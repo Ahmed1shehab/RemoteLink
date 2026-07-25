@@ -53,7 +53,16 @@ final class RemoteLinkServer {
   }) : _clock = clock;
 
   final DeviceIdentity identity;
-  final Capabilities capabilities;
+
+  /// Capabilities offered to new sessions.
+  ///
+  /// Mutable because capability is not a static property of the build. On macOS
+  /// the input backend only works once the user grants Accessibility, and that
+  /// can happen at any moment while the server is already running. A `final`
+  /// field here would freeze "no mouse, no keyboard" into every handshake until
+  /// the app was restarted.
+  Capabilities capabilities;
+
   final TrustStore trustStore;
   final int port;
   final int maxSessions;

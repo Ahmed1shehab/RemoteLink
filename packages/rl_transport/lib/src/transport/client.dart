@@ -104,6 +104,9 @@ final class RemoteLinkClient {
   bool _stopRequested = false;
   Completer<void>? _backoffTimer;
 
+  /// Callers parked in [waitUntilConnected].
+  final List<Completer<Session>> _readyWaiters = <Completer<Session>>[];
+
   ClientState get state => _state;
 
   Stream<ClientState> get states => _states.stream;
@@ -124,12 +127,66 @@ final class RemoteLinkClient {
   bool get isConnected => _state == ClientState.connected;
 
   /// Connects to [target] and keeps the connection alive until [disconnect].
+  ///
+  /// Returns as soon as the attempt is *scheduled*, not when it succeeds. That
+  /// is deliberate: the supervisor may need several retries, and a caller that
+  /// blocked until the first success could not show a "connecting" state or
+  /// offer a cancel button. Use [waitUntilConnected] when you actually need a
+  /// live session.
   Future<void> connect(ConnectionTarget target) async {
     await disconnect();
     _stopRequested = false;
     _target = target;
     _attempt = 0;
     unawaited(_runSupervisor());
+  }
+
+  /// Completes once a session is established, or throws if it cannot be.
+  ///
+  /// Exists because [connect] returning does not mean the handshake finished —
+  /// and the mistake is a subtle one, because the *server* side completes its
+  /// half first. Code that watches for the server to accept and then
+  /// immediately sends will find `session` still null on the client. This
+  /// checks the live session before parking a waiter, so there is no window
+  /// between the check and the subscription for the event to be missed.
+  Future<Session> waitUntilConnected({
+    Duration timeout = const Duration(seconds: 15),
+  }) {
+    final existing = _session;
+    if (existing != null && existing.state != SessionState.closed) {
+      return Future<Session>.value(existing);
+    }
+    if (_state == ClientState.failed) {
+      return Future<Session>.error(
+        const TransportError(
+          'connect_failed',
+          'the client stopped for a reason retrying cannot fix',
+          retryable: false,
+        ),
+      );
+    }
+
+    final waiter = Completer<Session>();
+    _readyWaiters.add(waiter);
+    return waiter.future.timeout(timeout);
+  }
+
+  void _resolveWaiters(Session session) {
+    if (_readyWaiters.isEmpty) return;
+    final waiting = List<Completer<Session>>.from(_readyWaiters);
+    _readyWaiters.clear();
+    for (final waiter in waiting) {
+      if (!waiter.isCompleted) waiter.complete(session);
+    }
+  }
+
+  void _failWaiters(Object error) {
+    if (_readyWaiters.isEmpty) return;
+    final waiting = List<Completer<Session>>.from(_readyWaiters);
+    _readyWaiters.clear();
+    for (final waiter in waiting) {
+      if (!waiter.isCompleted) waiter.completeError(error);
+    }
   }
 
   Future<void> _runSupervisor() async {
@@ -173,6 +230,7 @@ final class RemoteLinkClient {
         // just burns battery and hides a real problem from the user.
         _log.error('connection failed permanently', error: e);
         _setState(ClientState.failed);
+        _failWaiters(e);
         return;
       } on TransportError catch (e) {
         if (!e.retryable) {
@@ -207,6 +265,7 @@ final class RemoteLinkClient {
     );
 
     if (!_sessions.isClosed) _sessions.add(session);
+    _resolveWaiters(session);
 
     _messageSubscription = session.messages.listen(
       (message) {
@@ -288,6 +347,16 @@ final class RemoteLinkClient {
     await _detachSession();
     _target = null;
     _setState(ClientState.idle);
+
+    // A deliberate disconnect must not leave a caller parked forever waiting
+    // for a session that will never arrive.
+    _failWaiters(
+      const TransportError(
+        'disconnected',
+        'the client was disconnected before a session was established',
+        retryable: false,
+      ),
+    );
   }
 
   void _setState(ClientState next) {

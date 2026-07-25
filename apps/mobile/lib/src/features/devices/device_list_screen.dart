@@ -64,7 +64,12 @@ class DeviceListScreen extends ConsumerWidget {
   ) async {
     final client = await ref.read(clientProvider.future);
     final trustStore = await ref.read(trustStoreProvider.future);
-    final peer = await trustStore.findById(device.id);
+
+    // Typed explicitly rather than inferred. This is the lookup that decides
+    // whether the connection is verified against a stored key or falls back to
+    // trust-on-first-use, and naming the type keeps that visible at the call
+    // site instead of hiding it behind `var`.
+    final TrustedPeer? peer = await trustStore.findById(device.id);
 
     if (!context.mounted) return;
 

@@ -233,6 +233,14 @@
       ]
     },
     {
+      "name": "launch_at_startup",
+      "version": "0.3.1",
+      "dependencies": [
+        "flutter",
+        "win32_registry"
+      ]
+    },
+    {
       "name": "test",
       "version": "1.30.0",
       "dependencies": [
@@ -547,6 +555,14 @@
       "version": "0.0.0",
       "dependencies": [
         "flutter"
+      ]
+    },
+    {
+      "name": "win32_registry",
+      "version": "1.1.5",
+      "dependencies": [
+        "ffi",
+        "win32"
       ]
     },
     {
@@ -1033,22 +1049,6 @@
         "collection",
         "meta",
         "pub_semver"
-      ]
-    },
-    {
-      "name": "launch_at_startup",
-      "version": "0.3.1",
-      "dependencies": [
-        "flutter",
-        "win32_registry"
-      ]
-    },
-    {
-      "name": "win32_registry",
-      "version": "1.1.5",
-      "dependencies": [
-        "ffi",
-        "win32"
       ]
     }
   ],

@@ -1,3 +1,4 @@
+import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
 /// Translates USB HID usages to platform key identifiers.

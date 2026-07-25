@@ -123,8 +123,18 @@ final class Session {
     // The handlers are async, but `listen` expects void callbacks. Wrapping in
     // `unawaited` states that the fire-and-forget is intentional rather than an
     // accidentally dropped Future — the analyzer treats those as errors here.
+    // Records are chained rather than each handled independently. Decryption is
+    // asynchronous, so without this two records arriving in one event-loop turn
+    // could finish out of order and be dispatched out of order — a mouse-up
+    // delivered before its mouse-down, which the desktop would apply literally.
     _subscription = _connection.records.listen(
-      (record) => unawaited(_onRecord(record)),
+      (record) {
+        _readChain = _readChain
+            .then((_) => _onRecord(record))
+            .then((_) {}, onError: (Object error, StackTrace stack) {
+          _log.error('record handling failed', error: error, stackTrace: stack);
+        });
+      },
       onError: (Object error, StackTrace stack) =>
           unawaited(_onTransportError(error, stack)),
       onDone: () => unawaited(_teardown(CloseReason.shuttingDown)),
@@ -178,6 +188,9 @@ final class Session {
   /// count the same records. Sending it would waste eight bytes per frame and
   /// give an attacker a field to play with.
   int _receiveCounter = 0;
+
+  /// Serialises inbound record handling. See the constructor for why.
+  Future<void> _readChain = Future<void>.value();
 
   Timer? _heartbeat;
   int _lastPingMicros = 0;
@@ -275,7 +288,37 @@ final class Session {
     }
   }
 
-  Future<void> _writeNow(Message message, {required bool requireAck}) async {
+  /// Serialises writes so that sealing and sending stay in the same order.
+  ///
+  /// This is load-bearing, not tidiness. `seal` is asynchronous, so the nonce
+  /// is allocated before the `await` and the socket write happens after it. Two
+  /// overlapping sends therefore take nonces 0 and 1 but can reach the socket
+  /// in either order, and the peer — which derives the nonce from arrival
+  /// order — fails to authenticate the first record it sees.
+  ///
+  /// It is easy to assume this cannot happen in single-threaded Dart. It
+  /// happens constantly: the one-second heartbeat fires while the application
+  /// is sending, or a `pong` is written while a clipboard update is in flight.
+  /// The failure looks like a corrupted stream or an active attacker, which is
+  /// exactly the wrong place to start debugging.
+  Future<void> _writeChain = Future<void>.value();
+
+  Future<void> _writeNow(Message message, {required bool requireAck}) {
+    final queued = _writeChain.then(
+      (_) => _performWrite(message, requireAck: requireAck),
+    );
+    // The chain must survive a failed write. Without swallowing the error here,
+    // one broken send would leave every later send awaiting a rejected future.
+    _writeChain = queued.then((_) {}, onError: (Object _) {});
+    return queued;
+  }
+
+  Future<void> _performWrite(
+    Message message, {
+    required bool requireAck,
+  }) async {
+    if (_state == SessionState.closed) return;
+
     final frame = _codec.encode(message, requireAck: requireAck);
 
     // The whole frame — header included — is encrypted, so an observer learns
@@ -299,13 +342,14 @@ final class Session {
   Future<void> _onRecord(Uint8List sealed) async {
     _receivedBytes += sealed.length + 4;
 
+    // Claimed synchronously, before any `await`. Reading the field and
+    // incrementing it after the asynchronous `open` would let two records that
+    // arrive in the same event-loop turn both decrypt against counter 0.
+    final counter = _receiveCounter++;
+
     final Frame frame;
     try {
-      final plaintext = await _keys.receive.open(
-        sealed,
-        counter: _receiveCounter,
-      );
-      _receiveCounter++;
+      final plaintext = await _keys.receive.open(sealed, counter: counter);
       frame = Frame.readFrom(ByteReader(plaintext), copyPayload: false);
     } on SecurityError catch (e) {
       // A failed AEAD tag means either corruption TCP should have caught or an
@@ -361,11 +405,15 @@ final class Session {
         _closeReason = message.reason;
         await _teardown(message.reason);
         return;
-      case UnknownMessage():
+      // The code is destructured out of the pattern rather than read as
+      // `message.code` inside the closure: pattern promotion does not reach
+      // into a deferred closure body, so the promoted type is not visible there
+      // and only the `Message` supertype would be in scope.
+      case UnknownMessage(:final code):
         // A newer peer sent something this build does not know. Dropping it is
         // the forward-compatibility contract, not an error.
         _log.debug(() => 'ignoring unknown message 0x'
-            '${message.code.toRadixString(16)}');
+            '${code.toRadixString(16)}');
         return;
       default:
         break;

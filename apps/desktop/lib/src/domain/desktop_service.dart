@@ -161,6 +161,30 @@ final class DesktopService {
 
   String? get inputUnavailableReason => _input.unavailableReason;
 
+  /// Capabilities computed from the backends' *current* state.
+  ///
+  /// Recomputed on every read rather than cached at startup, because on macOS
+  /// Accessibility permission can be granted while the service is running.
+  Capabilities get currentCapabilities => buildCapabilities(
+        inputAvailable: _input.isAvailable,
+        clipboardAvailable: _clipboardBackend.isAvailable,
+      );
+
+  /// Emits whenever input availability flips.
+  ///
+  /// Drives the desktop's permission banner. `AXIsProcessTrusted` offers no
+  /// notification, so this is polled — but the call is a cheap framework
+  /// lookup, and a two-second poll costs nothing measurable while turning a
+  /// permanently stuck error banner into one that clears itself the moment the
+  /// user grants access.
+  Stream<bool> get inputAvailabilityChanges => _inputAvailability.stream;
+
+  final StreamController<bool> _inputAvailability =
+      StreamController<bool>.broadcast();
+
+  Timer? _permissionWatch;
+  bool? _lastInputAvailable;
+
   int get boundPort => _server?.boundPort ?? servicePort;
 
   /// Whether new devices may pair right now.
@@ -170,14 +194,9 @@ final class DesktopService {
   Future<void> start() async {
     if (_server != null) return;
 
-    final capabilities = buildCapabilities(
-      inputAvailable: _input.isAvailable,
-      clipboardAvailable: _clipboardBackend.isAvailable,
-    );
-
     final server = RemoteLinkServer(
       identity: identity,
-      capabilities: capabilities,
+      capabilities: currentCapabilities,
       trustStore: trustStore,
       clock: _clock,
       port: servicePort,
@@ -208,13 +227,18 @@ final class DesktopService {
         protocolVersion: kProtocolVersion,
         publicKeyFingerprint:
             Uint8List.sublistView(identity.publicKey, 0, 8),
-        capabilities: capabilities,
+        // Live, not a captured snapshot. Granting Accessibility mid-session
+        // must start advertising mouse and keyboard on the next announcement,
+        // otherwise the phone keeps hiding its touchpad until a restart.
+        capabilities: currentCapabilities,
         acceptsNewPairings: acceptsNewPairings,
         activeSessions: server.sessionCount,
       ),
     );
     await beacon.start();
     _beacon = beacon;
+
+    _startPermissionWatch();
 
     _log.info(
       'desktop service started',
@@ -224,6 +248,35 @@ final class DesktopService {
         'input': _input.isAvailable,
       },
     );
+  }
+
+  /// Watches for Accessibility permission being granted or revoked.
+  ///
+  /// There is no notification API for this, so it is polled. The check is a
+  /// cheap framework call and the interval is generous; the alternative is a
+  /// permission banner that never clears and a beacon that keeps advertising
+  /// stale capabilities until the app is restarted.
+  void _startPermissionWatch() {
+    _lastInputAvailable = _input.isAvailable;
+    _inputAvailability.add(_lastInputAvailable!);
+
+    _permissionWatch = Timer.periodic(const Duration(seconds: 2), (_) {
+      final available = _input.isAvailable;
+      if (available == _lastInputAvailable) return;
+      _lastInputAvailable = available;
+
+      // New sessions must be offered the updated capability set. Existing
+      // sessions negotiated theirs at handshake time and keep it until they
+      // reconnect — renegotiating mid-session is not something the protocol
+      // supports, and pretending otherwise would be worse than the wait.
+      _server?.capabilities = currentCapabilities;
+
+      _log.info(
+        'input availability changed',
+        fields: <String, Object?>{'available': available},
+      );
+      if (!_inputAvailability.isClosed) _inputAvailability.add(available);
+    });
   }
 
   Future<void> _onAccepted(ServerSession session) async {
@@ -590,7 +643,28 @@ final class DesktopService {
     if (!_deviceChanges.isClosed) _deviceChanges.add(devices);
   }
 
+  /// Opens the macOS Accessibility settings pane directly.
+  ///
+  /// Worth the four lines: the alternative is a banner that names a four-level
+  /// settings path and leaves the user to find it, which is exactly the point
+  /// where someone decides the app is broken and quits.
+  Future<void> openAccessibilitySettings() async {
+    if (NativeBackends.currentPlatform != PlatformKind.macos) return;
+    try {
+      await Process.run('open', <String>[
+        'x-apple.systempreferences:com.apple.preference.security'
+            '?Privacy_Accessibility',
+      ]);
+    } on ProcessException catch (e) {
+      _log.warn('could not open settings', error: e);
+    }
+  }
+
   Future<void> stop() async {
+    _permissionWatch?.cancel();
+    _permissionWatch = null;
+    await _inputAvailability.close();
+
     await _acceptedSubscription?.cancel();
     await _endedSubscription?.cancel();
     await _clipboardSubscription?.cancel();

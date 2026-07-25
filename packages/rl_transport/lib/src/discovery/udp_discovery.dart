@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:rl_core/rl_core.dart';
+import 'package:rl_protocol/rl_protocol.dart';
 
 import 'beacon.dart';
 

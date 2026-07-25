@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -263,6 +264,12 @@ void main() {
       expect(accepted.awaitingPairing, isFalse);
       expect(accepted.handshake.peerWasKnown, isTrue);
 
+      // The server finishes its half of the handshake one message before the
+      // client finishes its own, so `server.accepted` firing does NOT mean the
+      // client has a session yet. Waiting on the server's signal alone is a
+      // race, and it is the one that made this test flaky.
+      await client.waitUntilConnected();
+
       final received = accepted.session.messages.first;
       final sent = await client.send(
         const MouseMove(deltaX: 17, deltaY: -42),
@@ -298,6 +305,7 @@ void main() {
       );
       final accepted =
           await acceptedFuture.timeout(const Duration(seconds: 10));
+      await client.waitUntilConnected();
 
       final inbound = client.messages.first;
       await accepted.session.send(
@@ -308,6 +316,79 @@ void main() {
           await inbound.timeout(const Duration(seconds: 10)) as SystemStatus;
       expect(status.uptimeSeconds, 99);
       expect(status.volume, closeTo(0.4, 0.001));
+    });
+
+    test('overlapping sends stay ordered and authenticate', () async {
+      // Regression test for a real bug found only by running this suite.
+      //
+      // `DirectionalCipher.seal` is asynchronous: the nonce is allocated before
+      // the await and the socket write happens after it. Overlapping sends
+      // therefore took nonces 0 and 1 but could reach the socket in the other
+      // order, and the peer — which derives the nonce from arrival order —
+      // rejected the first record with an AEAD failure that looks exactly like
+      // an active attacker.
+      //
+      // In production the overlap came from the one-second heartbeat firing
+      // while application data was in flight. Firing a burst without awaiting
+      // between sends reproduces it far more reliably.
+      await trustStore.upsert(
+        TrustedPeer(
+          id: phoneIdentity.id,
+          publicKey: phoneIdentity.publicKey,
+          name: 'Test Phone',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: 2,
+        ),
+      );
+
+      final acceptedFuture = server.accepted.first;
+      await client.connect(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: server.boundPort,
+          deviceId: desktopIdentity.id,
+          serverPublicKey: desktopIdentity.publicKey,
+        ),
+      );
+      final accepted =
+          await acceptedFuture.timeout(const Duration(seconds: 10));
+      await client.waitUntilConnected();
+
+      const burst = 25;
+      final received = <String>[];
+      final complete = Completer<void>();
+
+      // TextInput rather than MouseMove: cursor deltas are declared lossy and
+      // are deliberately coalesced under load, which would merge the burst and
+      // defeat the point of the test.
+      final subscription = accepted.session.messages.listen((message) {
+        if (message is! TextInput) return;
+        received.add(message.text);
+        if (received.length == burst && !complete.isCompleted) {
+          complete.complete();
+        }
+      });
+      addTearDown(subscription.cancel);
+
+      // No await between sends — this is what a fast paste or a key repeat
+      // looks like, and it is what used to corrupt the nonce sequence.
+      final results = await Future.wait<bool>(<Future<bool>>[
+        for (var i = 0; i < burst; i++) client.send(TextInput('$i')),
+      ]);
+      expect(results.every((ok) => ok), isTrue, reason: 'every send accepted');
+
+      await complete.future.timeout(const Duration(seconds: 10));
+      expect(
+        received,
+        List<String>.generate(burst, (i) => '$i'),
+        reason: 'records must arrive in the order they were sent',
+      );
+      expect(
+        accepted.session.state,
+        isNot(SessionState.closed),
+        reason: 'a nonce desync would have torn the session down',
+      );
     });
 
     test('a client with the wrong server key refuses to connect', () async {

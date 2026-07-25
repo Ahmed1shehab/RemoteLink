@@ -1,3 +1,4 @@
+import 'package:rl_core/rl_core.dart';
 import 'package:rl_native/rl_native.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:test/test.dart';

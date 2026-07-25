@@ -53,37 +53,25 @@ optional and installed globally if you want its script runner
 (`dart pub global activate melos`); it is deliberately not a dev dependency, so
 its transitive dependencies can never break the build.
 
-The platform runner directories (`android/`, `ios/`, `macos/`, `windows/`) are
-generated rather than committed, since they are almost entirely tool output.
-Create them once per checkout:
+The platform runner directories are `flutter create` output and are not
+committed. Generate them and apply the required permissions in one step:
 
 ```bash
-cd apps/desktop && flutter create --platforms=windows,macos .
-cd ../mobile    && flutter create --platforms=android,ios .
+./tool/bootstrap_platforms.sh
 ```
 
-Then add the platform entitlements the apps need — macOS needs the
-`com.apple.security.network.server` and `network.client` entitlements plus an
-`NSLocalNetworkUsageDescription`; iOS needs `NSLocalNetworkUsageDescription`
-and a `NSBonjourServices` entry; Android needs `INTERNET`,
-`ACCESS_NETWORK_STATE`, and `CHANGE_WIFI_MULTICAST_STATE` (the last one is
-required for multicast discovery to receive anything at all).
-
-Run the desktop companion:
+Then run the two halves:
 
 ```bash
 cd apps/desktop && flutter run -d macos    # or -d windows
+cd apps/mobile  && flutter run -d macos    # fastest first client
 ```
 
-Run the phone app on a device on the same network:
-
-```bash
-cd apps/mobile && flutter run
-```
-
-**macOS:** grant Accessibility permission when prompted. Without it every input
-event is silently discarded — the app will tell you rather than appearing to
-work.
+**[docs/RUNNING.md](docs/RUNNING.md) is worth reading before you start a
+simulator.** It covers the four permissions that fail *silently* if missing,
+why the macOS Accessibility grant is not optional, and why the iOS Simulator is
+a better first target than a real iPhone (Apple gates multicast on real
+hardware behind an entitlement they grant by application).
 
 ---
 

@@ -2,7 +2,6 @@ import 'dart:typed_data';
 
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
-import 'package:rl_protocol/rl_protocol.dart';
 import 'package:test/test.dart';
 
 Uint8List _key(int fill) => Uint8List.fromList(List<int>.filled(32, fill));

@@ -75,9 +75,36 @@ change notification at all, so it is not merely simpler, it is the only option.
 - **Struct layout is a correctness dependency.** Dart FFI computes the C ABI
   layout from field types, so `MOUSEINPUT` and `INPUT` are right on x64 and
   arm64. A 32-bit target would need re-checking.
-- **Objective-C via `objc_msgSend`** requires looking the symbol up once per
-  call signature. It is the standard approach without a generated wrapper, but
-  a wrong signature is an ABI mismatch rather than a compile error.
+- **Objective-C via `objc_msgSend` is the highest-risk code in this repository,
+  and it has already cost one crash.** Two distinct hazards, both silent:
+
+  1. **A wrong signature is an ABI mismatch, not a compile error.** Each call
+     shape needs its own `lookupFunction` typedef, and getting one wrong
+     corrupts registers rather than failing to build.
+
+  2. **There is no ARC.** Objects returned by methods that are not `alloc`,
+     `new`, `copy`, or `mutableCopy` are *autoreleased*, and the main thread's
+     runloop drains its pool every iteration. Storing such a reference in a
+     field without retaining it produces a pointer that is valid for the rest
+     of the current callback and dangling forever after.
+
+     This happened: `MacosClipboardBackend` cached the result of
+     `+stringWithUTF8String:` and used it on a later event-loop turn. The
+     failure surfaced as `EXC_BREAKPOINT` inside `-[NSArray containsObject:]`
+     — ARM64 pointer authentication catching a freed object's `isa` — roughly a
+     minute after launch, the first time the clipboard changed. Nothing in the
+     Dart layer could have caught it, and nothing in the crash pointed at the
+     line that cached the object.
+
+     **Rule for this file:** any Objective-C object stored beyond the call that
+     produced it must be `objc_retain`ed and released in `dispose`. Objects
+     consumed within one synchronous call need nothing. Class objects and
+     exported framework constants are permanent and are exempt.
+
+  If this surface grows past the clipboard, the balance tips toward a small
+  Swift plugin over a platform channel: the added native code buys ARC, and
+  ARC removes hazard 2 entirely. That trade is not worth it for six selectors;
+  it clearly would be for sixty.
 - **Permission failures are silent on macOS.** Without Accessibility
   permission, every `CGEventPost` does nothing at all — no error, no exception.
   `AXIsProcessTrusted` is checked up front so the app can explain, instead of

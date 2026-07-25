@@ -44,3 +44,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    # The tray icon is loaded by path at runtime, so it must be bundled. A
+    # missing asset here is a launch-time crash, not a compile error.
+    - assets/tray/

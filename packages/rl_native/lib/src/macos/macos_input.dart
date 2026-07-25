@@ -61,8 +61,14 @@ final class MacosInputBackend implements InputBackend {
   String? get unavailableReason {
     if (_disposed) return 'backend disposed';
     if (!_bindings.isProcessTrusted()) {
-      return 'RemoteLink needs Accessibility permission. Open System Settings '
-          '› Privacy & Security › Accessibility and enable RemoteLink.';
+      // The restart hint is not boilerplate. `AXIsProcessTrusted` is answered
+      // from a value TCC establishes when the process launches, so a running
+      // app commonly keeps seeing `false` after the toggle is switched on —
+      // and without saying so, the user flips it, sees no change, and
+      // reasonably concludes the app is broken.
+      return 'RemoteLink needs Accessibility permission. Enable it in System '
+          'Settings › Privacy & Security › Accessibility, then quit and '
+          'reopen RemoteLink — macOS only re-checks at launch.';
     }
     return null;
   }

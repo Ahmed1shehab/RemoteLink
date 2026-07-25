@@ -98,12 +98,16 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
 });
 
 /// Connected devices, live.
-final connectedDevicesProvider = StreamProvider<List<ConnectedDevice>>((ref) {
-  final service = ref.watch(desktopServiceProvider).valueOrNull;
-  if (service == null) return const Stream<List<ConnectedDevice>>.empty();
-  // The current list is emitted first so a widget that mounts after devices
-  // connected still shows them, rather than waiting for the next change.
-  return service.deviceChanges.asBroadcastStream();
+final connectedDevicesProvider =
+    StreamProvider<List<ConnectedDevice>>((ref) async* {
+  final service = await ref.watch(desktopServiceProvider.future);
+
+  // The current snapshot is emitted before the change stream. `deviceChanges`
+  // only fires when something *changes*, so without this the provider sits in
+  // its loading state forever on a quiet network — and the UI shows a spinner
+  // caption instead of the empty state that explains what to do next.
+  yield service.devices;
+  yield* service.deviceChanges;
 });
 
 /// Pairing requests waiting on the user.
@@ -124,18 +128,29 @@ final trustedPeersProvider = FutureProvider<List<TrustedPeer>>((ref) async {
 /// False on macOS until Accessibility permission is granted, which is the
 /// single most common reason a fresh install appears connected but does
 /// nothing.
-final inputAvailabilityProvider = Provider<({bool available, String? reason})>(
-  (ref) {
-    final service = ref.watch(desktopServiceProvider).valueOrNull;
-    if (service == null) {
-      return (available: false, reason: 'service is still starting');
-    }
-    return (
+/// A [StreamProvider], not a plain [Provider].
+///
+/// Permission can be granted while the app is running, and a plain provider is
+/// computed once and never re-evaluated — so the banner would stay up forever
+/// even after the user did what it asked. That is a particularly bad failure:
+/// the user follows the instructions, nothing changes, and they conclude the
+/// app is broken.
+final inputAvailabilityProvider =
+    StreamProvider<({bool available, String? reason})>((ref) async* {
+  final service = await ref.watch(desktopServiceProvider.future);
+
+  yield (
+    available: service.inputAvailable,
+    reason: service.inputUnavailableReason,
+  );
+
+  await for (final _ in service.inputAvailabilityChanges) {
+    yield (
       available: service.inputAvailable,
       reason: service.inputUnavailableReason,
     );
-  },
-);
+  }
+});
 
 /// Which platform this build is on, for UI copy that differs by OS.
 final platformProvider = Provider<PlatformKind>(

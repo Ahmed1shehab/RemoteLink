@@ -88,8 +88,91 @@ class RemoteLinkDesktopApp extends StatelessWidget {
           ),
           useMaterial3: true,
         ),
-        home: const HomeScreen(),
+        home: const _TrayHost(child: HomeScreen()),
       );
+}
+
+/// Owns the menu-bar item and the window's close behaviour.
+///
+/// These belong together because they are two halves of one decision. The app
+/// is a background service: `setPreventClose(true)` stops the red button from
+/// quitting it, and `LSUIElement` keeps it out of the Dock. Each is right on
+/// its own and together they are a trap — without a menu-bar icon and a close
+/// handler, the window cannot be dismissed *or* reopened, and the service runs
+/// on with no way to reach it.
+///
+/// So the tray icon is not decoration here. It is the only affordance the user
+/// has while the window is hidden, which is almost all of the time.
+class _TrayHost extends ConsumerStatefulWidget {
+  const _TrayHost({required this.child});
+
+  final Widget child;
+
+  @override
+  ConsumerState<_TrayHost> createState() => _TrayHostState();
+}
+
+class _TrayHostState extends ConsumerState<_TrayHost> with WindowListener {
+  late final TrayController _tray;
+  int _lastCount = -1;
+
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+
+    _tray = TrayController(
+      onShowWindow: () async {
+        await windowManager.show();
+        await windowManager.focus();
+      },
+      onQuit: () async {
+        // Tear the service down before the process exits so the discovery
+        // beacon sends its goodbye and clients drop the entry immediately
+        // instead of waiting for it to time out.
+        final service = ref.read(desktopServiceProvider).valueOrNull;
+        await service?.stop();
+        await _tray.dispose();
+        await windowManager.destroy();
+      },
+      onTogglePairing: ({required bool enabled}) {
+        final service = ref.read(desktopServiceProvider).valueOrNull;
+        if (service != null) service.acceptsNewPairings = enabled;
+      },
+    );
+
+    unawaited(_tray.initialise(connectedCount: 0));
+  }
+
+  /// The red button hides rather than quits — that is what makes this a
+  /// service. Without this handler `setPreventClose(true)` leaves a button that
+  /// simply does nothing when clicked.
+  @override
+  void onWindowClose() {
+    unawaited(windowManager.hide());
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    unawaited(_tray.dispose());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final count = ref.watch(connectedDevicesProvider).valueOrNull?.length ?? 0;
+
+    // Rebuilt only when the count actually changes. The provider emits on every
+    // device update, and rewriting the native menu on each one would be a
+    // visible flicker in the menu bar.
+    if (count != _lastCount) {
+      _lastCount = count;
+      unawaited(_tray.rebuild(connectedCount: count));
+    }
+
+    return widget.child;
+  }
 }
 
 /// Owns the tray icon and its menu.

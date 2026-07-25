@@ -12,8 +12,29 @@ import '../message_type.dart';
 /// and acknowledge a frame without paying to decode its payload — which matters
 /// for screen frames, where the payload is a megabyte of already-encoded video
 /// that only the renderer needs to look at.
+/// `base`, not `sealed`.
+///
+/// `sealed` was the first choice and it was wrong. Sealing requires every
+/// subtype to live in the *same library*, and the forty-odd message classes are
+/// deliberately split across eight files by subsystem. Keeping `sealed` would
+/// have meant converting all of them into `part` files of one library — which
+/// strips their imports, makes each file unreadable on its own, and is a real
+/// cost for navigating the largest package here.
+///
+/// What sealing would have bought is exhaustiveness checking on switches over
+/// `Message`. That turns out to be worth nothing here: both such switches — the
+/// session's control-message router and the desktop's command dispatcher —
+/// legitimately handle a subset and end in `default`, which defeats
+/// exhaustiveness anyway. The exhaustiveness that actually protects this
+/// codebase is on `MessageType`, an enum, in `MessageCodec._decodeBody`; adding
+/// a wire code there is a compile error until it is given a decoder. That is
+/// the check that matters and it is unaffected.
+///
+/// `base` keeps the useful half of the guarantee: subtypes may extend but not
+/// `implement`, so nothing outside can fake a `Message` that satisfies the type
+/// without inheriting real `writeTo` behaviour.
 @immutable
-sealed class Message {
+abstract base class Message {
   const Message();
 
   /// Wire code this message serialises under.

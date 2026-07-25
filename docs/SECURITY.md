@@ -112,7 +112,21 @@ the scanned key or fails.
    secret exist; the server-side ticket sealing does not. Until it does, every
    reconnect is a full handshake — correct, just slower than the design allows.
 
-5. **`GetClipboardSequenceNumber` polling has a race.** A clipboard change
+5. **A revoked device reconnects forever.** The server closes the socket on
+   `security.peer_revoked`, which the client reads as a generic
+   `transport.handshake_closed` — retryable — so it backs off and tries again
+   indefinitely. Observed directly in the loopback test run: six attempts in the
+   first two seconds, then continuing on the backoff curve.
+
+   Nothing is *disclosed* by this, but it drains the phone's battery and lets a
+   removed device keep a server busy. The fix is available and cheap: by the
+   time revocation is checked, the peer has already been authenticated, so the
+   server can send an `error` frame carrying `ProtocolErrorCode.revoked` before
+   closing, and `isRetryable` already returns `false` for it. The client would
+   stop and tell the user why. Deferred only because it changes handshake
+   framing and belongs with the milestone-2 transport work.
+
+6. **`GetClipboardSequenceNumber` polling has a race.** A clipboard change
    landing between our write and the counter re-read could be misattributed as
    our own echo and dropped. The window is under a millisecond and the failure
    mode is a missed sync rather than a wrong one, but it is real.

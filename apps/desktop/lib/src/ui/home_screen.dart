@@ -41,14 +41,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildBody(DesktopService service) {
-    final input = ref.watch(inputAvailabilityProvider);
+    final input = ref.watch(inputAvailabilityProvider).valueOrNull;
     final devices = ref.watch(connectedDevicesProvider);
 
     return ListView(
       padding: const EdgeInsets.all(24),
       children: <Widget>[
-        if (!input.available && input.reason != null)
-          _PermissionBanner(reason: input.reason!),
+        if (input != null && !input.available && input.reason != null)
+          _PermissionBanner(
+            reason: input.reason!,
+            onOpenSettings: service.openAccessibilitySettings,
+          ),
         _StatusCard(service: service),
         const SizedBox(height: 24),
         Text(
@@ -156,34 +159,41 @@ class _StatusCard extends StatelessWidget {
 }
 
 class _PermissionBanner extends StatelessWidget {
-  const _PermissionBanner({required this.reason});
+  const _PermissionBanner({required this.reason, required this.onOpenSettings});
 
   final String reason;
+  final Future<void> Function() onOpenSettings;
 
   @override
-  Widget build(BuildContext context) => Card(
-        color: Theme.of(context).colorScheme.errorContainer,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: <Widget>[
-              Icon(
-                Icons.warning_amber_rounded,
-                color: Theme.of(context).colorScheme.onErrorContainer,
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      color: scheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: <Widget>[
+            Icon(Icons.warning_amber_rounded, color: scheme.onErrorContainer),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                reason,
+                style: TextStyle(color: scheme.onErrorContainer),
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Text(
-                  reason,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onErrorContainer,
-                  ),
-                ),
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(width: 16),
+            // The banner clears itself within a couple of seconds of the grant,
+            // so there is no "I've done it" button to press and no way to be
+            // left looking at a stale error.
+            FilledButton.tonal(
+              onPressed: () => onOpenSettings(),
+              child: const Text('Open Settings'),
+            ),
+          ],
         ),
-      );
+      ),
+    );
+  }
 }
 
 class _DeviceTile extends StatelessWidget {

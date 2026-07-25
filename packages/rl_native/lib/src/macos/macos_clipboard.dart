@@ -15,6 +15,12 @@ typedef _ObjcGetClassDart = _Id Function(Pointer<Utf8> name);
 typedef _SelRegisterNameNative = _Sel Function(Pointer<Utf8> name);
 typedef _SelRegisterNameDart = _Sel Function(Pointer<Utf8> name);
 
+typedef _ObjcRetainNative = _Id Function(_Id object);
+typedef _ObjcRetainDart = _Id Function(_Id object);
+
+typedef _ObjcReleaseNative = Void Function(_Id object);
+typedef _ObjcReleaseDart = void Function(_Id object);
+
 // `objc_msgSend` has no single signature — it is dispatched by the compiler
 // against the selector's actual type. Each call site below therefore looks the
 // symbol up again under the signature it needs. This is the standard and only
@@ -73,6 +79,10 @@ final class MacosClipboardBackend implements ClipboardBackend {
     _registerSelector =
         _objc.lookupFunction<_SelRegisterNameNative, _SelRegisterNameDart>(
             'sel_registerName');
+    _retain = _objc
+        .lookupFunction<_ObjcRetainNative, _ObjcRetainDart>('objc_retain');
+    _release = _objc
+        .lookupFunction<_ObjcReleaseNative, _ObjcReleaseDart>('objc_release');
 
     _send0 = _objc.lookupFunction<_MsgSend0Native, _MsgSend0Dart>(
       'objc_msgSend',
@@ -114,8 +124,21 @@ final class MacosClipboardBackend implements ClipboardBackend {
     final typeSymbol = _appKit.lookup<Pointer<Void>>('NSPasteboardTypeString');
     _typeString = typeSymbol.value;
 
-    _pasteboard = _send0(_nsPasteboard, _selGeneralPasteboard);
-    _concealedType = _makeString('org.nspasteboard.ConcealedType');
+    // ── Ownership: this is the part that must not be got wrong ──────────────
+    //
+    // Calling Objective-C through FFI means there is no ARC. `+generalPasteboard`
+    // and `+stringWithUTF8String:` both return *autoreleased* references, and
+    // the main thread's runloop drains its autorelease pool on every iteration.
+    // Storing them in fields without retaining leaves dangling pointers the
+    // moment control returns to the event loop — the next message send reads a
+    // freed object's `isa`, and ARM64 pointer authentication turns that into an
+    // immediate EXC_BREAKPOINT rather than silent corruption.
+    //
+    // These two live for the lifetime of the backend, so they are retained here
+    // and released in `dispose`. `_typeString` is exempt: it is read from an
+    // exported framework symbol and is a constant that outlives the process.
+    _pasteboard = _retain(_send0(_nsPasteboard, _selGeneralPasteboard));
+    _concealedType = _retain(_makeString('org.nspasteboard.ConcealedType'));
   }
 
   final DynamicLibrary _objc;
@@ -124,6 +147,8 @@ final class MacosClipboardBackend implements ClipboardBackend {
 
   late final _ObjcGetClassDart _getClass;
   late final _SelRegisterNameDart _registerSelector;
+  late final _ObjcRetainDart _retain;
+  late final _ObjcReleaseDart _release;
   late final _MsgSend0Dart _send0;
   late final _MsgSend0IntDart _send0Int;
   late final _MsgSend1Dart _send1;
@@ -239,5 +264,14 @@ final class MacosClipboardBackend implements ClipboardBackend {
   }
 
   @override
-  void dispose() => _disposed = true;
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+
+    // Balances the retains in the constructor. Skipping this leaks two objects
+    // per backend — trivial in practice, but an unbalanced retain is the kind
+    // of thing that makes the next person distrust the whole file.
+    _release(_pasteboard);
+    _release(_concealedType);
+  }
 }
