@@ -187,6 +187,40 @@ final class DesktopService {
 
   int get boundPort => _server?.boundPort ?? servicePort;
 
+  /// LAN addresses a phone can dial, most likely first.
+  ///
+  /// The status card used to show only the `.local` hostname, which is useless
+  /// for the one case where the user needs to read an address off the screen:
+  /// typing it into a phone that cannot discover automatically. Resolving
+  /// `.local` needs mDNS, which is precisely what is unavailable in that
+  /// situation.
+  List<String> get localAddresses => _localAddresses;
+
+  List<String> _localAddresses = const <String>[];
+
+  Future<void> _refreshLocalAddresses() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        type: InternetAddressType.IPv4,
+      );
+      final addresses = <String>[
+        for (final interface in interfaces)
+          for (final address in interface.addresses) address.address,
+      ]..sort((a, b) {
+          // Private ranges first: a Docker or VPN adapter often sorts ahead
+          // alphabetically while being unreachable from the phone.
+          bool isHomeLan(String ip) =>
+              ip.startsWith('192.168.') || ip.startsWith('10.');
+          if (isHomeLan(a) != isHomeLan(b)) return isHomeLan(a) ? -1 : 1;
+          return a.compareTo(b);
+        });
+      _localAddresses = addresses;
+    } on OSError catch (e) {
+      _log.warn('could not enumerate network interfaces', error: e);
+    }
+  }
+
   /// Whether new devices may pair right now.
   bool acceptsNewPairings = true;
 
@@ -239,6 +273,7 @@ final class DesktopService {
     _beacon = beacon;
 
     _startPermissionWatch();
+    await _refreshLocalAddresses();
 
     _log.info(
       'desktop service started',

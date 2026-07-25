@@ -39,14 +39,21 @@ final class ConnectionTarget {
   const ConnectionTarget({
     required this.host,
     required this.port,
-    required this.deviceId,
+    this.deviceId,
     this.serverPublicKey,
     this.displayName,
   });
 
   final String host;
   final int port;
-  final DeviceId deviceId;
+
+  /// The identity this client expects to find, when it already knows it.
+  ///
+  /// Null for a manual connection by address: the peer's identity is genuinely
+  /// unknown until the handshake proves it. Modelling that as nullable rather
+  /// than inventing a placeholder keeps the "we have not verified anything yet"
+  /// state visible in the type.
+  final DeviceId? deviceId;
 
   /// The server's static key from the trust store, when this is a reconnect.
   ///
@@ -60,7 +67,8 @@ final class ConnectionTarget {
   bool get isTrusted => serverPublicKey != null;
 
   @override
-  String toString() => '${displayName ?? deviceId.short} @ $host:$port';
+  String toString() =>
+      '${displayName ?? deviceId?.short ?? 'unknown'} @ $host:$port';
 }
 
 /// Maintains a connection to one computer, reconnecting as needed.

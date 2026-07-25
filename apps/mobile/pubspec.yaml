@@ -17,6 +17,7 @@ dependencies:
   flutter_riverpod: ^2.5.1
   flutter_secure_storage: ^9.2.2
   meta: ^1.15.0
+  path_provider: ^2.1.4
   rl_core: ^0.1.0
   rl_crypto: ^0.1.0
   rl_protocol: ^0.1.0

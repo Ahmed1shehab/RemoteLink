@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
@@ -21,37 +23,105 @@ const Capabilities kMobileCapabilities = Capabilities(
       Capabilities.sessionResumption,
 );
 
-const _secureStorage = FlutterSecureStorage(
-  aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
-);
-
 const String _identityKey = 'remotelink.identity.private';
 const String _trustKey = 'remotelink.trust.peers';
 
-/// This phone's long-term identity.
+/// Where the client keeps its long-term key and trust list.
 ///
-/// Stored in the platform keystore rather than in a file: the Android Keystore
-/// and the iOS Keychain are hardware-backed on modern devices, so the private
-/// key is not readable even from a rooted or jailbroken device with a full
-/// filesystem dump. On desktop the equivalent migration is still outstanding —
-/// see `docs/SECURITY.md`.
+/// Two implementations, chosen by platform rather than by preference. The
+/// platform keystore is the right home for a private key and is used wherever
+/// the app actually ships. It is *not* used on desktop, for a concrete reason:
+/// reaching the macOS Keychain from a sandboxed app needs a
+/// `keychain-access-groups` entitlement, that entitlement resolves
+/// `$(AppIdentifierPrefix)` from a provisioning profile, and requiring one
+/// breaks `flutter run` under ad-hoc signing. Since the desktop build of the
+/// client exists only as a development convenience, paying for it with a
+/// signing setup would be a bad trade.
+abstract interface class IdentityStore {
+  Future<String?> read(String key);
+  Future<void> write(String key, String value);
+}
+
+/// iOS and Android: hardware-backed keystore.
 ///
-/// `first_unlock` accessibility on iOS is chosen so the app can reconnect in
-/// the background after a reboot, while still keeping the key unreadable until
-/// the user has unlocked the device once.
+/// `first_unlock` on iOS lets the app reconnect in the background after a
+/// reboot while keeping the key unreadable until the device has been unlocked
+/// once.
+final class KeystoreIdentityStore implements IdentityStore {
+  const KeystoreIdentityStore();
+
+  static const FlutterSecureStorage _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
+
+  @override
+  Future<String?> read(String key) => _storage.read(key: key);
+
+  @override
+  Future<void> write(String key, String value) =>
+      _storage.write(key: key, value: value);
+}
+
+/// Desktop: an owner-only file under the application support directory.
+///
+/// The same trade-off the desktop companion makes, and documented in
+/// `docs/SECURITY.md` as gap 1. Acceptable here because this build is a test
+/// harness; it would not be acceptable in something shipped.
+final class FileIdentityStore implements IdentityStore {
+  const FileIdentityStore(this.directory);
+
+  final Directory directory;
+
+  File _fileFor(String key) => File('${directory.path}/$key');
+
+  @override
+  Future<String?> read(String key) async {
+    final file = _fileFor(key);
+    if (!file.existsSync()) return null;
+    return file.readAsString();
+  }
+
+  @override
+  Future<void> write(String key, String value) async {
+    final file = _fileFor(key);
+    await file.writeAsString(value, flush: true);
+    if (!Platform.isWindows) {
+      await Process.run('chmod', <String>['600', file.path]);
+    }
+  }
+}
+
+/// Picks the store for the running platform.
+final identityStoreProvider = FutureProvider<IdentityStore>((ref) async {
+  if (Platform.isIOS || Platform.isAndroid) {
+    return const KeystoreIdentityStore();
+  }
+  final base = await getApplicationSupportDirectory();
+  final directory = Directory('${base.path}/RemoteLink');
+  if (!directory.existsSync()) {
+    await directory.create(recursive: true);
+  }
+  return FileIdentityStore(directory);
+});
+
+/// This phone's long-term identity, generated once and reused forever.
+///
+/// On iOS and Android this lands in the hardware-backed keystore, so the
+/// private key is not readable even from a rooted or jailbroken device with a
+/// full filesystem dump. On desktop builds it falls back to an owner-only file
+/// — see [IdentityStore] for why, and `docs/SECURITY.md` gap 1.
 final identityProvider = FutureProvider<DeviceIdentity>((ref) async {
-  final stored = await _secureStorage.read(key: _identityKey);
+  final store = await ref.watch(identityStoreProvider.future);
+
+  final stored = await store.read(_identityKey);
   if (stored != null) {
     return DeviceIdentity.fromPrivateKey(base64Decode(stored));
   }
 
   final identity = await DeviceIdentity.generate();
   final privateKey = await identity.extractPrivateKey();
-  await _secureStorage.write(
-    key: _identityKey,
-    value: base64Encode(privateKey),
-  );
+  await store.write(_identityKey, base64Encode(privateKey));
   return identity;
 });
 
@@ -63,10 +133,11 @@ final identityProvider = FutureProvider<DeviceIdentity>((ref) async {
 /// own key for a trusted computer's and the phone would connect to them
 /// without any prompt.
 final trustStoreProvider = FutureProvider<TrustStore>((ref) async {
-  final store = InMemoryTrustStore();
-  ref.onDispose(store.dispose);
+  final peers = InMemoryTrustStore();
+  ref.onDispose(peers.dispose);
 
-  final raw = await _secureStorage.read(key: _trustKey);
+  final storage = await ref.watch(identityStoreProvider.future);
+  final raw = await storage.read(_trustKey);
   if (raw != null) {
     final decoded = jsonDecode(raw);
     if (decoded is List) {
@@ -75,7 +146,7 @@ final trustStoreProvider = FutureProvider<TrustStore>((ref) async {
         final id = DeviceId.tryParse(entry['id'] as String? ?? '');
         final key = entry['publicKey'] as String?;
         if (id == null || key == null) continue;
-        await store.upsert(
+        await peers.upsert(
           TrustedPeer(
             id: id,
             publicKey: Uint8List.fromList(base64Decode(key)),
@@ -89,16 +160,20 @@ final trustStoreProvider = FutureProvider<TrustStore>((ref) async {
       }
     }
   }
-  return store;
+  return peers;
 });
 
-/// Writes the trust store back to secure storage.
-Future<void> persistTrustStore(TrustStore store) async {
-  final peers = await store.listPeers();
-  await _secureStorage.write(
-    key: _trustKey,
-    value: jsonEncode(<Map<String, Object?>>[
-      for (final peer in peers)
+/// Writes the trust store back to persistent storage.
+///
+/// Takes the [IdentityStore] explicitly rather than reaching for a global: the
+/// backing store is platform-dependent, and passing it keeps that decision in
+/// one place instead of duplicating the platform check here.
+Future<void> persistTrustStore(TrustStore store, IdentityStore storage) async {
+  final saved = await store.listPeers();
+  await storage.write(
+    _trustKey,
+    jsonEncode(<Map<String, Object?>>[
+      for (final peer in saved)
         <String, Object?>{
           'id': peer.id.value,
           'publicKey': base64Encode(peer.publicKey),
@@ -110,6 +185,30 @@ Future<void> persistTrustStore(TrustStore store) async {
     ]),
   );
 }
+
+/// Whether automatic discovery can work on this device and network.
+///
+/// False on an iPhone without Apple's multicast entitlement, and on networks
+/// with client isolation. Surfaced so the UI can say so — an empty list with no
+/// explanation is indistinguishable from "the computer is not running", and
+/// sends the user looking in the wrong place.
+final discoveryOperationalProvider = StreamProvider<bool>((ref) async* {
+  final backend = await ref.watch(discoveryProvider.future);
+  yield backend.isOperational;
+  yield* backend.operational;
+});
+
+/// Computers this phone has paired with, discovered or not.
+///
+/// Kept separate from discovery on purpose. A paired computer must remain
+/// reachable when discovery cannot see it — on a network that blocks multicast,
+/// or on iOS without the multicast entitlement — by dialling the address it was
+/// last reached at. Without this the device list would be empty on exactly the
+/// networks where the user most needs it to work.
+final trustedPeersProvider = FutureProvider<List<TrustedPeer>>((ref) async {
+  final store = await ref.watch(trustStoreProvider.future);
+  return store.activePeers();
+});
 
 final clockProvider = Provider<Clock>((ref) => SystemClock());
 

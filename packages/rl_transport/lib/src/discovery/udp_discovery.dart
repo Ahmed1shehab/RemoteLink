@@ -33,6 +33,18 @@ abstract interface class DiscoveryBackend {
   /// Snapshot of the current list.
   List<DiscoveredDevice> get current;
 
+  /// Whether this backend can actually operate here.
+  ///
+  /// False when the platform or the network refuses the traffic discovery
+  /// depends on — an iPhone without Apple's multicast entitlement, or a Wi-Fi
+  /// network with client isolation. Modelling this explicitly matters: without
+  /// it the only symptom is an empty list, which is indistinguishable from
+  /// "the computer is not running" and leaves the user with nothing to act on.
+  bool get isOperational;
+
+  /// Emits when [isOperational] changes.
+  Stream<bool> get operational;
+
   /// Begins listening.
   Future<void> start();
 
@@ -77,11 +89,63 @@ final class UdpDiscoveryClient implements DiscoveryBackend {
   Timer? _reaper;
   bool _running = false;
 
+  /// Errno values that mean "this platform or network will not carry the
+  /// datagrams discovery needs".
+  ///
+  /// `EHOSTUNREACH` (65) is the one iOS returns when an app sends to a
+  /// multicast group without `com.apple.developer.networking.multicast`. These
+  /// are *expected states*, not faults, and are reported once and calmly
+  /// rather than as a stack trace per socket per target — which on a phone with
+  /// several interfaces means roughly twenty identical traces at launch,
+  /// burying anything genuinely useful.
+  static const Set<int> _refusedErrnos = <int>{
+    1, // EPERM        — sandbox or entitlement denial
+    49, // EADDRNOTAVAIL
+    50, // ENETDOWN
+    51, // ENETUNREACH
+    65, // EHOSTUNREACH — iOS without the multicast entitlement
+  };
+
+  bool _refused = false;
+  final StreamController<bool> _operational = StreamController<bool>.broadcast();
+
   @override
   Stream<List<DiscoveredDevice>> get devices => _controller.stream;
 
   @override
   List<DiscoveredDevice> get current => _snapshot();
+
+  @override
+  bool get isOperational => !_refused;
+
+  @override
+  Stream<bool> get operational => _operational.stream;
+
+  /// Classifies a send failure, reporting a refusal exactly once.
+  void _noteSendFailure(Object error) {
+    final code = error is SocketException ? error.osError?.errorCode : null;
+    if (code == null || !_refusedErrnos.contains(code)) {
+      _log.debug(() => 'discovery send failed: $error');
+      return;
+    }
+    if (_refused) return;
+
+    _refused = true;
+    _log.info(
+      'automatic discovery is unavailable on this device or network; '
+      'connect by address instead',
+      fields: <String, Object?>{'errno': code},
+    );
+    if (!_operational.isClosed) _operational.add(false);
+  }
+
+  void _trySend(Uint8List payload, RawDatagramSocket socket, String target) {
+    try {
+      socket.send(payload, InternetAddress(target), port);
+    } on SocketException catch (e) {
+      _noteSendFailure(e);
+    }
+  }
 
   @override
   Future<void> start() async {
@@ -130,11 +194,10 @@ final class UdpDiscoveryClient implements DiscoveryBackend {
       _subscriptions.add(
         socket.listen(
           (event) => _onSocketEvent(socket, event),
-          onError: (Object error, StackTrace stack) => _log.warn(
-            'discovery socket error',
-            error: error,
-            stackTrace: stack,
-          ),
+          // Datagram send failures surface here as well as by throwing, so
+          // both routes go through the same classifier — otherwise a refused
+          // multicast is reported twice, once calmly and once as a stack trace.
+          onError: _noteSendFailure,
           cancelOnError: false,
         ),
       );
@@ -215,16 +278,13 @@ final class UdpDiscoveryClient implements DiscoveryBackend {
     ).encode();
 
     for (final socket in _sockets) {
-      try {
-        socket
-          ..send(query, InternetAddress(kMulticastGroupV4), port)
-          // Directed broadcast as a fallback for access points that filter
-          // multicast between wireless clients — a common consumer-router
-          // "feature" that would otherwise make discovery silently fail.
-          ..send(query, InternetAddress('255.255.255.255'), port);
-      } on SocketException catch (e) {
-        _log.debug(() => 'query send failed: ${e.message}');
-      }
+      _trySend(query, socket, kMulticastGroupV4);
+      // Directed broadcast as a fallback for access points that filter
+      // multicast between wireless clients — a common consumer-router
+      // "feature" that would otherwise make discovery silently fail. Sent
+      // independently of the multicast attempt: if the first is refused, the
+      // second may still get through, and a shared try block would skip it.
+      _trySend(query, socket, '255.255.255.255');
     }
   }
 
@@ -261,6 +321,7 @@ final class UdpDiscoveryClient implements DiscoveryBackend {
     _devices.clear();
 
     await _controller.close();
+    await _operational.close();
   }
 }
 

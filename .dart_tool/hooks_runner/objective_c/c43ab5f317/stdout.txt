@@ -1,0 +1,51 @@
+Running `(cd /Users/ahmed/.pub-cache/hosted/pub.dev/objective_c-9.4.1/; ANDROID_HOME=/Users/ahmed/Library/Android/sdk TMPDIR=/var/folders/fc/db08phd96qn55thkrn4ryvt80000gn/T/ PATH=/Applications/Xcode.app/Contents/SharedFrameworks/SwiftBuild.framework/Versions/A/PlugIns/SWBBuildService.bundle/Contents/PlugIns/SWBUniversalPlatformPlugin.bundle/Contents/Frameworks/SWBUniversalPlatform.framework/Resources:/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/local/bin:/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/libexec:/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/usr/bin:/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/usr/local/bin:/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/local/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/local/bin:/Users/ahmed/.antigravity-ide/antigravity-ide/bin:/Users/ahmed/.antigravity/antigravity/bin:/Users/ahmed/Library/Android/sdk/platform-tools:/Users/ahmed/Library/Android/sdk/cmdline-tools/latest/bin:/opt/homebrew/share/flutter/bin/:/Users/ahmed/Library/Application Support/Code/User/globalStorage/github.copilot-chat/debugCommand:/Users/ahmed/Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/Apple/usr/bin:/usr/local/share/dotnet:/Users/ahmed/.local/bin:/Users/ahmed/flutter/bin:/Users/ahmed/.pub-cache/bin HOME=/Users/ahmed /opt/homebrew/share/flutter/bin/cache/dart-sdk/bin/dart --packages=/Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/package_config.json /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/objective_c/c43ab5f317/hook.dill --config=/Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/objective_c/c43ab5f317/input.json )`.
+INFO: 2026-07-26 02:09:24.281196: Using compiler /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang from BuildInput.cCompiler.cc.
+
+INFO: 2026-07-26 02:09:24.284383: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -target arm64-apple-ios -mios-version-min=13 -c /Users/ahmed/.pub-cache/hosted/pub.dev/objective_c-9.4.1/src/include/dart_api_dl.c -fpic -gline-tables-only -I src -o /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/include/dart_api_dl.c.o
+
+INFO: 2026-07-26 02:09:24.285618: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -target arm64-apple-ios -mios-version-min=13 -c /Users/ahmed/.pub-cache/hosted/pub.dev/objective_c-9.4.1/src/objective_c.c -fpic -gline-tables-only -I src -o /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/objective_c.c.o
+
+INFO: 2026-07-26 02:09:24.285981: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -target arm64-apple-ios -mios-version-min=13 -x objective-c -fobjc-arc -c /Users/ahmed/.pub-cache/hosted/pub.dev/objective_c-9.4.1/src/objective_c.m -fpic -gline-tables-only -I src -o /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/objective_c.m.o
+
+ream_adapter.m.o
+
+INFO: 2026-07-26 02:09:24.286165: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -target arm64-apple-ios -mios-version-min=13 -x objective-c -fobjc-arc -c /Users/ahmed/.pub-cache/hosted/pub.dev/objective_c-9.4.1/src/ns_number.m -fpic -gline-tables-only -I src -o /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/ns_number.m.o
+
+INFO: 2026-07-26 02:09:24.286246: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -target arm64-apple-ios -mios-version-min=13 -x objective-c -fobjc-arc -c /Users/ahmed/.pub-cache/hosted/pub.dev/objective_c-9.4.1/src/protocol.m -fpic -gline-tables-only -I src -o /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/protocol.m.o
+INFO: 2026-07-26 02:09:24.286329: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -target arm64-apple-ios -mios-version-min=13 -x objective-c -fobjc-arc -c /Users/ahmed/.pub-cache/hosted/pub.dev/objective_c-9.4.1/src/objective_c_bindings_generated.m -fpic -gline-tables-only -I src -o /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/objective_c_bindings_generated.m.o
+
+INFO: 2026-07-26 02:09:24.451826: 
+INFO: 2026-07-26 02:09:24.451905: 
+INFO: 2026-07-26 02:09:24.451930: Generated /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/objective_c.c.o
+
+INFO: 2026-07-26 02:09:24.452634: 
+INFO: 2026-07-26 02:09:24.452651: 
+INFO: 2026-07-26 02:09:24.452659: Generated /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/protocol.m.o
+
+pi_dl.c.o
+INFO: 2026-07-26 02:09:24.452555: 
+INFO: 2026-07-26 02:09:24.452564: 
+INFO: 2026-07-26 02:09:24.452573: Generated /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/observer.m.o
+
+INFO: 2026-07-26 02:09:24.530724: 
+INFO: 2026-07-26 02:09:24.530770: 
+INFO: 2026-07-26 02:09:24.530781: Generated /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/ns_number.m.o
+
+INFO: 2026-07-26 02:09:24.538555: 
+INFO: 2026-07-26 02:09:24.538590: 
+INFO: 2026-07-26 02:09:24.538600: Generated /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/objective_c.m.o
+INFO: 2026-07-26 02:09:24.538640: 
+INFO: 2026-07-26 02:09:24.538651: 
+INFO: 2026-07-26 02:09:24.538658: Generated /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/input_stream_adapter.m.o
+
+INFO: 2026-07-26 02:09:24.553006: 
+INFO: 2026-07-26 02:09:24.553037: 
+INFO: 2026-07-26 02:09:24.553046: Generated /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/objective_c_bindings_generated.m.o
+
+INFO: 2026-07-26 02:09:24.553328: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -shared -Wl,-encryptable -undefined dynamic_lookup -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -target arm64-apple-ios -mios-version-min=13 /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/include/dart_api_dl.c.o /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/objective_c.c.o /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/input_stream_adapter.m.o /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/objective_c.m.o /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/observer.m.o /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/ns_number.m.o /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/protocol.m.o /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/obj/src/objective_c_bindings_generated.m.o -o /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/objective_c.dylib
+
+INFO: 2026-07-26 02:09:24.654843: 
+INFO: 2026-07-26 02:09:24.654897: ld: warning: -undefined dynamic_lookup is deprecated on iOS
+
+INFO: 2026-07-26 02:09:24.654910: Generated /Users/ahmed/Documents/projects/UnifiedLInk/.dart_tool/hooks_runner/shared/objective_c/build/c43ab5f317/objective_c.dylib
+

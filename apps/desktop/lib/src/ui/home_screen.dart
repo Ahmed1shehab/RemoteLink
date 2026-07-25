@@ -140,6 +140,21 @@ class _StatusCard extends StatelessWidget {
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     const SizedBox(height: 2),
+                    // Selectable and shown as a raw IP: this is the value a
+                    // user reads off the screen and types into a phone that
+                    // cannot discover automatically, and resolving the `.local`
+                    // hostname needs the very mDNS that is unavailable then.
+                    if (service.localAddresses.isNotEmpty)
+                      SelectableText(
+                        service.localAddresses
+                            .map((address) => '$address:${service.boundPort}')
+                            .join('  ·  '),
+                        style:
+                            Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  fontFamily: 'monospace',
+                                ),
+                      ),
+                    const SizedBox(height: 2),
                     // The device ID is shown because it is the only thing a
                     // user can compare when they have two identically named
                     // computers on one network.

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_transport/rl_transport.dart';
 
@@ -20,9 +21,22 @@ import '../input/touchpad_screen.dart';
 /// agreements and cannot make both transcripts hash to the same digits, so
 /// mismatched numbers are a reliable signal — but only if the user looks.
 class PairingScreen extends ConsumerStatefulWidget {
-  const PairingScreen({required this.device, super.key});
+  const PairingScreen({
+    required this.deviceName,
+    required this.address,
+    this.platform = PlatformKind.unknown,
+    super.key,
+  });
 
-  final DiscoveredDevice device;
+  /// Name to show while pairing. From the beacon when discovered, or the typed
+  /// address when connecting manually.
+  final String deviceName;
+
+  /// Where this connection was dialled, stored so a paired computer stays
+  /// reachable on networks where discovery does not work.
+  final String address;
+
+  final PlatformKind platform;
 
   @override
   ConsumerState<PairingScreen> createState() => _PairingScreenState();
@@ -70,14 +84,17 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
       TrustedPeer(
         id: session.peerId,
         publicKey: session.peerStaticPublicKey,
-        name: widget.device.name,
-        platform: widget.device.beacon.platform,
+        name: widget.deviceName,
+        platform: widget.platform,
         pairedAt: DateTime.now(),
         permissionTier: 2,
-        lastAddress: widget.device.address,
+        lastAddress: widget.address,
       ),
     );
-    await persistTrustStore(trustStore);
+    await persistTrustStore(
+      trustStore,
+      await ref.read(identityStoreProvider.future),
+    );
 
     if (!mounted) return;
     await Navigator.of(context).pushReplacement(
@@ -90,7 +107,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
     final state = ref.watch(clientStateProvider).valueOrNull;
 
     return Scaffold(
-      appBar: AppBar(title: Text('Pair with ${widget.device.name}')),
+      appBar: AppBar(title: Text('Pair with ${widget.deviceName}')),
       body: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
