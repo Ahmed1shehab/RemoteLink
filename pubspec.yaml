@@ -1,0 +1,19 @@
+name: remotelink_workspace
+publish_to: none
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+# Dart 3.5+ native pub workspaces. Every package below shares one lockfile and
+# one .dart_tool, which keeps resolution deterministic across the monorepo.
+workspace:
+  - packages/rl_core
+  - packages/rl_protocol
+  - packages/rl_crypto
+  - packages/rl_transport
+  - packages/rl_native
+  - apps/desktop
+  - apps/mobile
+
+dev_dependencies:
+  melos: ^6.2.0

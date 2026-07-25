@@ -1,0 +1,19 @@
+name: rl_transport
+description: RemoteLink discovery, framed transport, sessions, and reconnection.
+version: 0.1.0
+publish_to: none
+
+resolution: workspace
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+dependencies:
+  meta: ^1.15.0
+  rl_core: ^0.1.0
+  rl_crypto: ^0.1.0
+  rl_protocol: ^0.1.0
+
+dev_dependencies:
+  lints: ^4.0.0
+  test: ^1.25.0

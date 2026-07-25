@@ -1,0 +1,19 @@
+name: rl_native
+description: Native desktop input, clipboard, and system integration via dart:ffi.
+version: 0.1.0
+publish_to: none
+
+resolution: workspace
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+dependencies:
+  ffi: ^2.1.0
+  meta: ^1.15.0
+  rl_core: ^0.1.0
+  rl_protocol: ^0.1.0
+
+dev_dependencies:
+  lints: ^4.0.0
+  test: ^1.25.0

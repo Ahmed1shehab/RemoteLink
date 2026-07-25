@@ -1,0 +1,40 @@
+name: remotelink
+
+packages:
+  - packages/**
+  - apps/**
+
+command:
+  bootstrap:
+    runPubGetInParallel: true
+
+scripts:
+  analyze:
+    description: Static analysis across every package.
+    # --fatal-warnings but not --fatal-infos: warnings are real defects, while
+    # infos are style preferences that should not be able to fail a build.
+    run: melos exec -c 1 -- dart analyze --fatal-warnings .
+
+  format:
+    description: Format all Dart sources.
+    run: melos exec -c 4 -- dart format --set-exit-if-changed .
+
+  test:
+    description: Run unit tests for pure-Dart packages.
+    run: melos exec -c 1 --dir-exists=test --no-flutter -- dart test --reporter expanded
+
+  test:flutter:
+    description: Run widget tests for Flutter packages.
+    run: melos exec -c 1 --dir-exists=test --flutter -- flutter test
+
+  gen:
+    description: Run build_runner across packages that need codegen.
+    run: melos exec -c 1 --depends-on=build_runner -- dart run build_runner build --delete-conflicting-outputs
+
+  ffigen:
+    description: Regenerate raw FFI bindings from platform headers.
+    run: melos exec --scope=rl_native -- dart run ffigen --config ffigen_macos.yaml
+
+  verify:
+    description: Everything CI runs.
+    run: melos run format && melos run analyze && melos run test

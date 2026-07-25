@@ -1,0 +1,33 @@
+name: remotelink_mobile
+description: RemoteLink for Android and iOS — the remote itself.
+version: 0.1.0
+publish_to: none
+
+resolution: workspace
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+  # 3.27 for Color.withValues, which replaced the deprecated withOpacity.
+  flutter: ">=3.27.0"
+
+dependencies:
+  device_info_plus: ^10.1.2
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^2.5.1
+  flutter_secure_storage: ^9.2.2
+  meta: ^1.15.0
+  mobile_scanner: ^5.2.3
+  package_info_plus: ^8.0.2
+  rl_core: ^0.1.0
+  rl_crypto: ^0.1.0
+  rl_protocol: ^0.1.0
+  rl_transport: ^0.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,16 @@
+name: rl_core
+description: Shared primitives for RemoteLink — domain types, errors, logging, clock.
+version: 0.1.0
+publish_to: none
+
+resolution: workspace
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+dependencies:
+  meta: ^1.15.0
+
+dev_dependencies:
+  lints: ^4.0.0
+  test: ^1.25.0
