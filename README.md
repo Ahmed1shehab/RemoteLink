@@ -40,11 +40,18 @@ speak to this one without a version bump.
 
 ## Getting started
 
+Requires **Flutter 3.27+** (Dart 3.6+, for pub workspaces).
+
 ```bash
-dart pub global activate melos
-melos bootstrap
-melos run verify          # format, analyze, test
+flutter pub get           # resolves the entire workspace — one lockfile
+./tool/verify.sh          # format, analyze, test
 ```
+
+There is no bootstrap step. The root `pubspec.yaml` declares a native pub
+workspace, so one `pub get` resolves all seven packages together. Melos is
+optional and installed globally if you want its script runner
+(`dart pub global activate melos`); it is deliberately not a dev dependency, so
+its transitive dependencies can never break the build.
 
 The platform runner directories (`android/`, `ios/`, `macos/`, `windows/`) are
 generated rather than committed, since they are almost entirely tool output.

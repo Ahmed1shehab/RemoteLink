@@ -6,32 +6,41 @@ publish_to: none
 resolution: workspace
 
 environment:
-  sdk: ">=3.5.0 <4.0.0"
+  # 3.6 is the floor for pub workspaces (`resolution: workspace`).
+  sdk: ">=3.6.0 <4.0.0"
   flutter: ">=3.27.0"
 
+# Every dependency here is one this app actually imports. Aspirational entries
+# are not free: `riverpod_generator` was listed for annotations that were never
+# written, and it dragged in an `analyzer` → `macros` → `_macros` chain that
+# does not resolve on Dart 3.7+, where `_macros` was removed from the SDK.
 dependencies:
   flutter:
     sdk: flutter
   flutter_riverpod: ^2.5.1
+  # Pinned to 0.3.x deliberately: its `setup(appName:, appPath:, args:)`
+  # signature is what the call site below is written against. 0.5.x reworked
+  # that signature, and an unverified major bump on a login-item API is a poor
+  # trade for no new functionality.
   launch_at_startup: ^0.3.0
   package_info_plus: ^8.0.2
   path_provider: ^2.1.4
-  qr_flutter: ^4.1.0
-  riverpod_annotation: ^2.3.5
   rl_core: ^0.1.0
   rl_crypto: ^0.1.0
   rl_native: ^0.1.0
   rl_protocol: ^0.1.0
   rl_transport: ^0.1.0
-  system_tray: ^2.0.3
+  # tray_manager rather than system_tray: system_tray pins `uuid ^3`, which
+  # collides with anything modern in the tree, and it has not been updated in
+  # over a year. tray_manager is maintained by the same author as
+  # window_manager, so the two stay in step.
+  tray_manager: ^0.2.3
   window_manager: ^0.4.2
 
 dev_dependencies:
-  build_runner: ^2.4.11
   flutter_test:
     sdk: flutter
-  lints: ^4.0.0
-  riverpod_generator: ^2.4.3
+  lints: ^5.0.0
 
 flutter:
   uses-material-design: true

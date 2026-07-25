@@ -47,7 +47,13 @@ out of twenty, and it is modelled explicitly in `PairingState` anyway.
 
 ## Consequences
 
-- `flutter_riverpod` with `riverpod_generator` for the annotated providers.
+- `flutter_riverpod` only. **No `riverpod_generator`.** The generator was in the
+  first dependency list out of habit, and it earned its removal: it pulls in
+  `riverpod_analyzer_utils` → `custom_lint_core` → an `analyzer` pinned to a
+  `macros` version that depends on `_macros`, which was removed from the Dart
+  SDK in 3.7. The whole chain failed to resolve for a code generator that no
+  file in this repository used. Providers are hand-written; there are about
+  fifteen of them and the annotation saves perhaps three lines each.
 - Providers are the only place `ref` appears; widgets read them and nothing
   else. This keeps the UI layer replaceable.
 - Domain code must never import Riverpod. `DesktopService` has no Flutter

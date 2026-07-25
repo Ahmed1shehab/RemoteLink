@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:launch_at_startup/launch_at_startup.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:rl_core/rl_core.dart';
-import 'package:system_tray/system_tray.dart';
+import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'src/app/providers.dart';
@@ -96,7 +97,7 @@ class RemoteLinkDesktopApp extends StatelessWidget {
 /// Kept as a plain class rather than a widget because the tray outlives every
 /// window: it is the only interface the user has while the app is hidden, which
 /// is most of the time.
-class TrayController {
+class TrayController with TrayListener {
   TrayController({
     required this.onShowWindow,
     required this.onQuit,
@@ -107,55 +108,85 @@ class TrayController {
   final VoidCallback onQuit;
   final void Function({required bool enabled}) onTogglePairing;
 
-  final SystemTray _tray = SystemTray();
-  final Menu _menu = Menu();
+  static const String _keyShow = 'show';
+  static const String _keyPairing = 'pairing';
+  static const String _keyQuit = 'quit';
+
+  bool _pairingEnabled = true;
 
   Future<void> initialise({required int connectedCount}) async {
-    await _tray.initSystemTray(
-      iconPath: Platform.isWindows
-          ? 'assets/tray/icon.ico'
-          : 'assets/tray/icon.png',
-      toolTip: 'RemoteLink',
+    await trayManager.setIcon(
+      Platform.isWindows ? 'assets/tray/icon.ico' : 'assets/tray/icon.png',
+      // macOS renders template images in the menu bar's own colour, so the
+      // icon inverts correctly in dark mode instead of staying black.
+      isTemplate: Platform.isMacOS,
     );
-
-    await rebuild(connectedCount: connectedCount, pairingEnabled: true);
-
-    // Left click opens the window on Windows, where that is the convention;
-    // macOS shows the menu on any click, matching every other status item.
-    _tray.registerSystemTrayEventHandler((eventName) {
-      if (eventName == kSystemTrayEventClick) {
-        Platform.isWindows ? onShowWindow() : _tray.popUpContextMenu();
-      } else if (eventName == kSystemTrayEventRightClick) {
-        Platform.isWindows ? _tray.popUpContextMenu() : onShowWindow();
-      }
-    });
+    await trayManager.setToolTip('RemoteLink');
+    await rebuild(connectedCount: connectedCount);
+    trayManager.addListener(this);
   }
 
   /// Rebuilds the menu so it reflects live state.
-  Future<void> rebuild({
-    required int connectedCount,
-    required bool pairingEnabled,
-  }) async {
-    await _menu.buildFrom(<MenuItemBase>[
-      MenuItemLabel(
-        label: connectedCount == 0
-            ? 'No devices connected'
-            : '$connectedCount device${connectedCount == 1 ? '' : 's'} '
-                'connected',
-        enabled: false,
+  Future<void> rebuild({required int connectedCount}) async {
+    await trayManager.setContextMenu(
+      Menu(
+        items: <MenuItem>[
+          MenuItem(
+            label: connectedCount == 0
+                ? 'No devices connected'
+                : '$connectedCount device${connectedCount == 1 ? '' : 's'} '
+                    'connected',
+            disabled: true,
+          ),
+          MenuItem.separator(),
+          MenuItem(key: _keyShow, label: 'Open RemoteLink'),
+          MenuItem.checkbox(
+            key: _keyPairing,
+            label: 'Allow new devices to pair',
+            checked: _pairingEnabled,
+          ),
+          MenuItem.separator(),
+          MenuItem(key: _keyQuit, label: 'Quit RemoteLink'),
+        ],
       ),
-      MenuSeparator(),
-      MenuItemLabel(label: 'Open RemoteLink', onClicked: (_) => onShowWindow()),
-      MenuItemCheckbox(
-        label: 'Allow new devices to pair',
-        checked: pairingEnabled,
-        onClicked: (_) => onTogglePairing(enabled: !pairingEnabled),
-      ),
-      MenuSeparator(),
-      MenuItemLabel(label: 'Quit RemoteLink', onClicked: (_) => onQuit()),
-    ]);
-    await _tray.setContextMenu(_menu);
+    );
   }
 
-  Future<void> dispose() => _tray.destroy();
+  @override
+  void onTrayIconMouseDown() {
+    // Left click opens the window on Windows, where that is the convention.
+    // macOS shows the menu on any click, matching every other status item.
+    if (Platform.isWindows) {
+      onShowWindow();
+    } else {
+      unawaited(trayManager.popUpContextMenu());
+    }
+  }
+
+  @override
+  void onTrayIconRightMouseDown() {
+    if (Platform.isWindows) {
+      unawaited(trayManager.popUpContextMenu());
+    } else {
+      onShowWindow();
+    }
+  }
+
+  @override
+  void onTrayMenuItemClick(MenuItem menuItem) {
+    switch (menuItem.key) {
+      case _keyShow:
+        onShowWindow();
+      case _keyPairing:
+        _pairingEnabled = !_pairingEnabled;
+        onTogglePairing(enabled: _pairingEnabled);
+      case _keyQuit:
+        onQuit();
+    }
+  }
+
+  Future<void> dispose() async {
+    trayManager.removeListener(this);
+    await trayManager.destroy();
+  }
 }

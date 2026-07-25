@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
@@ -32,13 +31,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('RemoteLink'),
-        actions: <Widget>[
-          IconButton(
-            icon: const Icon(Icons.qr_code_2),
-            tooltip: 'Show pairing code',
-            onPressed: service.valueOrNull == null ? null : _showQrSheet,
-          ),
-        ],
       ),
       body: service.when(
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -110,40 +102,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  Future<void> _showQrSheet() async {
-    final service = ref.read(desktopServiceProvider).valueOrNull;
-    if (service == null) return;
-
-    final payload = service.pairingPayload(host: '0.0.0.0');
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Scan to pair'),
-        content: SizedBox(
-          width: 280,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              QrImageView(data: payload.toUri(), size: 240),
-              const SizedBox(height: 16),
-              Text(
-                'Scanning transfers this computer’s key directly, so no '
-                'code comparison is needed.',
-                style: Theme.of(context).textTheme.bodySmall,
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Done'),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _StatusCard extends StatelessWidget {

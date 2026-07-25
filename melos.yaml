@@ -4,10 +4,17 @@ packages:
   - packages/**
   - apps/**
 
-command:
-  bootstrap:
-    runPubGetInParallel: true
-
+# Melos is used as a script runner only. Dependency resolution is handled by
+# native pub workspaces (see the root pubspec), so there is no `melos bootstrap`
+# step — `flutter pub get` at the repository root resolves everything at once.
+#
+# Melos is installed globally rather than as a dev_dependency, which keeps its
+# transitive dependencies out of the workspace resolution entirely:
+#
+#   dart pub global activate melos
+#
+# Every script below has a plain-shell equivalent in tool/verify.sh, so nothing
+# in this repository actually requires melos to be installed.
 scripts:
   analyze:
     description: Static analysis across every package.
@@ -20,20 +27,12 @@ scripts:
     run: melos exec -c 4 -- dart format --set-exit-if-changed .
 
   test:
-    description: Run unit tests for pure-Dart packages.
+    description: Run unit tests for the pure-Dart packages.
     run: melos exec -c 1 --dir-exists=test --no-flutter -- dart test --reporter expanded
 
   test:flutter:
-    description: Run widget tests for Flutter packages.
+    description: Run widget tests for the Flutter packages.
     run: melos exec -c 1 --dir-exists=test --flutter -- flutter test
-
-  gen:
-    description: Run build_runner across packages that need codegen.
-    run: melos exec -c 1 --depends-on=build_runner -- dart run build_runner build --delete-conflicting-outputs
-
-  ffigen:
-    description: Regenerate raw FFI bindings from platform headers.
-    run: melos exec --scope=rl_native -- dart run ffigen --config ffigen_macos.yaml
 
   verify:
     description: Everything CI runs.

@@ -2,10 +2,13 @@ name: remotelink_workspace
 publish_to: none
 
 environment:
-  sdk: ">=3.5.0 <4.0.0"
+  # Pub workspaces landed in Dart 3.6. Below that, `resolution: workspace` in
+  # the member packages is not understood and every package resolves alone.
+  sdk: ">=3.6.0 <4.0.0"
 
-# Dart 3.5+ native pub workspaces. Every package below shares one lockfile and
-# one .dart_tool, which keeps resolution deterministic across the monorepo.
+# Native pub workspaces: one lockfile, one .dart_tool, one resolution for the
+# whole repo. `flutter pub get` at the root bootstraps everything — there is no
+# separate bootstrap step and no per-package `pub get`.
 workspace:
   - packages/rl_core
   - packages/rl_protocol
@@ -15,5 +18,7 @@ workspace:
   - apps/desktop
   - apps/mobile
 
-dev_dependencies:
-  melos: ^6.2.0
+# Deliberately no dev_dependencies. Melos is used for its script runner only
+# and is installed globally (`dart pub global activate melos`), which keeps its
+# transitive dependencies out of the workspace resolution entirely. Tooling
+# that cannot break the build is tooling that cannot block a release.
