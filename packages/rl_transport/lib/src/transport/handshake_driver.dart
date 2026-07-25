@@ -197,7 +197,9 @@ abstract final class HandshakeDriver {
     if (message is! T) {
       throw SecurityError(
         'handshake_unexpected',
-        'expected ${expected.name}, decoded ${message.runtimeType}',
+        // `message.type.name` rather than `runtimeType`: the enum name is
+        // stable under minification, where a class name is not.
+        'expected ${expected.name}, decoded ${message.type.name}',
       );
     }
     return message;

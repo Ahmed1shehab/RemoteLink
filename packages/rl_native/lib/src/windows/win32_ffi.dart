@@ -1,6 +1,14 @@
-// ignore_for_file: non_constant_identifier_names
-// Win32 symbols keep their documented spelling so this file can be read
-// side by side with the Microsoft reference.
+// ignore_for_file: constant_identifier_names
+//
+// Win32 constants keep Microsoft's SCREAMING_CAPS spelling so this file can be
+// read side by side with the reference documentation, and so a value can be
+// pasted from MSDN and grepped for here. Renaming `MOUSEEVENTF_LEFTDOWN` to
+// `mouseeventfLeftdown` would make it harder to verify against the source of
+// truth, which is the only thing that matters for a binding file.
+//
+// The struct names are Microsoft's too, but they need no exemption: the lint
+// objects to underscores, not to capitals. The one union below is *not* a real
+// Win32 name — it models an anonymous union — so it uses Dart casing.
 
 import 'dart:ffi';
 
@@ -8,10 +16,11 @@ import 'package:ffi/ffi.dart';
 
 /// Raw FFI bindings to the Win32 APIs RemoteLink needs.
 ///
-/// Hand-written rather than generated with `ffigen` for one reason: the six
-/// structs and eleven functions below are the entire surface, and a hand-written
-/// binding can carry the "why" comments that a generated one would erase on
-/// every regeneration. If this grows past a couple of dozen symbols, generate it.
+/// Hand-written rather than generated with `ffigen` for one reason: the five
+/// structs and eighteen functions below are the entire surface, and a
+/// hand-written binding can carry the "why" comments that a generated one would
+/// erase on every regeneration. If this grows much past thirty symbols, the
+/// balance tips and it should be generated.
 ///
 /// Everything here is `dart:ffi`, not a platform channel. A `MethodChannel`
 /// round trip costs roughly 50 to 150 microseconds because it hops to the
@@ -113,7 +122,7 @@ final class KEYBDINPUT extends Struct {
 }
 
 /// The anonymous union inside `INPUT`.
-final class INPUT_UNION extends Union {
+final class InputUnion extends Union {
   external MOUSEINPUT mi;
   external KEYBDINPUT ki;
 }
@@ -123,7 +132,7 @@ final class INPUT extends Struct {
   @Uint32()
   external int type;
 
-  external INPUT_UNION u;
+  external InputUnion u;
 }
 
 /// `POINT`.
@@ -139,60 +148,60 @@ final class POINT extends Struct {
 
 typedef _SendInputNative = Uint32 Function(
     Uint32 cInputs, Pointer<INPUT> pInputs, Int32 cbSize);
-typedef _SendInputDart = int Function(
+typedef SendInputDart = int Function(
     int cInputs, Pointer<INPUT> pInputs, int cbSize);
 
 typedef _SetCursorPosNative = Int32 Function(Int32 x, Int32 y);
-typedef _SetCursorPosDart = int Function(int x, int y);
+typedef SetCursorPosDart = int Function(int x, int y);
 
 typedef _GetCursorPosNative = Int32 Function(Pointer<POINT> point);
-typedef _GetCursorPosDart = int Function(Pointer<POINT> point);
+typedef GetCursorPosDart = int Function(Pointer<POINT> point);
 
 typedef _GetSystemMetricsNative = Int32 Function(Int32 index);
-typedef _GetSystemMetricsDart = int Function(int index);
+typedef GetSystemMetricsDart = int Function(int index);
 
 typedef _GetLastErrorNative = Uint32 Function();
-typedef _GetLastErrorDart = int Function();
+typedef GetLastErrorDart = int Function();
 
 typedef _OpenClipboardNative = Int32 Function(IntPtr hWndNewOwner);
-typedef _OpenClipboardDart = int Function(int hWndNewOwner);
+typedef OpenClipboardDart = int Function(int hWndNewOwner);
 
 typedef _CloseClipboardNative = Int32 Function();
-typedef _CloseClipboardDart = int Function();
+typedef CloseClipboardDart = int Function();
 
 typedef _EmptyClipboardNative = Int32 Function();
-typedef _EmptyClipboardDart = int Function();
+typedef EmptyClipboardDart = int Function();
 
 typedef _GetClipboardDataNative = IntPtr Function(Uint32 format);
-typedef _GetClipboardDataDart = int Function(int format);
+typedef GetClipboardDataDart = int Function(int format);
 
 typedef _SetClipboardDataNative = IntPtr Function(Uint32 format, IntPtr hMem);
-typedef _SetClipboardDataDart = int Function(int format, int hMem);
+typedef SetClipboardDataDart = int Function(int format, int hMem);
 
 typedef _IsClipboardFormatAvailableNative = Int32 Function(Uint32 format);
-typedef _IsClipboardFormatAvailableDart = int Function(int format);
+typedef IsClipboardFormatAvailableDart = int Function(int format);
 
 typedef _GetClipboardSequenceNumberNative = Uint32 Function();
-typedef _GetClipboardSequenceNumberDart = int Function();
+typedef GetClipboardSequenceNumberDart = int Function();
 
 typedef _RegisterClipboardFormatNative = Uint32 Function(
     Pointer<Utf16> formatName);
-typedef _RegisterClipboardFormatDart = int Function(Pointer<Utf16> formatName);
+typedef RegisterClipboardFormatDart = int Function(Pointer<Utf16> formatName);
 
 typedef _GlobalAllocNative = IntPtr Function(Uint32 flags, IntPtr bytes);
-typedef _GlobalAllocDart = int Function(int flags, int bytes);
+typedef GlobalAllocDart = int Function(int flags, int bytes);
 
 typedef _GlobalLockNative = Pointer<Void> Function(IntPtr hMem);
-typedef _GlobalLockDart = Pointer<Void> Function(int hMem);
+typedef GlobalLockDart = Pointer<Void> Function(int hMem);
 
 typedef _GlobalUnlockNative = Int32 Function(IntPtr hMem);
-typedef _GlobalUnlockDart = int Function(int hMem);
+typedef GlobalUnlockDart = int Function(int hMem);
 
 typedef _GlobalFreeNative = IntPtr Function(IntPtr hMem);
-typedef _GlobalFreeDart = int Function(int hMem);
+typedef GlobalFreeDart = int Function(int hMem);
 
 typedef _GlobalSizeNative = IntPtr Function(IntPtr hMem);
-typedef _GlobalSizeDart = int Function(int hMem);
+typedef GlobalSizeDart = int Function(int hMem);
 
 /// Resolved Win32 entry points.
 ///
@@ -203,77 +212,77 @@ final class Win32Bindings {
       : _user32 = DynamicLibrary.open('user32.dll'),
         _kernel32 = DynamicLibrary.open('kernel32.dll') {
     sendInput =
-        _user32.lookupFunction<_SendInputNative, _SendInputDart>('SendInput');
+        _user32.lookupFunction<_SendInputNative, SendInputDart>('SendInput');
     setCursorPos = _user32
-        .lookupFunction<_SetCursorPosNative, _SetCursorPosDart>('SetCursorPos');
+        .lookupFunction<_SetCursorPosNative, SetCursorPosDart>('SetCursorPos');
     getCursorPos = _user32
-        .lookupFunction<_GetCursorPosNative, _GetCursorPosDart>('GetCursorPos');
+        .lookupFunction<_GetCursorPosNative, GetCursorPosDart>('GetCursorPos');
     getSystemMetrics =
-        _user32.lookupFunction<_GetSystemMetricsNative, _GetSystemMetricsDart>(
+        _user32.lookupFunction<_GetSystemMetricsNative, GetSystemMetricsDart>(
             'GetSystemMetrics');
     getLastError =
-        _kernel32.lookupFunction<_GetLastErrorNative, _GetLastErrorDart>(
+        _kernel32.lookupFunction<_GetLastErrorNative, GetLastErrorDart>(
             'GetLastError');
 
     openClipboard =
-        _user32.lookupFunction<_OpenClipboardNative, _OpenClipboardDart>(
+        _user32.lookupFunction<_OpenClipboardNative, OpenClipboardDart>(
             'OpenClipboard');
     closeClipboard =
-        _user32.lookupFunction<_CloseClipboardNative, _CloseClipboardDart>(
+        _user32.lookupFunction<_CloseClipboardNative, CloseClipboardDart>(
             'CloseClipboard');
     emptyClipboard =
-        _user32.lookupFunction<_EmptyClipboardNative, _EmptyClipboardDart>(
+        _user32.lookupFunction<_EmptyClipboardNative, EmptyClipboardDart>(
             'EmptyClipboard');
     getClipboardData =
-        _user32.lookupFunction<_GetClipboardDataNative, _GetClipboardDataDart>(
+        _user32.lookupFunction<_GetClipboardDataNative, GetClipboardDataDart>(
             'GetClipboardData');
     setClipboardData =
-        _user32.lookupFunction<_SetClipboardDataNative, _SetClipboardDataDart>(
+        _user32.lookupFunction<_SetClipboardDataNative, SetClipboardDataDart>(
             'SetClipboardData');
     isClipboardFormatAvailable = _user32.lookupFunction<
         _IsClipboardFormatAvailableNative,
-        _IsClipboardFormatAvailableDart>('IsClipboardFormatAvailable');
+        IsClipboardFormatAvailableDart>('IsClipboardFormatAvailable');
     getClipboardSequenceNumber = _user32.lookupFunction<
         _GetClipboardSequenceNumberNative,
-        _GetClipboardSequenceNumberDart>('GetClipboardSequenceNumber');
+        GetClipboardSequenceNumberDart>('GetClipboardSequenceNumber');
     registerClipboardFormat = _user32.lookupFunction<
         _RegisterClipboardFormatNative,
-        _RegisterClipboardFormatDart>('RegisterClipboardFormatW');
+        RegisterClipboardFormatDart>('RegisterClipboardFormatW');
 
     globalAlloc =
-        _kernel32.lookupFunction<_GlobalAllocNative, _GlobalAllocDart>(
+        _kernel32.lookupFunction<_GlobalAllocNative, GlobalAllocDart>(
             'GlobalAlloc');
     globalLock = _kernel32
-        .lookupFunction<_GlobalLockNative, _GlobalLockDart>('GlobalLock');
+        .lookupFunction<_GlobalLockNative, GlobalLockDart>('GlobalLock');
     globalUnlock = _kernel32
-        .lookupFunction<_GlobalUnlockNative, _GlobalUnlockDart>('GlobalUnlock');
+        .lookupFunction<_GlobalUnlockNative, GlobalUnlockDart>('GlobalUnlock');
     globalFree = _kernel32
-        .lookupFunction<_GlobalFreeNative, _GlobalFreeDart>('GlobalFree');
+        .lookupFunction<_GlobalFreeNative, GlobalFreeDart>('GlobalFree');
     globalSize = _kernel32
-        .lookupFunction<_GlobalSizeNative, _GlobalSizeDart>('GlobalSize');
+        .lookupFunction<_GlobalSizeNative, GlobalSizeDart>('GlobalSize');
   }
 
   final DynamicLibrary _user32;
   final DynamicLibrary _kernel32;
 
-  late final _SendInputDart sendInput;
-  late final _SetCursorPosDart setCursorPos;
-  late final _GetCursorPosDart getCursorPos;
-  late final _GetSystemMetricsDart getSystemMetrics;
-  late final _GetLastErrorDart getLastError;
+  late final SendInputDart sendInput;
+  late final SetCursorPosDart setCursorPos;
+  late final GetCursorPosDart getCursorPos;
+  late final GetSystemMetricsDart getSystemMetrics;
+  late final GetLastErrorDart getLastError;
 
-  late final _OpenClipboardDart openClipboard;
-  late final _CloseClipboardDart closeClipboard;
-  late final _EmptyClipboardDart emptyClipboard;
-  late final _GetClipboardDataDart getClipboardData;
-  late final _SetClipboardDataDart setClipboardData;
-  late final _IsClipboardFormatAvailableDart isClipboardFormatAvailable;
-  late final _GetClipboardSequenceNumberDart getClipboardSequenceNumber;
-  late final _RegisterClipboardFormatDart registerClipboardFormat;
+  late final OpenClipboardDart openClipboard;
+  late final CloseClipboardDart closeClipboard;
+  late final EmptyClipboardDart emptyClipboard;
+  late final GetClipboardDataDart getClipboardData;
+  late final SetClipboardDataDart setClipboardData;
+  late final IsClipboardFormatAvailableDart isClipboardFormatAvailable;
+  late final GetClipboardSequenceNumberDart getClipboardSequenceNumber;
+  late final RegisterClipboardFormatDart registerClipboardFormat;
 
-  late final _GlobalAllocDart globalAlloc;
-  late final _GlobalLockDart globalLock;
-  late final _GlobalUnlockDart globalUnlock;
-  late final _GlobalFreeDart globalFree;
-  late final _GlobalSizeDart globalSize;
+  late final GlobalAllocDart globalAlloc;
+  late final GlobalLockDart globalLock;
+  late final GlobalUnlockDart globalUnlock;
+  late final GlobalFreeDart globalFree;
+  late final GlobalSizeDart globalSize;
 }

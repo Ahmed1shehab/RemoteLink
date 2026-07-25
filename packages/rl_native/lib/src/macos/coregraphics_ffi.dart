@@ -1,6 +1,8 @@
-// ignore_for_file: non_constant_identifier_names
 // Core Graphics symbols keep Apple's spelling so this reads alongside the
-// framework headers.
+// framework headers. No lint exemption is needed here: Apple's `kFoo` constant
+// convention already satisfies `constant_identifier_names`, and `CGPoint` and
+// friends already satisfy `camel_case_types`. Win32's SCREAMING_CAPS does not,
+// which is why only the Windows binding carries an ignore directive.
 
 import 'dart:ffi';
 
@@ -88,7 +90,7 @@ final class CGRect extends Struct {
 }
 
 typedef _CGEventSourceCreateNative = CGEventSourceRef Function(Int32 stateID);
-typedef _CGEventSourceCreateDart = CGEventSourceRef Function(int stateID);
+typedef CGEventSourceCreateDart = CGEventSourceRef Function(int stateID);
 
 typedef _CGEventCreateMouseEventNative = CGEventRef Function(
   CGEventSourceRef source,
@@ -96,7 +98,7 @@ typedef _CGEventCreateMouseEventNative = CGEventRef Function(
   CGPoint mouseCursorPosition,
   Int32 mouseButton,
 );
-typedef _CGEventCreateMouseEventDart = CGEventRef Function(
+typedef CGEventCreateMouseEventDart = CGEventRef Function(
   CGEventSourceRef source,
   int mouseType,
   CGPoint mouseCursorPosition,
@@ -108,7 +110,7 @@ typedef _CGEventCreateKeyboardEventNative = CGEventRef Function(
   Uint16 virtualKey,
   Bool keyDown,
 );
-typedef _CGEventCreateKeyboardEventDart = CGEventRef Function(
+typedef CGEventCreateKeyboardEventDart = CGEventRef Function(
   CGEventSourceRef source,
   int virtualKey,
   bool keyDown,
@@ -121,7 +123,7 @@ typedef _CGEventCreateScrollWheelEventNative = CGEventRef Function(
   Int32 wheel1,
   Int32 wheel2,
 );
-typedef _CGEventCreateScrollWheelEventDart = CGEventRef Function(
+typedef CGEventCreateScrollWheelEventDart = CGEventRef Function(
   CGEventSourceRef source,
   int units,
   int wheelCount,
@@ -130,14 +132,14 @@ typedef _CGEventCreateScrollWheelEventDart = CGEventRef Function(
 );
 
 typedef _CGEventPostNative = Void Function(Int32 tap, CGEventRef event);
-typedef _CGEventPostDart = void Function(int tap, CGEventRef event);
+typedef CGEventPostDart = void Function(int tap, CGEventRef event);
 
 typedef _CGEventSetFlagsNative = Void Function(CGEventRef event, Uint64 flags);
-typedef _CGEventSetFlagsDart = void Function(CGEventRef event, int flags);
+typedef CGEventSetFlagsDart = void Function(CGEventRef event, int flags);
 
 typedef _CGEventSetIntegerValueFieldNative = Void Function(
     CGEventRef event, Int32 field, Int64 value);
-typedef _CGEventSetIntegerValueFieldDart = void Function(
+typedef CGEventSetIntegerValueFieldDart = void Function(
     CGEventRef event, int field, int value);
 
 typedef _CGEventKeyboardSetUnicodeStringNative = Void Function(
@@ -145,32 +147,32 @@ typedef _CGEventKeyboardSetUnicodeStringNative = Void Function(
   IntPtr stringLength,
   Pointer<Uint16> unicodeString,
 );
-typedef _CGEventKeyboardSetUnicodeStringDart = void Function(
+typedef CGEventKeyboardSetUnicodeStringDart = void Function(
   CGEventRef event,
   int stringLength,
   Pointer<Uint16> unicodeString,
 );
 
 typedef _CGEventGetLocationNative = CGPoint Function(CGEventRef event);
-typedef _CGEventGetLocationDart = CGPoint Function(CGEventRef event);
+typedef CGEventGetLocationDart = CGPoint Function(CGEventRef event);
 
 typedef _CGEventCreateNative = CGEventRef Function(CGEventSourceRef source);
-typedef _CGEventCreateDart = CGEventRef Function(CGEventSourceRef source);
+typedef CGEventCreateDart = CGEventRef Function(CGEventSourceRef source);
 
 typedef _CFReleaseNative = Void Function(Pointer<Void> ref);
-typedef _CFReleaseDart = void Function(Pointer<Void> ref);
+typedef CFReleaseDart = void Function(Pointer<Void> ref);
 
 typedef _CGMainDisplayIDNative = Uint32 Function();
-typedef _CGMainDisplayIDDart = int Function();
+typedef CGMainDisplayIDDart = int Function();
 
 typedef _CGDisplayBoundsNative = CGRect Function(Uint32 display);
-typedef _CGDisplayBoundsDart = CGRect Function(int display);
+typedef CGDisplayBoundsDart = CGRect Function(int display);
 
 typedef _CGDisplayPixelsWideNative = IntPtr Function(Uint32 display);
-typedef _CGDisplayPixelsWideDart = int Function(int display);
+typedef CGDisplayPixelsWideDart = int Function(int display);
 
 typedef _AXIsProcessTrustedNative = Bool Function();
-typedef _AXIsProcessTrustedDart = bool Function();
+typedef AXIsProcessTrustedDart = bool Function();
 
 /// Resolved Core Graphics entry points.
 final class CoreGraphicsBindings {
@@ -187,63 +189,63 @@ final class CoreGraphicsBindings {
         ) {
     eventSourceCreate = _coreGraphics.lookupFunction<
         _CGEventSourceCreateNative,
-        _CGEventSourceCreateDart>('CGEventSourceCreate');
+        CGEventSourceCreateDart>('CGEventSourceCreate');
     createMouseEvent = _coreGraphics.lookupFunction<
         _CGEventCreateMouseEventNative,
-        _CGEventCreateMouseEventDart>('CGEventCreateMouseEvent');
+        CGEventCreateMouseEventDart>('CGEventCreateMouseEvent');
     createKeyboardEvent = _coreGraphics.lookupFunction<
         _CGEventCreateKeyboardEventNative,
-        _CGEventCreateKeyboardEventDart>('CGEventCreateKeyboardEvent');
+        CGEventCreateKeyboardEventDart>('CGEventCreateKeyboardEvent');
     createScrollEvent = _coreGraphics.lookupFunction<
         _CGEventCreateScrollWheelEventNative,
-        _CGEventCreateScrollWheelEventDart>('CGEventCreateScrollWheelEvent');
+        CGEventCreateScrollWheelEventDart>('CGEventCreateScrollWheelEvent');
     post = _coreGraphics
-        .lookupFunction<_CGEventPostNative, _CGEventPostDart>('CGEventPost');
+        .lookupFunction<_CGEventPostNative, CGEventPostDart>('CGEventPost');
     setFlags = _coreGraphics.lookupFunction<_CGEventSetFlagsNative,
-        _CGEventSetFlagsDart>('CGEventSetFlags');
+        CGEventSetFlagsDart>('CGEventSetFlags');
     setIntegerValueField = _coreGraphics.lookupFunction<
         _CGEventSetIntegerValueFieldNative,
-        _CGEventSetIntegerValueFieldDart>('CGEventSetIntegerValueField');
+        CGEventSetIntegerValueFieldDart>('CGEventSetIntegerValueField');
     setUnicodeString = _coreGraphics.lookupFunction<
         _CGEventKeyboardSetUnicodeStringNative,
-        _CGEventKeyboardSetUnicodeStringDart>('CGEventKeyboardSetUnicodeString');
+        CGEventKeyboardSetUnicodeStringDart>('CGEventKeyboardSetUnicodeString');
     getLocation = _coreGraphics.lookupFunction<_CGEventGetLocationNative,
-        _CGEventGetLocationDart>('CGEventGetLocation');
+        CGEventGetLocationDart>('CGEventGetLocation');
     createEvent = _coreGraphics
-        .lookupFunction<_CGEventCreateNative, _CGEventCreateDart>(
+        .lookupFunction<_CGEventCreateNative, CGEventCreateDart>(
             'CGEventCreate');
     mainDisplayId = _coreGraphics.lookupFunction<_CGMainDisplayIDNative,
-        _CGMainDisplayIDDart>('CGMainDisplayID');
+        CGMainDisplayIDDart>('CGMainDisplayID');
     displayBounds = _coreGraphics.lookupFunction<_CGDisplayBoundsNative,
-        _CGDisplayBoundsDart>('CGDisplayBounds');
+        CGDisplayBoundsDart>('CGDisplayBounds');
     displayPixelsWide = _coreGraphics.lookupFunction<_CGDisplayPixelsWideNative,
-        _CGDisplayPixelsWideDart>('CGDisplayPixelsWide');
+        CGDisplayPixelsWideDart>('CGDisplayPixelsWide');
 
     release = _coreFoundation
-        .lookupFunction<_CFReleaseNative, _CFReleaseDart>('CFRelease');
+        .lookupFunction<_CFReleaseNative, CFReleaseDart>('CFRelease');
 
     isProcessTrusted = _applicationServices.lookupFunction<
-        _AXIsProcessTrustedNative, _AXIsProcessTrustedDart>('AXIsProcessTrusted');
+        _AXIsProcessTrustedNative, AXIsProcessTrustedDart>('AXIsProcessTrusted');
   }
 
   final DynamicLibrary _coreGraphics;
   final DynamicLibrary _coreFoundation;
   final DynamicLibrary _applicationServices;
 
-  late final _CGEventSourceCreateDart eventSourceCreate;
-  late final _CGEventCreateMouseEventDart createMouseEvent;
-  late final _CGEventCreateKeyboardEventDart createKeyboardEvent;
-  late final _CGEventCreateScrollWheelEventDart createScrollEvent;
-  late final _CGEventPostDart post;
-  late final _CGEventSetFlagsDart setFlags;
-  late final _CGEventSetIntegerValueFieldDart setIntegerValueField;
-  late final _CGEventKeyboardSetUnicodeStringDart setUnicodeString;
-  late final _CGEventGetLocationDart getLocation;
-  late final _CGEventCreateDart createEvent;
-  late final _CGMainDisplayIDDart mainDisplayId;
-  late final _CGDisplayBoundsDart displayBounds;
-  late final _CGDisplayPixelsWideDart displayPixelsWide;
-  late final _CFReleaseDart release;
+  late final CGEventSourceCreateDart eventSourceCreate;
+  late final CGEventCreateMouseEventDart createMouseEvent;
+  late final CGEventCreateKeyboardEventDart createKeyboardEvent;
+  late final CGEventCreateScrollWheelEventDart createScrollEvent;
+  late final CGEventPostDart post;
+  late final CGEventSetFlagsDart setFlags;
+  late final CGEventSetIntegerValueFieldDart setIntegerValueField;
+  late final CGEventKeyboardSetUnicodeStringDart setUnicodeString;
+  late final CGEventGetLocationDart getLocation;
+  late final CGEventCreateDart createEvent;
+  late final CGMainDisplayIDDart mainDisplayId;
+  late final CGDisplayBoundsDart displayBounds;
+  late final CGDisplayPixelsWideDart displayPixelsWide;
+  late final CFReleaseDart release;
 
   /// Whether the process holds Accessibility permission.
   ///
@@ -251,5 +253,5 @@ final class CoreGraphicsBindings {
   /// exception, just a cursor that will not move. Checking up front is the only
   /// way to tell the user what is wrong instead of leaving them with a remote
   /// that appears connected and does not work.
-  late final _AXIsProcessTrustedDart isProcessTrusted;
+  late final AXIsProcessTrustedDart isProcessTrusted;
 }

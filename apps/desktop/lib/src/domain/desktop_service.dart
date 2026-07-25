@@ -419,9 +419,6 @@ final class DesktopService {
       );
 
   Future<void> _broadcastClipboard(ClipboardUpdate update) async {
-    final server = _server;
-    if (server == null) return;
-
     for (final device in _devices.values) {
       if (!device.tier.canSyncClipboard) continue;
       if (!device.serverSession.session.isEstablished) continue;

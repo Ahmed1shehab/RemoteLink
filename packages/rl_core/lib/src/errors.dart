@@ -18,9 +18,16 @@ sealed class RemoteLinkError implements Exception {
   /// Underlying error, when this wraps a lower-level failure.
   final Object? cause;
 
+  /// Formats as `protocol.short_frame: need 4 bytes ... <- FormatException`.
+  ///
+  /// Deliberately built from [code] rather than from `runtimeType`. A class
+  /// name is minified in release builds, so a crash report would carry
+  /// something like `a1(protocol.short_frame)`; the code is a stable string
+  /// that already encodes the category as its prefix, making the type name
+  /// redundant as well as unreliable.
   @override
   String toString() =>
-      '$runtimeType($code): $message${cause == null ? '' : ' <- $cause'}';
+      '$code: $message${cause == null ? '' : ' <- $cause'}';
 }
 
 /// The peer sent bytes that do not conform to the wire format.
