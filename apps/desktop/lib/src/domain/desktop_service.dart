@@ -8,6 +8,7 @@ import 'package:rl_native/rl_native.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import 'bonjour_advertiser.dart';
 import 'clipboard_sync.dart';
 import 'command_dispatcher.dart';
 
@@ -133,6 +134,7 @@ final class DesktopService {
 
   RemoteLinkServer? _server;
   UdpDiscoveryServer? _beacon;
+  BonjourAdvertiser? _bonjour;
 
   final Map<String, ConnectedDevice> _devices = <String, ConnectedDevice>{};
   final Map<String, StreamSubscription<Message>> _messageSubscriptions =
@@ -248,29 +250,20 @@ final class DesktopService {
       (update) => unawaited(_broadcastClipboard(update)),
     );
 
-    // The beacon reads live state on every announcement rather than holding a
-    // snapshot, so the session count and pairing availability a phone sees are
-    // always current without anything having to remember to push updates.
-    final beacon = UdpDiscoveryServer(
-      describe: () => Beacon(
-        kind: BeaconKind.announce,
-        deviceId: identity.id,
-        name: deviceName,
-        platform: NativeBackends.currentPlatform,
-        servicePort: server.boundPort,
-        protocolVersion: kProtocolVersion,
-        publicKeyFingerprint:
-            Uint8List.sublistView(identity.publicKey, 0, 8),
-        // Live, not a captured snapshot. Granting Accessibility mid-session
-        // must start advertising mouse and keyboard on the next announcement,
-        // otherwise the phone keeps hiding its touchpad until a restart.
-        capabilities: currentCapabilities,
-        acceptsNewPairings: acceptsNewPairings,
-        activeSessions: server.sessionCount,
-      ),
-    );
+    // Both advertisers read live state on every announcement rather than
+    // holding a snapshot, so the session count, pairing availability, and
+    // capabilities a phone sees are always current without anything having to
+    // remember to push updates.
+    final beacon = UdpDiscoveryServer(describe: _describeBeacon);
     await beacon.start();
     _beacon = beacon;
+
+    // Bonjour runs in addition to the UDP beacon, not instead of it. An iPhone
+    // cannot receive the UDP beacon at all without Apple's multicast
+    // entitlement, and Bonjour is explicitly exempt from that requirement.
+    final bonjour = BonjourAdvertiser(describe: _describeBeacon);
+    await bonjour.start();
+    _bonjour = bonjour;
 
     _startPermissionWatch();
     await _refreshLocalAddresses();
@@ -284,6 +277,27 @@ final class DesktopService {
       },
     );
   }
+
+  /// This computer as it appears to a phone, built fresh on every call.
+  ///
+  /// Shared by the UDP beacon and the Bonjour advertisement so the two can
+  /// never drift — a client that finds this computer either way builds the same
+  /// [Beacon] and nothing downstream cares which route found it.
+  Beacon _describeBeacon() => Beacon(
+        kind: BeaconKind.announce,
+        deviceId: identity.id,
+        name: deviceName,
+        platform: NativeBackends.currentPlatform,
+        servicePort: boundPort,
+        protocolVersion: kProtocolVersion,
+        publicKeyFingerprint: Uint8List.sublistView(identity.publicKey, 0, 8),
+        // Live, not a captured snapshot. Granting Accessibility mid-session
+        // must start advertising mouse and keyboard on the next announcement,
+        // otherwise the phone keeps hiding its touchpad until a restart.
+        capabilities: currentCapabilities,
+        acceptsNewPairings: acceptsNewPairings,
+        activeSessions: _server?.sessionCount ?? 0,
+      );
 
   /// Watches for Accessibility permission being granted or revoked.
   ///
@@ -305,6 +319,10 @@ final class DesktopService {
       // reconnect — renegotiating mid-session is not something the protocol
       // supports, and pretending otherwise would be worse than the wait.
       _server?.capabilities = currentCapabilities;
+
+      // The UDP beacon picks this up on its next tick for free, but a DNS-SD
+      // TXT record is only read at resolve time, so it has to be republished.
+      unawaited(_bonjour?.refresh() ?? Future<void>.value());
 
       _log.info(
         'input availability changed',
@@ -709,6 +727,7 @@ final class DesktopService {
     }
     _messageSubscriptions.clear();
 
+    await _bonjour?.stop();
     await _beacon?.stop();
     await _server?.stop();
     await clipboard.dispose();

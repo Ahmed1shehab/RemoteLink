@@ -43,6 +43,39 @@ product's central promise. "It just works" is the feature.
 - **Mitigated:** `DiscoveryBackend` is an interface. A DNS-SD backend can be
   added later without the UI or connection layer changing.
 
+### Amendment — DNS-SD added alongside, 2026-07-26
+
+**This decision was half wrong, and real-device testing proved it.**
+
+The reasoning above weighed mDNS on effort and latency and never asked whether
+custom multicast was *permitted*. Since iOS 14 it is not: sending to a multicast
+group or a broadcast address requires
+`com.apple.developer.networking.multicast`, which Apple grants by manual
+application and may refuse. On a physical iPhone every send failed immediately
+with `EHOSTUNREACH`, so automatic discovery did not work at all — the one
+platform where "it just works" matters most.
+
+Bonjour is **explicitly exempt** from that entitlement. That is not an accident:
+Apple gates the raw mechanism precisely to push apps toward the framework one.
+The original analysis treated mDNS as a more expensive way to achieve the same
+thing, when on iOS it is the *only* way.
+
+What was actually right was keeping `DiscoveryBackend` an interface. Adding
+`BonjourDiscoveryBackend` and `CompositeDiscoveryBackend` touched no UI and no
+connection code, exactly as this ADR predicted.
+
+**Current design:** both routes run together, merged by device ID.
+
+| Route | Strength | Weakness |
+|---|---|---|
+| UDP multicast | No native plugin; works where mDNS is filtered | Refused on iOS without the entitlement |
+| Bonjour / DNS-SD | Works on iOS today; standard, so other tools can see it | Needs a native plugin; some networks filter mDNS |
+
+Discovery is reported as working if *either* succeeds, so a failure in one is
+invisible to the user. The lesson worth carrying forward: **platform permission
+models are a design input, not an implementation detail**, and the desktop-first
+analysis in this ADR missed that entirely.
+
 The client binds one socket **per network interface** rather than a single
 wildcard socket. This is not paranoia — a laptop routinely has Wi-Fi, Ethernet,
 and several virtual adapters (Docker, VPN, VirtualBox), and a wildcard multicast

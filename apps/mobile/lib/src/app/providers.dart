@@ -10,6 +10,8 @@ import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../features/devices/bonjour_discovery.dart';
+
 /// What this phone can do, advertised during the handshake.
 const Capabilities kMobileCapabilities = Capabilities(
   Capabilities.mouse |
@@ -221,15 +223,23 @@ final discoveryProvider = FutureProvider<DiscoveryBackend>((ref) async {
   final trustStore = await ref.watch(trustStoreProvider.future);
   final peers = await trustStore.activePeers();
 
-  final backend = UdpDiscoveryClient(
-    clock: ref.watch(clockProvider),
-    isTrusted: (fingerprint) => peers.any(
-      (peer) => Primitives.constantTimeEquals(
-        Uint8List.sublistView(peer.publicKey, 0, 8),
-        fingerprint,
-      ),
-    ),
-  );
+  bool isTrusted(Uint8List fingerprint) => peers.any(
+        (peer) => Primitives.constantTimeEquals(
+          Uint8List.sublistView(peer.publicKey, 0, 8),
+          fingerprint,
+        ),
+      );
+
+  final clock = ref.watch(clockProvider);
+
+  // Bonjour first: on iOS it is the only route that works, and where both are
+  // available its resolved addresses are as good as the beacon's. The UDP
+  // backend stays as a second route for networks that filter mDNS and for
+  // platforms where the plugin is unavailable.
+  final backend = CompositeDiscoveryBackend(<DiscoveryBackend>[
+    BonjourDiscoveryBackend(clock: clock, isTrusted: isTrusted),
+    UdpDiscoveryClient(clock: clock, isTrusted: isTrusted),
+  ]);
 
   await backend.start();
   ref.onDispose(backend.stop);

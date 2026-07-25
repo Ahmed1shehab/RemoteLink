@@ -15,6 +15,9 @@ environment:
 # written, and it dragged in an `analyzer` → `macros` → `_macros` chain that
 # does not resolve on Dart 3.7+, where `_macros` was removed from the SDK.
 dependencies:
+  # DNS-SD advertising. Required because an iPhone cannot use the UDP beacon
+  # without Apple's multicast entitlement, and Bonjour is explicitly exempt.
+  bonsoir: ^5.1.0
   flutter:
     sdk: flutter
   flutter_riverpod: ^2.5.1

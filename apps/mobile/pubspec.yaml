@@ -12,6 +12,9 @@ environment:
   flutter: ">=3.27.0"
 
 dependencies:
+  # DNS-SD browsing. The only automatic discovery an iPhone can do without the
+  # multicast entitlement Apple grants by manual application.
+  bonsoir: ^5.1.0
   flutter:
     sdk: flutter
   flutter_riverpod: ^2.5.1

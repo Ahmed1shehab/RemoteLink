@@ -85,6 +85,7 @@
       "name": "remotelink_desktop",
       "version": "0.1.0",
       "dependencies": [
+        "bonsoir",
         "flutter",
         "flutter_riverpod",
         "launch_at_startup",
@@ -107,6 +108,7 @@
       "name": "remotelink_mobile",
       "version": "0.1.0",
       "dependencies": [
+        "bonsoir",
         "flutter",
         "flutter_riverpod",
         "flutter_secure_storage",
@@ -196,6 +198,18 @@
         "meta",
         "sky_engine",
         "vector_math"
+      ]
+    },
+    {
+      "name": "bonsoir",
+      "version": "5.1.11",
+      "dependencies": [
+        "bonsoir_android",
+        "bonsoir_darwin",
+        "bonsoir_linux",
+        "bonsoir_platform_interface",
+        "bonsoir_windows",
+        "flutter"
       ]
     },
     {
@@ -496,6 +510,49 @@
       "name": "characters",
       "version": "1.4.1",
       "dependencies": []
+    },
+    {
+      "name": "bonsoir_linux",
+      "version": "5.1.3",
+      "dependencies": [
+        "bonsoir_platform_interface",
+        "dbus",
+        "flutter",
+        "meta"
+      ]
+    },
+    {
+      "name": "bonsoir_windows",
+      "version": "5.1.5",
+      "dependencies": [
+        "bonsoir_platform_interface",
+        "flutter"
+      ]
+    },
+    {
+      "name": "bonsoir_darwin",
+      "version": "5.1.3",
+      "dependencies": [
+        "bonsoir_platform_interface",
+        "flutter"
+      ]
+    },
+    {
+      "name": "bonsoir_android",
+      "version": "5.1.6",
+      "dependencies": [
+        "bonsoir_platform_interface",
+        "flutter"
+      ]
+    },
+    {
+      "name": "bonsoir_platform_interface",
+      "version": "5.1.3",
+      "dependencies": [
+        "flutter",
+        "meta",
+        "plugin_platform_interface"
+      ]
     },
     {
       "name": "screen_retriever",
@@ -865,6 +922,16 @@
       ]
     },
     {
+      "name": "dbus",
+      "version": "0.7.14",
+      "dependencies": [
+        "args",
+        "ffi",
+        "meta",
+        "xml"
+      ]
+    },
+    {
       "name": "screen_retriever_windows",
       "version": "0.2.2",
       "dependencies": [
@@ -1029,6 +1096,15 @@
       ]
     },
     {
+      "name": "xml",
+      "version": "6.6.1",
+      "dependencies": [
+        "collection",
+        "meta",
+        "petitparser"
+      ]
+    },
+    {
       "name": "json_annotation",
       "version": "4.12.0",
       "dependencies": [
@@ -1050,6 +1126,14 @@
         "collection",
         "meta",
         "pub_semver"
+      ]
+    },
+    {
+      "name": "petitparser",
+      "version": "7.0.2",
+      "dependencies": [
+        "collection",
+        "meta"
       ]
     }
   ],
