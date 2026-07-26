@@ -9,7 +9,7 @@ import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
-import '../input/touchpad_screen.dart';
+import '../control/control_screen.dart';
 import '../pairing/pairing_screen.dart';
 import 'auto_connect.dart';
 
@@ -82,7 +82,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
       unawaited(
         Navigator.of(context)
             .push(
-              MaterialPageRoute<void>(builder: (_) => const TouchpadScreen()),
+              MaterialPageRoute<void>(builder: (_) => const ControlScreen()),
             )
             // Returning from the touchpad means the user chose to leave, so
             // stop auto-connecting or they would be bounced straight back.
@@ -234,7 +234,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => entry.isPaired
-            ? const TouchpadScreen()
+            ? const ControlScreen()
             : PairingScreen(
                 deviceName: entry.name,
                 address: entry.host,

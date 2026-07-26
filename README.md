@@ -26,12 +26,15 @@ such rather than stubbed.
 | Native input | Complete: Win32 `SendInput` and macOS `CGEvent` via `dart:ffi`, full HID keymaps |
 | Native clipboard | Text complete on both platforms; images deferred |
 | Desktop app | Service, dispatcher with permission enforcement, clipboard sync, tray, pairing UI |
-| Mobile app | Discovery, pairing, touchpad with acceleration and multi-touch |
+| Mobile app | Discovery, pairing, touchpad, full keyboard, clipboard, media |
+| Auto-connect | Reconnects to the last computer on launch and skips the list |
+| Media control | macOS: transport via hardware media keys, volume, now playing |
 
 ### Declared in the protocol, not yet implemented
 
-Screen streaming · file transfer · presentation mode · gamepad · media session
-integration · custom command registry · session resumption.
+Screen streaming · file transfer · presentation mode · gamepad · custom command
+registry · session resumption · Windows media control (the WinRT session API is
+not a flat C export, so it needs more than `DynamicLibrary.lookupFunction`).
 
 These have wire codes reserved and decode as opaque, so a future build can
 speak to this one without a version bump.

@@ -3,13 +3,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:launch_at_startup/launch_at_startup.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'src/app/providers.dart';
+import 'src/domain/auto_start.dart';
 import 'src/ui/home_screen.dart';
 
 /// Entry point for the desktop companion.
@@ -37,7 +36,11 @@ Future<void> main() async {
       titleBarStyle: TitleBarStyle.normal,
     ),
     () async {
-      await windowManager.show();
+      // Started by the login item: register everything and stay out of the way.
+      // The tray icon is the only thing the user should see until they ask for
+      // more.
+      if (!_startedMinimised) await windowManager.show();
+
       // Intercepting close is what makes this a service rather than an app: the
       // listener hides the window and leaves the socket, discovery beacon, and
       // clipboard watcher running.
@@ -53,22 +56,24 @@ Future<void> main() async {
 /// Set by the build system for release binaries.
 const bool kReleaseBuild = bool.fromEnvironment('dart.vm.product');
 
+/// Starting minimised is the point: the user installed a service, and a window
+/// appearing at every login is the thing that makes people disable autostart.
 Future<void> _configureAutoLaunch() async {
-  try {
-    final info = await PackageInfo.fromPlatform();
-    launchAtStartup.setup(
-      appName: info.appName,
-      appPath: Platform.resolvedExecutable,
-      // Starting minimised is the whole point: the user installed a service,
-      // and having a window appear on every login would be an annoyance they
-      // would fix by disabling autostart entirely.
-      args: <String>['--minimised'],
-    );
-  } on Object catch (e) {
-    Log.scoped('desktop.autostart').warn('could not configure autostart',
-        error: e);
-  }
+  await AutoStart(
+    label: 'com.example.remotelinkDesktop',
+    executablePath: Platform.resolvedExecutable,
+  ).enable();
 }
+
+/// True when launched by the login item rather than by the user.
+///
+/// The window is suppressed in that case: a service that opens a window on
+/// every boot is a service people uninstall.
+bool get _startedMinimised =>
+    Platform.executableArguments.contains(AutoStart.minimisedFlag) ||
+    // `flutter run` does not forward arguments, so the same flag is honoured
+    // from the environment for testing the boot path.
+    Platform.environment['REMOTELINK_MINIMISED'] == '1';
 
 class RemoteLinkDesktopApp extends StatelessWidget {
   const RemoteLinkDesktopApp({super.key});

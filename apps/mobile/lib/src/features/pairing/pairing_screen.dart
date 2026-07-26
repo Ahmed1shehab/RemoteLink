@@ -7,7 +7,7 @@ import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
-import '../input/touchpad_screen.dart';
+import '../control/control_screen.dart';
 
 /// Shows the six-digit code and waits for the user to confirm it matches.
 ///
@@ -98,7 +98,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
 
     if (!mounted) return;
     await Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(builder: (_) => const TouchpadScreen()),
+      MaterialPageRoute<void>(builder: (_) => const ControlScreen()),
     );
   }
 

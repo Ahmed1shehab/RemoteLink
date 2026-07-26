@@ -21,12 +21,6 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_riverpod: ^2.5.1
-  # Pinned to 0.3.x deliberately: its `setup(appName:, appPath:, args:)`
-  # signature is what the call site below is written against. 0.5.x reworked
-  # that signature, and an unverified major bump on a login-item API is a poor
-  # trade for no new functionality.
-  launch_at_startup: ^0.3.0
-  package_info_plus: ^8.0.2
   path_provider: ^2.1.4
   rl_core: ^0.1.0
   rl_crypto: ^0.1.0

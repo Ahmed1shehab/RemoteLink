@@ -224,12 +224,6 @@
       "languageVersion": "3.10"
     },
     {
-      "name": "http",
-      "rootUri": "file:///Users/ahmed/.pub-cache/hosted/pub.dev/http-1.6.0",
-      "packageUri": "lib/",
-      "languageVersion": "3.4"
-    },
-    {
       "name": "http_multi_server",
       "rootUri": "file:///Users/ahmed/.pub-cache/hosted/pub.dev/http_multi_server-3.2.2",
       "packageUri": "lib/",
@@ -270,12 +264,6 @@
       "rootUri": "file:///Users/ahmed/.pub-cache/hosted/pub.dev/json_annotation-4.12.0",
       "packageUri": "lib/",
       "languageVersion": "3.9"
-    },
-    {
-      "name": "launch_at_startup",
-      "rootUri": "file:///Users/ahmed/.pub-cache/hosted/pub.dev/launch_at_startup-0.3.1",
-      "packageUri": "lib/",
-      "languageVersion": "3.0"
     },
     {
       "name": "leak_tracker",
@@ -354,18 +342,6 @@
       "rootUri": "file:///Users/ahmed/.pub-cache/hosted/pub.dev/package_config-2.2.0",
       "packageUri": "lib/",
       "languageVersion": "3.4"
-    },
-    {
-      "name": "package_info_plus",
-      "rootUri": "file:///Users/ahmed/.pub-cache/hosted/pub.dev/package_info_plus-8.3.1",
-      "packageUri": "lib/",
-      "languageVersion": "3.3"
-    },
-    {
-      "name": "package_info_plus_platform_interface",
-      "rootUri": "file:///Users/ahmed/.pub-cache/hosted/pub.dev/package_info_plus_platform_interface-3.2.1",
-      "packageUri": "lib/",
-      "languageVersion": "2.18"
     },
     {
       "name": "path",
@@ -642,12 +618,6 @@
       "rootUri": "file:///Users/ahmed/.pub-cache/hosted/pub.dev/win32-5.15.0",
       "packageUri": "lib/",
       "languageVersion": "3.8"
-    },
-    {
-      "name": "win32_registry",
-      "rootUri": "file:///Users/ahmed/.pub-cache/hosted/pub.dev/win32_registry-1.1.5",
-      "packageUri": "lib/",
-      "languageVersion": "3.4"
     },
     {
       "name": "window_manager",

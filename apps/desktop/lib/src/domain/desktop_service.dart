@@ -21,10 +21,10 @@ import 'command_dispatcher.dart';
 Capabilities buildCapabilities({
   required bool inputAvailable,
   required bool clipboardAvailable,
+  required bool mediaAvailable,
 }) {
   var capabilities = const Capabilities(
-    Capabilities.mediaControl |
-        Capabilities.powerControl |
+    Capabilities.powerControl |
         Capabilities.launchApps |
         Capabilities.compression |
         Capabilities.sessionResumption,
@@ -37,6 +37,14 @@ Capabilities buildCapabilities({
   }
   if (clipboardAvailable) {
     capabilities = capabilities.plus(Capabilities.clipboardText);
+  }
+  if (mediaAvailable) {
+    // Advertised only when a real backend exists, so a Windows build — where
+    // the WinRT media session is not yet bound — does not offer a media tab
+    // whose buttons would do nothing.
+    capabilities = capabilities
+        .plus(Capabilities.mediaControl)
+        .plus(Capabilities.mediaMetadata);
   }
   return capabilities;
 }
@@ -97,7 +105,8 @@ final class DesktopService {
     this.servicePort = kDefaultServicePort,
   })  : _clock = clock,
         _input = NativeBackends.createInput(),
-        _clipboardBackend = NativeBackends.createClipboard();
+        _clipboardBackend = NativeBackends.createClipboard(),
+        _media = NativeBackends.createMedia();
 
   final DeviceIdentity identity;
   final TrustStore trustStore;
@@ -108,6 +117,7 @@ final class DesktopService {
   final Clock _clock;
   final InputBackend _input;
   final ClipboardBackend _clipboardBackend;
+  final MediaBackend _media;
   final Log _log = Log.scoped('desktop.service');
 
   late final PairingCoordinator _pairing = PairingCoordinator(
@@ -170,6 +180,7 @@ final class DesktopService {
   Capabilities get currentCapabilities => buildCapabilities(
         inputAvailable: _input.isAvailable,
         clipboardAvailable: _clipboardBackend.isAvailable,
+        mediaAvailable: _media.isAvailable,
       );
 
   /// Emits whenever input availability flips.
@@ -266,6 +277,7 @@ final class DesktopService {
     _bonjour = bonjour;
 
     _startPermissionWatch();
+    _startMediaWatch();
     await _refreshLocalAddresses();
 
     _log.info(
@@ -277,6 +289,20 @@ final class DesktopService {
       },
     );
   }
+
+  /// This computer's identity, sent to a phone once the session is usable.
+  ///
+  /// The platform field is not cosmetic. The phone renders a keyboard with
+  /// Command or Windows keys, and resolves nothing itself — so without being
+  /// told which OS it is driving, it would have to guess, and a keyboard with
+  /// the wrong modifier key is worse than no keyboard.
+  DeviceInfo describeSelf() => DeviceInfo(
+        id: identity.id,
+        name: deviceName,
+        platform: NativeBackends.currentPlatform,
+        role: PeerRole.server,
+        appVersion: appVersion,
+      );
 
   /// This computer as it appears to a phone, built fresh on every call.
   ///
@@ -393,6 +419,7 @@ final class DesktopService {
     // the first paste after connecting already has the right content rather
     // than waiting for the next copy.
     await session.session.send(PermissionGrant(tier: tier));
+    await session.session.send(DeviceInfoMessage(describeSelf()));
     final snapshot = await clipboard.snapshot();
     if (snapshot != null) await session.session.send(snapshot);
   }
@@ -456,6 +483,12 @@ final class DesktopService {
 
     request.session.session.completePairing();
     await request.session.session.send(PermissionGrant(tier: tier));
+
+    // Also sent here, not only on the already-trusted path. A phone that paired
+    // by typing an address has no beacon and therefore no idea what it just
+    // connected to — it would render a Windows keyboard against a Mac until the
+    // next reconnect.
+    await request.session.session.send(DeviceInfoMessage(describeSelf()));
 
     _devices[request.peerId.value] = ConnectedDevice(
       serverSession: request.session,
@@ -681,16 +714,84 @@ final class DesktopService {
     );
   }
 
-  void _onMediaCommand(MediaCommand command) {
-    // Media keys are synthesised as a fallback until the OS media-session
-    // integration lands. Consumer-control HID usages live on a different usage
-    // page than the keyboard, so they do not go through the standard key map.
-    _log.debug(() => 'media command ${command.action.name}');
+  void _onMediaCommand(MediaCommand command) =>
+      unawaited(_runMediaCommand(command));
+
+  Future<void> _runMediaCommand(MediaCommand command) async {
+    if (!_media.isAvailable) return;
+    await _media.command(command.action, seekSeconds: command.seekSeconds);
+    // Push the new state straight away rather than waiting for the poll: the
+    // user pressed a button and expects the phone to agree within a frame, not
+    // within a poll interval.
+    unawaited(_publishMediaState());
   }
 
-  void _onVolumeCommand(VolumeCommand command) {
-    _log.debug(() => 'volume command ${command.mode.name}');
+  void _onVolumeCommand(VolumeCommand command) =>
+      unawaited(_runVolumeCommand(command));
+
+  Future<void> _runVolumeCommand(VolumeCommand command) async {
+    if (!_media.isAvailable) return;
+
+    switch (command.mode) {
+      case VolumeMode.absolute:
+        await _media.setVolume(command.value);
+      case VolumeMode.relative:
+        // Read-modify-write rather than tracking a local value: the user may
+        // have moved the slider on the computer since we last looked, and a
+        // stale base would make the phone's volume jump.
+        final current = await _media.volume();
+        await _media.setVolume(current.level + command.value);
+      case VolumeMode.toggleMute:
+        final current = await _media.volume();
+        await _media.setMuted(muted: !current.muted);
+      case VolumeMode.setMute:
+        await _media.setMuted(muted: command.value > 0);
+    }
+    unawaited(_publishMediaState());
   }
+
+  /// Sends the current media state to every session that can use it.
+  Future<void> _publishMediaState() async {
+    if (_devices.isEmpty || !_media.isAvailable) return;
+
+    final volume = await _media.volume();
+    final playing = await _media.nowPlaying();
+
+    final state = MediaState(
+      isPlaying: playing?.isPlaying ?? false,
+      title: playing?.title ?? '',
+      artist: playing?.artist ?? '',
+      album: playing?.album ?? '',
+      positionSeconds: playing?.positionSeconds ?? 0,
+      durationSeconds: playing?.durationSeconds ?? 0,
+      volume: volume.level,
+      isMuted: volume.muted,
+      sourceApplication: playing?.source,
+    );
+
+    for (final device in _devices.values) {
+      if (!device.serverSession.session.isEstablished) continue;
+      try {
+        await device.serverSession.session.send(state);
+      } on TransportError {
+        // Tearing down; its watcher will clean up.
+      }
+    }
+  }
+
+  /// Polls media state while at least one phone is connected.
+  ///
+  /// Polling only when someone is watching matters: this shells out to
+  /// AppleScript, and doing that every two seconds forever on a laptop with no
+  /// phone attached would be a battery cost for nobody's benefit.
+  void _startMediaWatch() {
+    _mediaWatch = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (_devices.isEmpty) return;
+      unawaited(_publishMediaState());
+    });
+  }
+
+  Timer? _mediaWatch;
 
   void _publishDevices() {
     if (!_deviceChanges.isClosed) _deviceChanges.add(devices);
@@ -716,6 +817,8 @@ final class DesktopService {
   Future<void> stop() async {
     _permissionWatch?.cancel();
     _permissionWatch = null;
+    _mediaWatch?.cancel();
+    _mediaWatch = null;
     await _inputAvailability.close();
 
     await _acceptedSubscription?.cancel();
@@ -735,6 +838,7 @@ final class DesktopService {
 
     _input.dispose();
     _clipboardBackend.dispose();
+    _media.dispose();
 
     _devices.clear();
     await _deviceChanges.close();

@@ -23,14 +23,15 @@ final pointerSettingsProvider = StateProvider<PointerSettings>(
 /// the arena buys nothing here because this widget owns the entire surface and
 /// has no competitors. `Listener` delivers raw pointer events immediately, and
 /// the multi-touch logic below does the disambiguation itself.
-class TouchpadScreen extends ConsumerStatefulWidget {
-  const TouchpadScreen({super.key});
+class TouchpadSurfaceView extends ConsumerStatefulWidget {
+  const TouchpadSurfaceView({super.key});
 
   @override
-  ConsumerState<TouchpadScreen> createState() => _TouchpadScreenState();
+  ConsumerState<TouchpadSurfaceView> createState() =>
+      _TouchpadSurfaceViewState();
 }
 
-class _TouchpadScreenState extends ConsumerState<TouchpadScreen> {
+class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
   final PointerController _pointer = PointerController();
   final TapRecogniser _taps = TapRecogniser();
 
@@ -177,44 +178,38 @@ class _TouchpadScreenState extends ConsumerState<TouchpadScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(clientStateProvider).valueOrNull;
-    final connected = state == ClientState.connected;
+    final connected =
+        ref.watch(clientStateProvider).valueOrNull == ClientState.connected;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Touchpad'),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(2),
-          child: _ConnectionBar(state: state),
-        ),
-      ),
-      body: Column(
-        children: <Widget>[
-          Expanded(
-            child: Listener(
-              // Opaque so the whole area receives events even where nothing is
-              // painted.
-              behavior: HitTestBehavior.opaque,
-              onPointerDown: _onPointerDown,
-              onPointerMove: _onPointerMove,
-              onPointerUp: _onPointerUp,
-              onPointerCancel: _onPointerCancel,
-              child: GestureDetector(
-                // Long press is the one gesture worth the arena's latency: it
-                // is defined by *not* moving, so a frame of delay is invisible.
-                onLongPress: _onLongPress,
-                child: _TouchpadSurface(enabled: connected),
-              ),
+    // No Scaffold or AppBar: this is one tab inside ControlScreen, which owns
+    // the chrome. Nesting a second Scaffold would double the status bar inset
+    // and give the tab its own disconnected app bar.
+    return Column(
+      children: <Widget>[
+        Expanded(
+          child: Listener(
+            // Opaque so the whole area receives events even where nothing is
+            // painted.
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: _onPointerDown,
+            onPointerMove: _onPointerMove,
+            onPointerUp: _onPointerUp,
+            onPointerCancel: _onPointerCancel,
+            child: GestureDetector(
+              // Long press is the one gesture worth the arena's latency: it is
+              // defined by *not* moving, so a frame of delay is invisible.
+              onLongPress: _onLongPress,
+              child: _TouchpadSurface(enabled: connected),
             ),
           ),
-          _ButtonRow(
-            onLeft: () => _click(MouseButton.left),
-            onMiddle: () => _click(MouseButton.middle),
-            onRight: () => _click(MouseButton.right),
-            enabled: connected,
-          ),
-        ],
-      ),
+        ),
+        _ButtonRow(
+          onLeft: () => _click(MouseButton.left),
+          onMiddle: () => _click(MouseButton.middle),
+          onRight: () => _click(MouseButton.right),
+          enabled: connected,
+        ),
+      ],
     );
   }
 
@@ -341,38 +336,3 @@ class _PadButton extends StatelessWidget {
       );
 }
 
-/// A thin line that turns amber while reconnecting.
-///
-/// Deliberately unobtrusive. Reconnection is expected and usually over in under
-/// a second, so a dialog or a snackbar would draw far more attention than the
-/// event deserves — the user should notice only if it persists.
-class _ConnectionBar extends StatelessWidget {
-  const _ConnectionBar({required this.state});
-
-  final ClientState? state;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final (color, animate) = switch (state) {
-      ClientState.connected => (scheme.primary, false),
-      ClientState.reconnecting || ClientState.connecting => (
-          scheme.tertiary,
-          true,
-        ),
-      ClientState.failed => (scheme.error, false),
-      _ => (scheme.surfaceContainerHighest, false),
-    };
-
-    return SizedBox(
-      height: 2,
-      child: animate
-          ? LinearProgressIndicator(
-              minHeight: 2,
-              backgroundColor: scheme.surfaceContainerHighest,
-              color: color,
-            )
-          : ColoredBox(color: color, child: const SizedBox.expand()),
-    );
-  }
-}

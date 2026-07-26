@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -283,6 +284,77 @@ final connectionQualityProvider =
   await for (final session in client.sessions) {
     yield* session.quality;
   }
+});
+
+/// The connected computer's identity, once it has told us.
+///
+/// Chiefly so the rendered keyboard can label the modifier key Command or
+/// Windows. Guessing that from the phone's own platform would be wrong exactly
+/// when it matters — an iPhone driving a Windows PC is a normal thing to do.
+///
+/// Falls back to the trust store while the message is in flight, so a
+/// reconnect to a known computer never briefly shows the wrong key.
+final connectedPeerProvider = StreamProvider<DeviceInfo?>((ref) async* {
+  final client = await ref.watch(clientProvider.future);
+  yield null;
+
+  await for (final message in client.messages) {
+    if (message is! DeviceInfoMessage) continue;
+    final info = message.info;
+    yield info;
+
+    // Write it back to the trust store. A device paired by typing an address
+    // was recorded with an unknown platform and an address for a name; without
+    // this correction it would be re-guessed on every launch, and the device
+    // list would keep showing an IP where a name belongs.
+    unawaited(_rememberPeerDetails(ref, info));
+  }
+});
+
+Future<void> _rememberPeerDetails(Ref ref, DeviceInfo info) async {
+  final store = await ref.read(trustStoreProvider.future);
+  final peer = await store.findById(info.id);
+  if (peer == null) return;
+
+  final needsUpdate =
+      peer.platform != info.platform || peer.name != info.name;
+  if (!needsUpdate) return;
+
+  // `TrustedPeer.copyWith` cannot change the platform — it is derived from the
+  // pairing and treated as immutable there — so the record is rebuilt. The
+  // public key is carried across untouched: it is the thing trust rests on and
+  // must never be taken from a message.
+  await store.upsert(
+    TrustedPeer(
+      id: peer.id,
+      publicKey: peer.publicKey,
+      name: info.name,
+      platform: info.platform,
+      pairedAt: peer.pairedAt,
+      permissionTier: peer.permissionTier,
+      lastSeenAt: DateTime.now(),
+      lastAddress: peer.lastAddress,
+      revoked: peer.revoked,
+    ),
+  );
+  await persistTrustStore(store, await ref.read(identityStoreProvider.future));
+  ref.invalidate(trustedPeersProvider);
+}
+
+/// Platform of the computer being controlled, best effort.
+final connectedPlatformProvider = Provider<PlatformKind>((ref) {
+  final reported = ref.watch(connectedPeerProvider).valueOrNull?.platform;
+  if (reported != null && reported != PlatformKind.unknown) return reported;
+
+  // Before the identity message arrives, use what pairing recorded.
+  final session = ref.watch(clientProvider).valueOrNull?.session;
+  final peers = ref.watch(trustedPeersProvider).valueOrNull;
+  if (session != null && peers != null) {
+    for (final peer in peers) {
+      if (peer.id == session.peerId) return peer.platform;
+    }
+  }
+  return PlatformKind.unknown;
 });
 
 /// Inbound messages from the desktop, flattened across reconnects.

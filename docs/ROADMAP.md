@@ -63,10 +63,20 @@ Risk: this is where TCP's head-of-line blocking stops being theoretical.
 
 ## Milestone 5 — the long tail of features
 
-Media session integration (`GlobalSystemMediaTransportControls`,
-`MPRemoteCommandCenter`) · presentation mode · gamepad with gyroscope · quick
-actions and the custom command registry · Wake-on-LAN · multi-monitor
-enumeration · notifications.
+**Done:** media control on macOS — transport by synthesising hardware media
+keys (so any player responds, not just an enumerated list), volume and mute via
+AppleScript, and now-playing read from Music and Spotify.
+
+That last part is limited by Apple, not by effort: `MediaRemote` was the private
+framework that exposed universal now-playing, and it was closed to unentitled
+processes in macOS 15.4. Asking players directly is the only route left, so
+metadata is blank for browsers and anything not enumerated. Playback control
+still works with all of them, because media keys are routed by the system.
+
+**Remaining:** Windows media control via `GlobalSystemMediaTransportControls`
+(a WinRT interface, so it needs a real binding rather than a `lookupFunction`)
+· presentation mode · gamepad with gyroscope · quick actions and the custom
+command registry · Wake-on-LAN · multi-monitor enumeration · notifications.
 
 Each is small on its own. They are grouped because none of them changes the
 architecture.

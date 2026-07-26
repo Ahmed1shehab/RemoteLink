@@ -17,13 +17,18 @@ import 'package:rl_core/rl_core.dart';
 import 'src/input_backend.dart';
 import 'src/macos/macos_clipboard.dart';
 import 'src/macos/macos_input.dart';
+import 'src/macos/macos_media.dart';
+import 'src/media_backend.dart';
 import 'src/windows/win32_clipboard.dart';
 import 'src/windows/win32_input.dart';
 
 export 'src/input_backend.dart';
 export 'src/keymap.dart';
+export 'src/macos/coreaudio_ffi.dart';
 export 'src/macos/macos_clipboard.dart';
 export 'src/macos/macos_input.dart';
+export 'src/macos/macos_media.dart';
+export 'src/media_backend.dart';
 export 'src/windows/win32_clipboard.dart';
 export 'src/windows/win32_input.dart';
 
@@ -65,6 +70,24 @@ abstract final class NativeBackends {
     } on ArgumentError catch (e) {
       log.error('could not load native clipboard libraries', error: e);
       return const UnsupportedClipboardBackend();
+    }
+  }
+
+  /// Builds the media backend, or an unsupported stub.
+  ///
+  /// Windows has an equivalent in `GlobalSystemMediaTransportControls`, which
+  /// is a WinRT interface rather than a flat C export and therefore needs more
+  /// than `DynamicLibrary.lookupFunction`. Until that is written, Windows gets
+  /// the stub and the desktop simply does not advertise media control — which
+  /// is why capability negotiation exists.
+  static MediaBackend createMedia() {
+    final log = Log.scoped('native.factory');
+    try {
+      if (Platform.isMacOS) return MacosMediaBackend();
+      return const UnsupportedMediaBackend();
+    } on ArgumentError catch (e) {
+      log.error('could not load native media libraries', error: e);
+      return const UnsupportedMediaBackend();
     }
   }
 

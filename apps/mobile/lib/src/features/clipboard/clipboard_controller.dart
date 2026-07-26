@@ -4,6 +4,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
+// For WidgetsBindingObserver and AppLifecycleState. `services.dart` alone gives
+// Clipboard but not the binding, which is what makes the foreground hook work.
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
