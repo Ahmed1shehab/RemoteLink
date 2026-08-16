@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -11,6 +12,8 @@ import 'package:rl_transport/rl_transport.dart';
 import 'bonjour_advertiser.dart';
 import 'clipboard_sync.dart';
 import 'command_dispatcher.dart';
+import 'file_transfer_store.dart';
+import 'transfer_model.dart';
 
 /// Everything the desktop advertises it can do.
 ///
@@ -165,10 +168,25 @@ final class DesktopService {
       <String, FileTransferReceiver>{};
   DeviceId? _activeSessionPeerId;
 
+  final Map<String, TransferRecord> _transfers = <String, TransferRecord>{};
+  final Map<String, Map<String, OutgoingFile>> _outgoingSources =
+      <String, Map<String, OutgoingFile>>{};
+  final Map<String, FileOffer> _outgoingOffers = <String, FileOffer>{};
+  final Map<String, DeviceId> _outgoingPeerIds = <String, DeviceId>{};
+  final Map<String, Completer<void>> _activeSendCompleters =
+      <String, Completer<void>>{};
+  final Map<String, TransferSpeedTracker> _speedTrackers =
+      <String, TransferSpeedTracker>{};
+  final Set<String> _knownPeersWithTransfers = <String>{};
+
   final StreamController<List<ConnectedDevice>> _deviceChanges =
       StreamController<List<ConnectedDevice>>.broadcast();
   final StreamController<PendingPairing> _pairingRequests =
       StreamController<PendingPairing>.broadcast();
+  final StreamController<PendingIncomingTransfer> _incomingTransferRequests =
+      StreamController<PendingIncomingTransfer>.broadcast();
+  final StreamController<List<TransferRecord>> _transferChanges =
+      StreamController<List<TransferRecord>>.broadcast();
 
   StreamSubscription<ServerSession>? _acceptedSubscription;
   StreamSubscription<ServerSession>? _endedSubscription;
@@ -179,6 +197,15 @@ final class DesktopService {
 
   /// Pairing requests awaiting the user's confirmation.
   Stream<PendingPairing> get pairingRequests => _pairingRequests.stream;
+
+  /// Incoming transfer requests awaiting explicit user approval.
+  Stream<PendingIncomingTransfer> get incomingTransferRequests =>
+      _incomingTransferRequests.stream;
+
+  /// Transfer changes for real-time progress and status updates.
+  Stream<List<TransferRecord>> get transferChanges => _transferChanges.stream;
+
+  List<TransferRecord> get transfers => _transfers.values.toList();
 
   List<ConnectedDevice> get devices => _devices.values.toList();
 
@@ -640,6 +667,12 @@ final class DesktopService {
     unawaited(_handleFileTransferMessage(peerId, message));
   }
 
+  void _publishTransfers() {
+    if (!_transferChanges.isClosed) {
+      _transferChanges.add(_transfers.values.toList());
+    }
+  }
+
   Future<void> _handleFileTransferMessage(
     DeviceId peerId,
     Message message,
@@ -661,12 +694,186 @@ final class DesktopService {
     try {
       switch (message) {
         case FileOffer():
-          final decision =
-              await receiver.acceptOffer(message, tier: device.tier);
-          await device.serverSession.session.send(decision.accept);
-          if (decision.abort case final abort?) {
-            await device.serverSession.session.send(abort);
+          if (!device.tier.canTransferFiles) {
+            await device.serverSession.session.send(
+              FileAbort(
+                transferId: message.transferId,
+                reason: FileAbortReason.declined,
+              ),
+            );
+            return;
           }
+
+          final isFirst = !_knownPeersWithTransfers.contains(peerId.value);
+          final destinationPath = incomingTransferStore is FileTransferStore
+              ? (incomingTransferStore as FileTransferStore).destination.path
+              : '';
+
+          final request = PendingIncomingTransfer(
+            transferId: message.transferId,
+            peerId: peerId,
+            peerName: device.name,
+            offer: message,
+            isFirstTransferFromDevice: isFirst,
+            destinationPath: destinationPath,
+          );
+
+          final record = TransferRecord(
+            transferId: message.transferId,
+            peerId: peerId,
+            peerName: device.name,
+            direction: TransferDirection.incoming,
+            status: TransferStatus.prompting,
+            files: <TransferFileProgress>[
+              for (final f in message.files)
+                TransferFileProgress(
+                  fileId: f.fileId,
+                  fileName: f.fileName,
+                  totalBytes: f.size,
+                  transferredBytes: 0,
+                ),
+            ],
+            totalBytes: message.files.fold(0, (sum, f) => sum + f.size),
+            transferredBytes: 0,
+            createdAt: DateTime.now(),
+          );
+
+          _speedTrackers[message.transferId] = TransferSpeedTracker();
+          _transfers[message.transferId] = record;
+          _publishTransfers();
+
+          _incomingTransferRequests.add(request);
+
+        case FileAccept():
+          final sources = _outgoingSources[message.transferId];
+          final offer = _outgoingOffers[message.transferId];
+          if (sources != null && offer != null) {
+            final sender = FileTransferSender(
+              exporterSecret: device.serverSession.session.exporterSecret,
+            );
+            final tracker = _speedTrackers.putIfAbsent(
+              message.transferId,
+              TransferSpeedTracker.new,
+            );
+            final sendCompleter = Completer<void>();
+            _activeSendCompleters[message.transferId] = sendCompleter;
+
+            final existing = _transfers[message.transferId];
+            if (existing != null) {
+              _transfers[message.transferId] =
+                  existing.copyWith(status: TransferStatus.inProgress);
+              _publishTransfers();
+            }
+
+            unawaited(
+              () async {
+                try {
+                  await sender.sendAccepted(
+                    offer: offer,
+                    accept: message,
+                    sources: sources,
+                    sendChunk: (chunk) async {
+                      if (sendCompleter.isCompleted) {
+                        throw StateError('Transfer cancelled');
+                      }
+                      await device.serverSession.session.send(chunk);
+                      final rec = _transfers[message.transferId];
+                      if (rec != null) {
+                        final fileIdx = rec.files
+                            .indexWhere((f) => f.fileId == chunk.fileId);
+                        if (fileIdx != -1) {
+                          final f = rec.files[fileIdx];
+                          final newBytes = (chunk.offset + chunk.bytes.length)
+                              .clamp(0, f.totalBytes);
+                          final updatedF =
+                              f.copyWith(transferredBytes: newBytes);
+                          final uFiles =
+                              List<TransferFileProgress>.from(rec.files);
+                          uFiles[fileIdx] = updatedF;
+                          final totalTr = uFiles.fold(
+                              0, (sum, item) => sum + item.transferredBytes);
+
+                          tracker.record(totalTr);
+                          final speed = tracker.calculateSpeed();
+                          final eta = tracker.calculateEta(
+                              rec.totalBytes, totalTr, speed);
+
+                          _transfers[message.transferId] = rec.copyWith(
+                            files: uFiles,
+                            transferredBytes: totalTr,
+                            speedBytesPerSecond: speed,
+                            eta: eta,
+                            status: TransferStatus.inProgress,
+                          );
+                          _publishTransfers();
+                        }
+                      }
+                    },
+                    sendComplete: (complete) async {
+                      if (sendCompleter.isCompleted) {
+                        throw StateError('Transfer cancelled');
+                      }
+                      await device.serverSession.session.send(complete);
+                      final rec = _transfers[message.transferId];
+                      if (rec != null) {
+                        final fileIdx = rec.files
+                            .indexWhere((f) => f.fileId == complete.fileId);
+                        if (fileIdx != -1) {
+                          final uFiles =
+                              List<TransferFileProgress>.from(rec.files);
+                          uFiles[fileIdx] = uFiles[fileIdx].copyWith(
+                            transferredBytes: uFiles[fileIdx].totalBytes,
+                            isComplete: true,
+                          );
+                          final allDone = uFiles.every((f) => f.isComplete);
+                          final totalTr = uFiles.fold(
+                              0, (sum, item) => sum + item.transferredBytes);
+
+                          _transfers[message.transferId] = rec.copyWith(
+                            files: uFiles,
+                            transferredBytes: totalTr,
+                            status: allDone
+                                ? TransferStatus.completed
+                                : TransferStatus.inProgress,
+                            completedAt: allDone ? DateTime.now() : null,
+                          );
+                          _publishTransfers();
+                        }
+                      }
+                    },
+                  );
+                  if (!sendCompleter.isCompleted) {
+                    sendCompleter.complete();
+                  }
+                  final rec = _transfers[message.transferId];
+                  if (rec != null) {
+                    _transfers[message.transferId] = rec.copyWith(
+                      status: TransferStatus.completed,
+                      transferredBytes: rec.totalBytes,
+                      completedAt: DateTime.now(),
+                    );
+                    _publishTransfers();
+                  }
+                } catch (e) {
+                  if (!sendCompleter.isCompleted) {
+                    sendCompleter.completeError(e);
+                  }
+                  final rec = _transfers[message.transferId];
+                  if (rec != null) {
+                    _transfers[message.transferId] = rec.copyWith(
+                      status: TransferStatus.failed,
+                      errorMessage: e.toString(),
+                      completedAt: DateTime.now(),
+                    );
+                    _publishTransfers();
+                  }
+                } finally {
+                  _activeSendCompleters.remove(message.transferId);
+                }
+              }(),
+            );
+          }
+
         case FileChunk():
           final result =
               await receiver.receiveChunk(message, tier: device.tier);
@@ -678,7 +885,53 @@ final class DesktopService {
                 reason: FileAbortReason.declined,
               ),
             );
+            return;
           }
+          if (result == ChunkDisposition.corrupt) {
+            await device.serverSession.session.send(
+              FileAbort(
+                transferId: message.transferId,
+                fileId: message.fileId,
+                reason: FileAbortReason.hashMismatch,
+              ),
+            );
+            return;
+          }
+
+          final record = _transfers[message.transferId];
+          if (record != null) {
+            final tracker = _speedTrackers.putIfAbsent(
+              message.transferId,
+              TransferSpeedTracker.new,
+            );
+            final fileIdx =
+                record.files.indexWhere((f) => f.fileId == message.fileId);
+            if (fileIdx != -1) {
+              final file = record.files[fileIdx];
+              final newBytes = (message.offset + message.bytes.length)
+                  .clamp(0, file.totalBytes);
+              final updatedFile = file.copyWith(transferredBytes: newBytes);
+              final uFiles = List<TransferFileProgress>.from(record.files);
+              uFiles[fileIdx] = updatedFile;
+              final totalTr =
+                  uFiles.fold(0, (sum, f) => sum + f.transferredBytes);
+
+              tracker.record(totalTr);
+              final speed = tracker.calculateSpeed();
+              final eta =
+                  tracker.calculateEta(record.totalBytes, totalTr, speed);
+
+              _transfers[message.transferId] = record.copyWith(
+                files: uFiles,
+                transferredBytes: totalTr,
+                speedBytesPerSecond: speed,
+                eta: eta,
+                status: TransferStatus.inProgress,
+              );
+              _publishTransfers();
+            }
+          }
+
         case FileComplete():
           final result = await receiver.complete(message, tier: device.tier);
           if (result == CompletionDisposition.hashMismatch ||
@@ -692,11 +945,65 @@ final class DesktopService {
                     : FileAbortReason.ioError,
               ),
             );
+            final record = _transfers[message.transferId];
+            if (record != null) {
+              _transfers[message.transferId] = record.copyWith(
+                status: TransferStatus.failed,
+                errorMessage: 'Integrity verification failed',
+                completedAt: DateTime.now(),
+              );
+              _publishTransfers();
+            }
+            return;
           }
+
+          final record = _transfers[message.transferId];
+          if (record != null) {
+            final fileIdx =
+                record.files.indexWhere((f) => f.fileId == message.fileId);
+            if (fileIdx != -1) {
+              final uFiles = List<TransferFileProgress>.from(record.files);
+              uFiles[fileIdx] = uFiles[fileIdx].copyWith(
+                transferredBytes: uFiles[fileIdx].totalBytes,
+                isComplete: true,
+              );
+              final allDone = uFiles.every((f) => f.isComplete);
+              final totalTr =
+                  uFiles.fold(0, (sum, f) => sum + f.transferredBytes);
+
+              _transfers[message.transferId] = record.copyWith(
+                files: uFiles,
+                transferredBytes: totalTr,
+                status: allDone
+                    ? TransferStatus.completed
+                    : TransferStatus.inProgress,
+                completedAt: allDone ? DateTime.now() : null,
+              );
+              _publishTransfers();
+            }
+          }
+
         case FileAbort():
           await receiver.abort(message, tier: device.tier);
-        case FileAccept():
-        // Desktop-originated sending is intentionally outside this task.
+          final completer = _activeSendCompleters.remove(message.transferId);
+          if (completer != null && !completer.isCompleted) {
+            completer
+                .completeError(StateError('Transfer aborted by remote peer'));
+          }
+
+          final isDeclined = message.reason == FileAbortReason.declined;
+          final record = _transfers[message.transferId];
+          if (record != null) {
+            _transfers[message.transferId] = record.copyWith(
+              status: isDeclined
+                  ? TransferStatus.declined
+                  : TransferStatus.cancelled,
+              errorMessage: message.reason.name,
+              completedAt: DateTime.now(),
+            );
+            _publishTransfers();
+          }
+
         default:
           break;
       }
@@ -728,6 +1035,265 @@ final class DesktopService {
         }
       }
     }
+  }
+
+  /// Approves a pending incoming file transfer.
+  Future<void> approveIncomingTransfer(PendingIncomingTransfer request) async {
+    final device = _devices[request.peerId.value];
+    final receiver = _transferReceivers[request.peerId.value];
+    if (device == null || receiver == null) {
+      final record = _transfers[request.transferId];
+      if (record != null) {
+        _transfers[request.transferId] = record.copyWith(
+          status: TransferStatus.failed,
+          errorMessage: 'Device disconnected',
+          completedAt: DateTime.now(),
+        );
+        _publishTransfers();
+      }
+      return;
+    }
+
+    _knownPeersWithTransfers.add(request.peerId.value);
+
+    final decision =
+        await receiver.acceptOffer(request.offer, tier: device.tier);
+    await device.serverSession.session.send(decision.accept);
+    if (decision.abort case final abort?) {
+      await device.serverSession.session.send(abort);
+    }
+
+    final record = _transfers[request.transferId];
+    if (record != null) {
+      _transfers[request.transferId] = record.copyWith(
+        status: TransferStatus.inProgress,
+      );
+      _publishTransfers();
+    }
+  }
+
+  /// Declines a pending incoming file transfer.
+  Future<void> declineIncomingTransfer(PendingIncomingTransfer request) async {
+    final device = _devices[request.peerId.value];
+    if (device != null && device.serverSession.session.isEstablished) {
+      try {
+        await device.serverSession.session.send(
+          FileAbort(
+            transferId: request.transferId,
+            reason: FileAbortReason.declined,
+          ),
+        );
+      } catch (_) {}
+    }
+
+    final record = _transfers[request.transferId];
+    if (record != null) {
+      _transfers[request.transferId] = record.copyWith(
+        status: TransferStatus.declined,
+        completedAt: DateTime.now(),
+      );
+      _publishTransfers();
+    }
+  }
+
+  /// Sends a list of files to [targetPeerId].
+  Future<String> sendFiles(DeviceId targetPeerId, List<File> files) async {
+    final device = _devices[targetPeerId.value];
+    if (device == null || !device.serverSession.session.isEstablished) {
+      throw StateError('Cannot send files: device not connected');
+    }
+
+    if (files.isEmpty) {
+      throw ArgumentError('files list must not be empty');
+    }
+
+    final transferId = 't-${DateTime.now().microsecondsSinceEpoch}';
+    final offeredFiles = <OfferedFile>[];
+    final sources = <String, OutgoingFile>{};
+
+    for (var i = 0; i < files.length; i++) {
+      final file = files[i];
+      final fileId = 'file-${i + 1}';
+      final rawName = file.uri.pathSegments.lastWhere(
+        (s) => s.isNotEmpty,
+        orElse: () => 'file_${i + 1}.dat',
+      );
+      final fileName = sanitiseFileName(rawName);
+      final length = file.lengthSync();
+      final stat = file.statSync();
+
+      offeredFiles.add(
+        OfferedFile(
+          fileId: fileId,
+          fileName: fileName,
+          size: length,
+          fileType: 'application/octet-stream',
+          modifiedAt: stat.modified.toUtc(),
+        ),
+      );
+      sources[fileId] = FileBackedOutgoingFile(file, length);
+    }
+
+    final offer = FileOffer(
+      transferId: transferId,
+      files: offeredFiles,
+    );
+
+    _outgoingSources[transferId] = sources;
+    _outgoingOffers[transferId] = offer;
+    _outgoingPeerIds[transferId] = targetPeerId;
+    _speedTrackers[transferId] = TransferSpeedTracker();
+
+    final record = TransferRecord(
+      transferId: transferId,
+      peerId: targetPeerId,
+      peerName: device.name,
+      direction: TransferDirection.outgoing,
+      status: TransferStatus.offered,
+      files: <TransferFileProgress>[
+        for (final f in offeredFiles)
+          TransferFileProgress(
+            fileId: f.fileId,
+            fileName: f.fileName,
+            totalBytes: f.size,
+            transferredBytes: 0,
+          ),
+      ],
+      totalBytes: offeredFiles.fold(0, (sum, f) => sum + f.size),
+      transferredBytes: 0,
+      createdAt: DateTime.now(),
+    );
+
+    _transfers[transferId] = record;
+    _publishTransfers();
+
+    await device.serverSession.session.send(offer);
+    return transferId;
+  }
+
+  /// Sends a plain text snippet or URL as a generated file transfer.
+  Future<String> sendText(
+    DeviceId targetPeerId,
+    String text, {
+    String? fileName,
+  }) async {
+    final device = _devices[targetPeerId.value];
+    if (device == null || !device.serverSession.session.isEstablished) {
+      throw StateError('Cannot send text: device not connected');
+    }
+
+    final bytes = Uint8List.fromList(utf8.encode(text));
+    final rawName = fileName != null && fileName.trim().isNotEmpty
+        ? fileName.trim()
+        : generateTextSnippetFileName();
+    final cleanName = sanitiseFileName(rawName);
+
+    final transferId =
+        't-${DateTime.now().microsecondsSinceEpoch}-${bytes.length}';
+    const fileId = 'text-1';
+
+    final sha256 = await Primitives.sha256(bytes);
+    final offeredFile = OfferedFile(
+      fileId: fileId,
+      fileName: cleanName,
+      size: bytes.length,
+      fileType: 'text/plain',
+      sha256: sha256,
+      modifiedAt: DateTime.now().toUtc(),
+    );
+
+    final offer = FileOffer(
+      transferId: transferId,
+      files: <OfferedFile>[offeredFile],
+    );
+
+    final sources = <String, OutgoingFile>{
+      fileId: MemoryOutgoingFile(bytes),
+    };
+
+    _outgoingSources[transferId] = sources;
+    _outgoingOffers[transferId] = offer;
+    _outgoingPeerIds[transferId] = targetPeerId;
+    _speedTrackers[transferId] = TransferSpeedTracker();
+
+    final record = TransferRecord(
+      transferId: transferId,
+      peerId: targetPeerId,
+      peerName: device.name,
+      direction: TransferDirection.outgoing,
+      status: TransferStatus.offered,
+      files: <TransferFileProgress>[
+        TransferFileProgress(
+          fileId: fileId,
+          fileName: cleanName,
+          totalBytes: bytes.length,
+          transferredBytes: 0,
+        ),
+      ],
+      totalBytes: bytes.length,
+      transferredBytes: 0,
+      createdAt: DateTime.now(),
+    );
+
+    _transfers[transferId] = record;
+    _publishTransfers();
+
+    await device.serverSession.session.send(offer);
+    return transferId;
+  }
+
+  /// Cancels an in-progress transfer and sends FileAbort.
+  Future<void> cancelTransfer(String transferId) async {
+    final record = _transfers[transferId];
+    if (record != null) {
+      final device = _devices[record.peerId.value];
+      if (device != null && device.serverSession.session.isEstablished) {
+        try {
+          await device.serverSession.session.send(
+            FileAbort(
+              transferId: transferId,
+              reason: FileAbortReason.cancelled,
+            ),
+          );
+        } catch (_) {}
+      }
+
+      final completer = _activeSendCompleters.remove(transferId);
+      if (completer != null && !completer.isCompleted) {
+        completer.completeError(StateError('Transfer cancelled by user'));
+      }
+
+      _transfers[transferId] = record.copyWith(
+        status: TransferStatus.cancelled,
+        completedAt: DateTime.now(),
+      );
+      _publishTransfers();
+    }
+  }
+
+  /// Retries a failed or cancelled transfer.
+  Future<void> retryTransfer(String transferId) async {
+    final offer = _outgoingOffers[transferId];
+    final sources = _outgoingSources[transferId];
+    final peerId = _outgoingPeerIds[transferId];
+    final record = _transfers[transferId];
+
+    if (offer == null || sources == null || peerId == null || record == null) {
+      throw StateError('Cannot retry transfer: original offer not found');
+    }
+
+    final device = _devices[peerId.value];
+    if (device == null || !device.serverSession.session.isEstablished) {
+      throw StateError('Cannot retry: device not connected');
+    }
+
+    _transfers[transferId] = record.copyWith(
+      status: TransferStatus.offered,
+      errorMessage: null,
+    );
+    _publishTransfers();
+
+    await device.serverSession.session.send(offer);
   }
 
   Future<void> _renamePeer(DeviceId peerId, String newName) async {
@@ -1115,6 +1681,8 @@ final class DesktopService {
     _devices.clear();
     await _deviceChanges.close();
     await _pairingRequests.close();
+    await _incomingTransferRequests.close();
+    await _transferChanges.close();
 
     _log.info('desktop service stopped');
   }

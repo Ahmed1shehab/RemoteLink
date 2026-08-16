@@ -10,6 +10,7 @@ import '../input/touchpad_screen.dart';
 import '../keyboard/keyboard_screen.dart';
 import '../media/media_screen.dart';
 import '../settings/settings_screen.dart';
+import '../transfer/transfer_screen.dart';
 
 /// The connected experience: touchpad, keyboard, and clipboard.
 ///
@@ -53,7 +54,8 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
             0 => 'Touchpad',
             1 => 'Keyboard',
             2 => 'Media',
-            _ => 'Clipboard',
+            3 => 'Clipboard',
+            _ => 'Send',
           },
         ),
         actions: <Widget>[
@@ -93,6 +95,7 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                 KeyboardScreen(),
                 MediaScreen(),
                 ClipboardView(),
+                TransferScreen(),
               ],
             ),
           ),
@@ -121,6 +124,11 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
             icon: Icon(Icons.content_paste_outlined),
             selectedIcon: Icon(Icons.content_paste),
             label: 'Clipboard',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.send_outlined),
+            selectedIcon: Icon(Icons.send),
+            label: 'Send',
           ),
         ],
       ),

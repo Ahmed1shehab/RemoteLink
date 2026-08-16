@@ -11,6 +11,7 @@ import 'package:rl_transport/rl_transport.dart';
 
 import '../domain/desktop_service.dart';
 import '../domain/file_transfer_store.dart';
+import '../domain/transfer_model.dart';
 
 /// Riverpod, not Bloc.
 ///
@@ -165,6 +166,25 @@ final pairingRequestProvider = StreamProvider<PendingPairing>((ref) {
   final service = ref.watch(desktopServiceProvider).valueOrNull;
   if (service == null) return const Stream<PendingPairing>.empty();
   return service.pairingRequests;
+});
+
+/// Incoming file transfer requests awaiting explicit user approval.
+final incomingTransferRequestProvider =
+    StreamProvider<PendingIncomingTransfer>((ref) {
+  final service = ref.watch(desktopServiceProvider).valueOrNull;
+  if (service == null) return const Stream<PendingIncomingTransfer>.empty();
+  return service.incomingTransferRequests;
+});
+
+/// Active and recent transfers on desktop.
+final transfersProvider = StreamProvider<List<TransferRecord>>((ref) async* {
+  final service = ref.watch(desktopServiceProvider).valueOrNull;
+  if (service == null) {
+    yield const <TransferRecord>[];
+    return;
+  }
+  yield service.transfers;
+  yield* service.transferChanges;
 });
 
 /// Every paired device, connected or not.
