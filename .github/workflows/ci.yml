@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  # A newer push to the same branch makes the older run irrelevant.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: "3.44.8"
+
+jobs:
+  test:
+    name: Analyze and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Do not cancel the other platform on first failure. A Windows-only
+      # regression in the FFI backends is exactly the thing this matrix exists
+      # to catch, and losing the macOS result with it wastes the run.
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # One resolution for every package: this is a native pub workspace, so
+      # there is no per-package pub get and no bootstrap step.
+      - name: Resolve the workspace
+        run: flutter pub get
+
+      - name: Analyze
+        run: dart analyze --fatal-warnings .
+
+      # Listed explicitly rather than globbed. A package whose tests silently
+      # stop running is worse than one that has none, and a glob hides that.
+      - name: Test pure-Dart packages
+        run: |
+          for pkg in rl_core rl_protocol rl_crypto rl_transport rl_native; do
+            echo "--- packages/$pkg"
+            (cd "packages/$pkg" && dart test --reporter expanded)
+          done
+        shell: bash
+
+      - name: Test the latency harness
+        run: dart test --reporter expanded
+        working-directory: tool/latency_harness
+
+      - name: Test the desktop app
+        run: flutter test
+        working-directory: apps/desktop
+
+      - name: Test the mobile app
+        run: flutter test
+        working-directory: apps/mobile
+
+  format:
+    name: Format
+    runs-on: macos-latest
+    # NOT a required check yet, and deliberately so.
+    #
+    # The repository was formatted under a pre-3.7 Dart, and the tall-style
+    # formatter that shipped in 3.7 rewrites roughly 34 of its files. Making
+    # this blocking today would fail every pull request for a reason unrelated
+    # to its contents.
+    #
+    # The reformat is a single mechanical commit and wants to land when no
+    # branches are outstanding, or every one of them conflicts. Once it does,
+    # delete `continue-on-error` and fold this step back into the test job.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: dart format --output none --set-exit-if-changed .
+
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: macos
+          - os: windows-latest
+            target: windows
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # The platform runner directories are `flutter create` output and are not
+      # committed, so this script is the documented first step for any fresh
+      # checkout. Nothing else exercises it — if it breaks, the README's opening
+      # instructions break with it and no test would notice.
+      - name: Generate the platform runners
+        run: ./tool/bootstrap_platforms.sh
+        shell: bash
+
+      - name: Build the desktop app
+        run: flutter build ${{ matrix.target }} --debug
+        working-directory: apps/desktop
