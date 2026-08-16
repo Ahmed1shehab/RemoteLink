@@ -146,6 +146,50 @@ void main() {
     expect(find.text('This computer removed your access'), findsOneWidget);
     expect(find.text('Pair again'), findsOneWidget);
   });
+
+  testWidgets('allows renaming a paired computer', (tester) async {
+    final desktopIdentity = await DeviceIdentity.generate();
+    final mobileTrust = InMemoryTrustStore();
+    await mobileTrust.upsert(
+      TrustedPeer(
+        id: desktopIdentity.id,
+        publicKey: desktopIdentity.publicKey,
+        name: 'Original Mac',
+        platform: PlatformKind.macos,
+        pairedAt: DateTime.now(),
+        permissionTier: 2,
+        lastAddress: '192.168.1.100',
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: mobileDeviceListOverrides(
+          discoveryOperational: true,
+          trustStore: mobileTrust,
+        ),
+        child: const MaterialApp(home: DeviceListScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Original Mac'), findsOneWidget);
+    final editButton = find.byIcon(Icons.edit_outlined);
+    expect(editButton, findsOneWidget);
+
+    await tester.tap(editButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rename computer'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'Renamed MacBook Pro');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final updatedPeer = await mobileTrust.findById(desktopIdentity.id);
+    expect(updatedPeer?.name, 'Renamed MacBook Pro');
+  });
 }
 
 Future<void> _pumpDeviceList(

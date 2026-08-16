@@ -90,6 +90,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         device: device,
                         onRevoke: () => _revoke(device.id),
                         onTierChanged: (tier) => _setTier(device.id, tier),
+                        onRename: () => _renameDevice(device.id, device.name),
                       ),
                   ],
                 ),
@@ -111,6 +112,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Future<void> _setTier(DeviceId deviceId, PermissionTier tier) async {
     final service = await ref.read(desktopServiceProvider.future);
     await service.setTier(deviceId, tier);
+  }
+
+  Future<void> _renameDevice(DeviceId deviceId, String currentName) async {
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (context) => _RenameDeviceDialog(initialName: currentName),
+    );
+    if (newName == null || !mounted) return;
+
+    final service = await ref.read(desktopServiceProvider.future);
+    final applied = await service.renameDevice(deviceId, newName);
+    if (!applied && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Invalid device name. Names must be 1–64 characters with no control characters.',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _showPairingDialog(PendingPairing request) async {
@@ -242,11 +263,13 @@ class _DeviceTile extends StatelessWidget {
     required this.device,
     required this.onRevoke,
     required this.onTierChanged,
+    required this.onRename,
   });
 
   final ConnectedDevice device;
   final VoidCallback onRevoke;
   final ValueChanged<PermissionTier> onTierChanged;
+  final VoidCallback onRename;
 
   @override
   Widget build(BuildContext context) {
@@ -266,6 +289,11 @@ class _DeviceTile extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Rename this device',
+              onPressed: onRename,
+            ),
             DropdownButton<PermissionTier>(
               value: device.tier,
               underline: const SizedBox.shrink(),
@@ -295,6 +323,71 @@ class _DeviceTile extends StatelessWidget {
         PermissionTier.extended => 'Control + files',
         PermissionTier.admin => 'Full access',
       };
+}
+
+class _RenameDeviceDialog extends StatefulWidget {
+  const _RenameDeviceDialog({required this.initialName});
+
+  final String initialName;
+
+  @override
+  State<_RenameDeviceDialog> createState() => _RenameDeviceDialogState();
+}
+
+class _RenameDeviceDialogState extends State<_RenameDeviceDialog> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initialName);
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final raw = _controller.text;
+    final sanitised = sanitiseDeviceName(raw);
+    if (sanitised == null) {
+      setState(() {
+        _error =
+            'Invalid name: 1–64 characters, no control codes or line breaks.';
+      });
+      return;
+    }
+    Navigator.of(context).pop(sanitised);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Rename device'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'Device name',
+                errorText: _error,
+                border: const OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: _submit,
+            child: const Text('Save'),
+          ),
+        ],
+      );
 }
 
 class _PairingDialog extends StatelessWidget {

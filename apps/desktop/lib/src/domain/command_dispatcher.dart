@@ -26,6 +26,7 @@ final class CommandDispatcher {
     required this.onClipboardUpdate,
     required this.onMediaCommand,
     required this.onVolumeCommand,
+    required this.onDeviceRename,
   }) : _input = input;
 
   final InputBackend _input;
@@ -41,6 +42,7 @@ final class CommandDispatcher {
   final void Function(ClipboardUpdate update) onClipboardUpdate;
   final void Function(MediaCommand command) onMediaCommand;
   final void Function(VolumeCommand command) onVolumeCommand;
+  final void Function(DeviceRename command) onDeviceRename;
 
   final Log _log = Log.scoped('desktop.dispatcher');
 
@@ -130,6 +132,17 @@ final class CommandDispatcher {
 
       case RunCommand():
         onRunCommand(message);
+
+      case DeviceRename():
+        final sanitised = sanitiseDeviceName(message.name);
+        if (sanitised == null) {
+          _log.warn(
+            'refusing invalid device rename',
+            fields: <String, Object?>{'raw': message.name},
+          );
+          return false;
+        }
+        onDeviceRename(DeviceRename(sanitised));
 
       default:
         _unsupported++;
