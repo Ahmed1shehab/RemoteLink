@@ -17,11 +17,24 @@ import 'package:rl_protocol/rl_protocol.dart';
 /// actually moved.
 const Duration kClipboardPollInterval = Duration(milliseconds: 50);
 
+/// Maximum number of recent self-written content hashes retained for echo suppression.
+const int kMaxSelfWriteHashes = 3;
+
+/// Time after which a self-written content hash expires and is no longer treated as our own write.
+const Duration kSelfWriteExpiry = Duration(seconds: 2);
+
 /// Largest text payload mirrored automatically.
 ///
 /// Someone copying a 50 MB log file should not have it silently pushed to their
 /// phone over Wi-Fi. Past this size the sync is offered rather than performed.
 const int kMaxAutoSyncTextBytes = 256 * 1024;
+
+final class _SelfWrite {
+  _SelfWrite({required this.hash, required this.recordedAtMicros});
+
+  final Uint8List hash;
+  final int recordedAtMicros;
+}
 
 /// Mirrors the clipboard between this computer and connected phones.
 ///
@@ -30,22 +43,19 @@ const int kMaxAutoSyncTextBytes = 256 * 1024;
 /// device: no "send clipboard" button, no confirmation, no visible sync step.
 /// Everything below exists to make that safe and stable.
 ///
-/// ## The echo loop, and why hashing alone does not solve it
+/// ## The echo loop, and why content-hash origin tracking solves it
 ///
 /// Naive bidirectional mirroring oscillates forever. The desktop pushes to the
 /// phone, the phone's watcher sees a change and pushes back, and the two bounce
 /// the same text between them until something gives.
 ///
-/// Suppressing updates whose content hash matches what is already held breaks
-/// the loop, but it also breaks a legitimate case: a user who copies the same
-/// text twice — very common when re-copying a password or a command — would
-/// find the second copy silently ignored.
-///
-/// So origin tracking is used instead. When an update is applied locally, the
-/// origin device and sequence are recorded, and the very next change the
-/// watcher observes is attributed to that write and not re-broadcast. Identical
-/// content copied afresh by a human still syncs, because it arrives with no
-/// pending attribution.
+/// To break the loop without suppressing deliberate duplicate copies, we record
+/// the content hash of writes we perform ourselves (keeping the last
+/// [kMaxSelfWriteHashes] hashes, expiring after [kSelfWriteExpiry]). When the
+/// watcher observes an OS clipboard change, it hashes the current content: if it
+/// matches a recorded self-write, it is recognized as our own echo and suppressed.
+/// Genuine user copies (including identical text copied afresh) produce hashes not
+/// held in the self-write buffer, and are broadcast normally.
 ///
 /// ## Concurrent changes
 ///
@@ -57,11 +67,14 @@ final class ClipboardSyncService {
   ClipboardSyncService({
     required ClipboardBackend clipboard,
     required this.localDeviceId,
+    Clock? clock,
     this.pollInterval = kClipboardPollInterval,
-  }) : _clipboard = clipboard;
+  })  : _clipboard = clipboard,
+        _clock = clock ?? SystemClock();
 
   final ClipboardBackend _clipboard;
   final DeviceId localDeviceId;
+  final Clock _clock;
   final Duration pollInterval;
 
   final Log _log = Log.scoped('desktop.clipboard');
@@ -74,11 +87,8 @@ final class ClipboardSyncService {
   /// Hash of the content currently held, used to skip no-op updates.
   Uint8List _currentHash = Uint8List(0);
 
-  /// Set immediately before writing the clipboard ourselves.
-  ///
-  /// The watcher consumes it on the next tick and suppresses that one change.
-  /// This is the origin tracking that makes re-copying identical text work.
-  bool _expectingSelfWrite = false;
+  /// Recent self-written hashes for echo suppression.
+  final List<_SelfWrite> _selfWrites = <_SelfWrite>[];
 
   int _localSequence = 0;
   bool _enabled = true;
@@ -115,18 +125,45 @@ final class ClipboardSyncService {
     _log.info('watching the clipboard');
   }
 
-  void _poll() {
+  void _recordSelfWrite(Uint8List hash) {
+    _pruneExpiredSelfWrites();
+    if (_selfWrites.length >= kMaxSelfWriteHashes) {
+      _selfWrites.removeAt(0);
+    }
+    _selfWrites.add(
+      _SelfWrite(
+        hash: hash,
+        recordedAtMicros: _clock.monotonicMicros(),
+      ),
+    );
+  }
+
+  void _pruneExpiredSelfWrites() {
+    final now = _clock.monotonicMicros();
+    final expiryMicros = kSelfWriteExpiry.inMicroseconds;
+    _selfWrites.removeWhere(
+      (entry) => (now - entry.recordedAtMicros) > expiryMicros,
+    );
+  }
+
+  bool _isSelfWrite(Uint8List hash) {
+    _pruneExpiredSelfWrites();
+    final index = _selfWrites.indexWhere(
+      (entry) => Primitives.constantTimeEquals(entry.hash, hash),
+    );
+    if (index != -1) {
+      _selfWrites.removeAt(index);
+      return true;
+    }
+    return false;
+  }
+
+  Future<void> _poll() async {
     if (!_enabled) return;
 
     final count = _clipboard.changeCount;
     if (count == _lastChangeCount) return;
     _lastChangeCount = count;
-
-    if (_expectingSelfWrite) {
-      _expectingSelfWrite = false;
-      _log.debug(() => 'suppressed the echo of our own clipboard write');
-      return;
-    }
 
     // A password manager marking its entry confidential is an explicit request
     // not to have it copied elsewhere. Honouring it matters: mirroring would
@@ -149,12 +186,12 @@ final class ClipboardSyncService {
       return;
     }
 
-    unawaited(_broadcast(text, bytes));
-  }
-
-  Future<void> _broadcast(String text, List<int> bytes) async {
     final hash = await _hash(bytes);
-    if (Primitives.constantTimeEquals(hash, _currentHash)) return;
+    if (_isSelfWrite(hash)) {
+      _log.debug(() => 'suppressed the echo of our own clipboard write');
+      return;
+    }
+
     _currentHash = hash;
 
     final update = ClipboardUpdate(
@@ -202,13 +239,9 @@ final class ClipboardSyncService {
       return false;
     }
 
-    _expectingSelfWrite = true;
+    _recordSelfWrite(update.contentHash);
     _clipboard.writeText(text);
     _currentHash = update.contentHash;
-
-    // Re-read the counter immediately so a change that landed between the last
-    // poll and this write is not later mistaken for our own.
-    _lastChangeCount = _clipboard.changeCount;
 
     _log.debug(
       () => 'applied a clipboard update from ${update.originDeviceId}',

@@ -135,6 +135,7 @@ final class DesktopService {
   late final ClipboardSyncService clipboard = ClipboardSyncService(
     clipboard: _clipboardBackend,
     localDeviceId: identity.id,
+    clock: _clock,
   );
 
   late final CommandDispatcher _dispatcher = CommandDispatcher(
