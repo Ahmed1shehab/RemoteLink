@@ -18,9 +18,12 @@ import 'src/input_backend.dart';
 import 'src/macos/macos_clipboard.dart';
 import 'src/macos/macos_input.dart';
 import 'src/macos/macos_media.dart';
+import 'src/macos/macos_system_info.dart';
 import 'src/media_backend.dart';
+import 'src/system_info_backend.dart';
 import 'src/windows/win32_clipboard.dart';
 import 'src/windows/win32_input.dart';
+import 'src/windows/win32_system_info.dart';
 
 export 'src/input_backend.dart';
 export 'src/keymap.dart';
@@ -28,9 +31,12 @@ export 'src/macos/coreaudio_ffi.dart';
 export 'src/macos/macos_clipboard.dart';
 export 'src/macos/macos_input.dart';
 export 'src/macos/macos_media.dart';
+export 'src/macos/macos_system_info.dart';
 export 'src/media_backend.dart';
+export 'src/system_info_backend.dart';
 export 'src/windows/win32_clipboard.dart';
 export 'src/windows/win32_input.dart';
+export 'src/windows/win32_system_info.dart';
 
 /// Chooses the backend for the running platform.
 ///
@@ -54,7 +60,7 @@ abstract final class NativeBackends {
       // Thrown by DynamicLibrary.open when a system library is missing — an
       // unusual but real situation on stripped or sandboxed systems.
       log.error('could not load native input libraries', error: e);
-      return UnsupportedInputBackend(
+      return const UnsupportedInputBackend(
         'native input libraries could not be loaded',
       );
     }
@@ -88,6 +94,23 @@ abstract final class NativeBackends {
     } on ArgumentError catch (e) {
       log.error('could not load native media libraries', error: e);
       return const UnsupportedMediaBackend();
+    }
+  }
+
+  /// Builds the system info backend, or an unsupported stub.
+  static SystemInfoBackend createSystemInfo() {
+    final log = Log.scoped('native.factory');
+    try {
+      if (Platform.isWindows) return Win32SystemInfoBackend();
+      if (Platform.isMacOS) return MacosSystemInfoBackend();
+      return const UnsupportedSystemInfoBackend(
+        'system info is not implemented on this platform',
+      );
+    } on ArgumentError catch (e) {
+      log.error('could not load native system info libraries', error: e);
+      return const UnsupportedSystemInfoBackend(
+        'native system info libraries could not be loaded',
+      );
     }
   }
 

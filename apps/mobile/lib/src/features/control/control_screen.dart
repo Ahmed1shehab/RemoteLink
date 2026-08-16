@@ -72,13 +72,20 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
           child: _ConnectionBar(state: state),
         ),
       ),
-      body: IndexedStack(
-        index: _index,
-        children: const <Widget>[
-          TouchpadSurfaceView(),
-          KeyboardScreen(),
-          MediaScreen(),
-          ClipboardView(),
+      body: Column(
+        children: <Widget>[
+          const SystemStatusStrip(),
+          Expanded(
+            child: IndexedStack(
+              index: _index,
+              children: const <Widget>[
+                TouchpadSurfaceView(),
+                KeyboardScreen(),
+                MediaScreen(),
+                ClipboardView(),
+              ],
+            ),
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -224,6 +231,139 @@ class _ConnectionBar extends StatelessWidget {
               color: color,
             )
           : ColoredBox(color: color, child: const SizedBox.expand()),
+    );
+  }
+}
+
+/// Host status strip: battery with charging indicator, CPU, RAM, uptime.
+///
+/// Degrades gracefully: returns [SizedBox.shrink] when disconnected, when no
+/// telemetry has arrived, or when the host reports nothing (e.g. an unsupported
+/// platform), avoiding an empty row of dashes or zeros.
+class SystemStatusStrip extends ConsumerWidget {
+  const SystemStatusStrip({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(clientStateProvider).valueOrNull;
+    if (state != ClientState.connected) {
+      return const SizedBox.shrink();
+    }
+
+    final status = ref.watch(systemStatusProvider).valueOrNull;
+    if (status == null) {
+      return const SizedBox.shrink();
+    }
+
+    final hasBattery = status.batteryPercent != null;
+    final hasCpu = status.cpuPercent != null;
+    final hasMemory = status.memoryPercent != null;
+    final hasUptime = status.uptimeSeconds > 0;
+
+    if (!hasBattery && !hasCpu && !hasMemory && !hasUptime) {
+      return const SizedBox.shrink();
+    }
+
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isCharging = status.isCharging ?? false;
+
+    return Material(
+      color: colorScheme.surfaceContainerLow,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+              width: 0.5,
+            ),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: <Widget>[
+            if (hasBattery)
+              _StatusChip(
+                icon: isCharging
+                    ? Icons.battery_charging_full
+                    : Icons.battery_full,
+                iconColor: isCharging
+                    ? colorScheme.primary
+                    : colorScheme.onSurfaceVariant,
+                label: '${status.batteryPercent}%',
+              ),
+            if (hasCpu)
+              _StatusChip(
+                icon: Icons.memory,
+                iconColor: colorScheme.onSurfaceVariant,
+                label: 'CPU ${status.cpuPercent!.toStringAsFixed(0)}%',
+              ),
+            if (hasMemory)
+              _StatusChip(
+                icon: Icons.pie_chart_outline,
+                iconColor: colorScheme.onSurfaceVariant,
+                label: 'RAM ${status.memoryPercent!.toStringAsFixed(0)}%',
+              ),
+            if (hasUptime)
+              _StatusChip(
+                icon: Icons.schedule,
+                iconColor: colorScheme.onSurfaceVariant,
+                label: _formatUptime(status.uptimeSeconds),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _formatUptime(int seconds) {
+    if (seconds <= 0) return '0s';
+    final days = seconds ~/ 86400;
+    final hours = (seconds % 86400) ~/ 3600;
+    final minutes = (seconds % 3600) ~/ 60;
+    final secs = seconds % 60;
+
+    if (days > 0) {
+      return hours > 0 ? '${days}d ${hours}h' : '${days}d';
+    }
+    if (hours > 0) {
+      return minutes > 0 ? '${hours}h ${minutes}m' : '${hours}h';
+    }
+    if (minutes > 0) {
+      return '${minutes}m';
+    }
+    return '${secs}s';
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Icon(icon, size: 14, color: iconColor),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: textTheme.labelSmall?.copyWith(
+            letterSpacing: 0.1,
+          ),
+        ),
+      ],
     );
   }
 }

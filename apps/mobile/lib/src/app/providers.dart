@@ -316,8 +316,7 @@ Future<void> _rememberPeerDetails(Ref ref, DeviceInfo info) async {
   final peer = await store.findById(info.id);
   if (peer == null) return;
 
-  final needsUpdate =
-      peer.platform != info.platform || peer.name != info.name;
+  final needsUpdate = peer.platform != info.platform || peer.name != info.name;
   if (!needsUpdate) return;
 
   // `TrustedPeer.copyWith` cannot change the platform — it is derived from the
@@ -361,4 +360,13 @@ final connectedPlatformProvider = Provider<PlatformKind>((ref) {
 final desktopMessagesProvider = StreamProvider<Message>((ref) async* {
   final client = await ref.watch(clientProvider.future);
   yield* client.messages;
+});
+
+/// Host telemetry (battery, load, memory, uptime), pushed from the desktop.
+final systemStatusProvider = StreamProvider<SystemStatus?>((ref) async* {
+  final client = await ref.watch(clientProvider.future);
+  yield null;
+  await for (final message in client.messages) {
+    if (message is SystemStatus) yield message;
+  }
 });

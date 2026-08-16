@@ -229,5 +229,19 @@ void main() {
       expect(backend.readText(), isNull);
       expect(() => backend.writeText('x'), returnsNormally);
     });
+
+    test('system info backend reports unavailable and returns empty metrics',
+        () async {
+      const backend = UnsupportedSystemInfoBackend('no driver');
+      expect(backend.isAvailable, isFalse);
+      expect(backend.unavailableReason, 'no driver');
+      final metrics = await backend.metrics();
+      expect(metrics.batteryPercent, isNull);
+      expect(metrics.isCharging, isNull);
+      expect(metrics.cpuPercent, isNull);
+      expect(metrics.memoryPercent, isNull);
+      expect(metrics.uptimeSeconds, isNull);
+      expect(() => backend.dispose(), returnsNormally);
+    });
   });
 }
