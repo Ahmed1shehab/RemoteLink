@@ -1,0 +1,427 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:remotelink_mobile/src/app/providers.dart';
+import 'package:remotelink_mobile/src/features/control/control_screen.dart';
+import 'package:remotelink_mobile/src/features/devices/device_list_screen.dart';
+import 'package:remotelink_mobile/src/features/input/pointer_controller.dart';
+import 'package:remotelink_mobile/src/features/settings/settings_screen.dart';
+import 'package:rl_core/rl_core.dart';
+import 'package:rl_crypto/rl_crypto.dart';
+import 'package:rl_protocol/rl_protocol.dart';
+import 'package:rl_transport/rl_transport.dart';
+
+import 'support/fakes.dart';
+
+void main() {
+  group('SettingsScreen', () {
+    testWidgets('renders every section', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final identity = await DeviceIdentity.generate();
+      final trustStore = InMemoryTrustStore();
+      await trustStore.upsert(
+        TrustedPeer(
+          id: const DeviceId('0123456789ABCDEFGHJKMNPQRS'),
+          publicKey: Uint8List(32),
+          name: 'Living Room PC',
+          platform: PlatformKind.windows,
+          pairedAt: DateTime.now(),
+          permissionTier: 2,
+          lastAddress: '192.168.1.50',
+        ),
+      );
+
+      final logSink = MemoryLogSink();
+      logSink.write(
+        LogRecord(
+          level: LogLevel.info,
+          scope: 'test.scope',
+          message: 'Test log entry',
+          time: DateTime.now(),
+        ),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: mobileSettingsOverrides(
+            identity: identity,
+            trustStore: trustStore,
+            deviceName: 'My Test Phone',
+            memoryLogSink: logSink,
+          ),
+          child: const MaterialApp(home: SettingsScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      // Section 1: THIS PHONE
+      expect(find.text('This Phone'), findsOneWidget);
+      expect(find.text('My Test Phone'), findsOneWidget);
+      expect(find.text(identity.id.value), findsOneWidget);
+      expect(find.text('Public-key fingerprint'), findsOneWidget);
+
+      // Section 2: PAIRED COMPUTERS
+      expect(find.text('Paired Computers'), findsOneWidget);
+      expect(find.text('Living Room PC'), findsOneWidget);
+      expect(find.text('Last seen: 192.168.1.50'), findsOneWidget);
+
+      // Section 3: TOUCHPAD
+      expect(find.text('Touchpad'), findsOneWidget);
+      expect(find.text('Pointer sensitivity'), findsOneWidget);
+      expect(find.text('Natural scrolling'), findsOneWidget);
+      expect(find.text('Tap to click'), findsOneWidget);
+
+      // Section 4: CLIPBOARD
+      expect(find.text('Clipboard'), findsOneWidget);
+      expect(find.text('Sync from computer'), findsOneWidget);
+      expect(find.text('Sync to computer'), findsOneWidget);
+      expect(
+        find.textContaining('Why is phone-to-computer manual on iOS?'),
+        findsOneWidget,
+      );
+
+      // Section 5: DIAGNOSTICS
+      expect(find.text('Diagnostics'), findsOneWidget);
+      expect(find.text('Connection state'), findsOneWidget);
+      expect(find.text('Round-trip time'), findsOneWidget);
+      expect(find.text('Discovery route'), findsOneWidget);
+      expect(find.text('Export Logs'), findsOneWidget);
+
+      // Section 6: ABOUT
+      expect(find.text('About'), findsOneWidget);
+      expect(find.text('RemoteLink Mobile'), findsOneWidget);
+      expect(find.text('Version 0.1.0'), findsOneWidget);
+      expect(find.text('Licenses'), findsOneWidget);
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'an invalid rename is rejected and leaves the stored name unchanged',
+        (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final storage = InMemoryIdentityStore();
+      await storage.write('remotelink.device.name', 'Initial Phone Name');
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: mobileSettingsOverrides(
+            identityStore: storage,
+            deviceName: 'Initial Phone Name',
+          ),
+          child: const MaterialApp(home: SettingsScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Initial Phone Name'), findsOneWidget);
+
+      // Tap the rename button
+      final renameButton = find.byTooltip('Rename this phone');
+      expect(renameButton, findsOneWidget);
+      await tester.tap(renameButton);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Rename this phone'), findsOneWidget);
+
+      // Enter an invalid name (e.g. whitespace only or > 64 chars)
+      await tester.enterText(find.byType(TextField), '   ');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      // Error message is displayed and dialog stays open
+      expect(
+        find.text(
+          'Invalid name: 1–64 characters, no control codes or line breaks.',
+        ),
+        findsOneWidget,
+      );
+
+      // Cancel the dialog
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      // Stored name is unchanged
+      expect(
+          await storage.read('remotelink.device.name'), 'Initial Phone Name');
+      expect(find.text('Initial Phone Name'), findsOneWidget);
+    });
+
+    testWidgets('a valid rename updates the stored name and UI',
+        (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final storage = InMemoryIdentityStore();
+      await storage.write('remotelink.device.name', 'Old Name');
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: mobileSettingsOverrides(
+            identityStore: storage,
+            deviceName: 'Old Name',
+          ),
+          child: const MaterialApp(home: SettingsScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final renameButton = find.byTooltip('Rename this phone');
+      await tester.tap(renameButton);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'Pixel 9 Pro');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(await storage.read('remotelink.device.name'), 'Pixel 9 Pro');
+      expect(find.text('Pixel 9 Pro'), findsOneWidget);
+    });
+
+    testWidgets('"forget" requires confirmation and only then removes the peer',
+        (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final storage = InMemoryIdentityStore();
+      final trustStore = InMemoryTrustStore();
+      const peerId = DeviceId('0123456789ABCDEFGHJKMNPQRS');
+      final peer = TrustedPeer(
+        id: peerId,
+        publicKey: Uint8List(32),
+        name: 'Work iMac',
+        platform: PlatformKind.macos,
+        pairedAt: DateTime.now(),
+        permissionTier: 2,
+        lastAddress: '192.168.1.120',
+      );
+      await trustStore.upsert(peer);
+      await persistTrustStore(trustStore, storage);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: mobileSettingsOverrides(
+            identityStore: storage,
+            trustStore: trustStore,
+          ),
+          child: const MaterialApp(home: SettingsScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Work iMac'), findsOneWidget);
+
+      // Tap forget icon button
+      final forgetButton = find.byTooltip('Forget Work iMac');
+      expect(forgetButton, findsOneWidget);
+      await tester.tap(forgetButton);
+      await tester.pumpAndSettle();
+
+      // Confirmation dialog appears
+      expect(find.text('Forget Work iMac?'), findsOneWidget);
+      expect(
+        find.textContaining(
+            'This will remove this computer from your trusted list'),
+        findsOneWidget,
+      );
+
+      // 1. Cancel does NOT remove the peer
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(await trustStore.findById(peerId), isNotNull);
+      expect(find.text('Work iMac'), findsOneWidget);
+
+      // 2. Tap forget again and confirm
+      await tester.tap(forgetButton);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Forget'));
+      await tester.pumpAndSettle();
+
+      // Peer is removed from trust store
+      expect(await trustStore.findById(peerId), isNull);
+      expect(find.text('Work iMac'), findsNothing);
+      expect(
+        find.text(
+            'No paired computers yet. Pair with a computer on your Wi-Fi network to start.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a touchpad setting round-trips through storage',
+        (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final storage = InMemoryIdentityStore();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: mobileSettingsOverrides(
+            identityStore: storage,
+          ),
+          child: const MaterialApp(home: SettingsScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      // Toggle natural scrolling switch
+      final naturalScrollingFinder = find.widgetWithText(
+        SwitchListTile,
+        'Natural scrolling',
+      );
+      expect(naturalScrollingFinder, findsOneWidget);
+
+      // Initial value is true
+      SwitchListTile tile = tester.widget(naturalScrollingFinder);
+      expect(tile.value, isTrue);
+
+      // Tap switch inside the tile
+      final switchFinder = find.descendant(
+        of: naturalScrollingFinder,
+        matching: find.byType(Switch),
+      );
+      await tester.tap(switchFinder);
+      await tester.pump();
+      await tester.pump();
+
+      tile = tester.widget(naturalScrollingFinder);
+      expect(tile.value, isFalse);
+
+      // Verify written to storage
+      final storedJson = await storage.read('remotelink.settings.pointer');
+      expect(storedJson, isNotNull);
+      final decoded = jsonDecode(storedJson!) as Map<String, dynamic>;
+      expect(decoded['naturalScrolling'], isFalse);
+
+      // Verify that PointerSettings deserialization preserves it
+      final loadedSettings = PointerSettings.fromJson(decoded);
+      expect(loadedSettings.naturalScrolling, isFalse);
+
+      // Verify behavior in PointerController
+      final controller = PointerController(settings: loadedSettings);
+      final scroll = controller.translateScroll(const Offset(0, 40));
+      // With natural scrolling FALSE, direction is -1
+      expect(scroll.linesY, -1);
+    });
+
+    testWidgets('clipboard settings toggle and persist', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final storage = InMemoryIdentityStore();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: mobileSettingsOverrides(
+            identityStore: storage,
+          ),
+          child: const MaterialApp(home: SettingsScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final syncFromDesktopFinder = find.widgetWithText(
+        SwitchListTile,
+        'Sync from computer',
+      );
+      expect(syncFromDesktopFinder, findsOneWidget);
+
+      final switchFinder = find.descendant(
+        of: syncFromDesktopFinder,
+        matching: find.byType(Switch),
+      );
+      await tester.tap(switchFinder);
+      await tester.pump();
+      await tester.pump();
+
+      final storedJson = await storage.read('remotelink.settings.clipboard');
+      expect(storedJson, isNotNull);
+      final decoded = jsonDecode(storedJson!) as Map<String, dynamic>;
+      expect(decoded['syncFromDesktop'], isFalse);
+    });
+
+    testWidgets('reachable from DeviceListScreen', (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: mobileDeviceListOverrides(
+            discoveryOperational: true,
+          ),
+          child: const MaterialApp(home: DeviceListScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final settingsButton = find.byTooltip('Settings');
+      expect(settingsButton, findsOneWidget);
+
+      await tester.tap(settingsButton);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('Settings'), findsOneWidget);
+      expect(find.text('This Phone'), findsOneWidget);
+    });
+
+    testWidgets('reachable from ControlScreen', (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            identityProvider.overrideWith(
+              (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+            ),
+            clientStateProvider.overrideWith(
+              (ref) => Stream<ClientState>.value(ClientState.connected),
+            ),
+            systemStatusProvider.overrideWith(
+              (ref) => const Stream<SystemStatus?>.empty(),
+            ),
+            connectionQualityProvider.overrideWith(
+              (ref) => const Stream<ConnectionQuality>.empty(),
+            ),
+          ],
+          child: const MaterialApp(home: ControlScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final settingsButton = find.byTooltip('Settings');
+      expect(settingsButton, findsOneWidget);
+
+      await tester.tap(settingsButton);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('Settings'), findsOneWidget);
+      expect(find.text('This Phone'), findsOneWidget);
+    });
+  });
+}

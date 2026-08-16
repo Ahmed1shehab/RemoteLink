@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 // For WidgetsBindingObserver and AppLifecycleState. `services.dart` alone gives
@@ -109,6 +108,13 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
 
   /// Writes an update from the computer into the phone's clipboard.
   Future<void> _applyRemote(ClipboardUpdate update) async {
+    final settings = _ref.read(clipboardSettingsProvider);
+    if (!settings.syncFromDesktop) {
+      _log.debug(
+          () => 'ignoring a clipboard update; sync from desktop disabled');
+      return;
+    }
+
     if (update.isSensitive) {
       // The computer marked this confidential — a password manager, typically.
       // Mirroring it would put it in the phone's clipboard history, quietly
@@ -138,6 +144,12 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
   /// foreground call, where the user did not ask for anything and should not be
   /// told about a no-op.
   Future<bool> sendCurrent({bool silent = false}) async {
+    final settings = _ref.read(clipboardSettingsProvider);
+    if (!settings.syncToDesktop) {
+      _log.debug(() => 'skipping clipboard send; sync to desktop disabled');
+      return false;
+    }
+
     final client = _ref.read(clientProvider).valueOrNull;
     if (client == null || !client.isConnected) return false;
 
@@ -192,8 +204,11 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState lifecycle) {
-    if (lifecycle != AppLifecycleState.resumed) return;
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+
+    final settings = _ref.read(clipboardSettingsProvider);
+    if (!settings.syncToDesktop) return;
 
     // The one automatic read. Coming to the foreground is the strongest signal
     // available that the user is about to use what they copied, and it costs a

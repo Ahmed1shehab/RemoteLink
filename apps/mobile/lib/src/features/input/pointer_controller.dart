@@ -42,6 +42,43 @@ final class PointerSettings {
         scrollSensitivity: scrollSensitivity ?? this.scrollSensitivity,
         tapToClick: tapToClick ?? this.tapToClick,
       );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'sensitivity': sensitivity,
+        'acceleration': acceleration,
+        'naturalScrolling': naturalScrolling,
+        'scrollSensitivity': scrollSensitivity,
+        'tapToClick': tapToClick,
+      };
+
+  factory PointerSettings.fromJson(Map<String, dynamic> json) =>
+      PointerSettings(
+        sensitivity: (json['sensitivity'] as num?)?.toDouble() ?? 1.6,
+        acceleration: (json['acceleration'] as num?)?.toDouble() ?? 1.0,
+        naturalScrolling: json['naturalScrolling'] as bool? ?? true,
+        scrollSensitivity:
+            (json['scrollSensitivity'] as num?)?.toDouble() ?? 1.0,
+        tapToClick: json['tapToClick'] as bool? ?? true,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PointerSettings &&
+          other.sensitivity == sensitivity &&
+          other.acceleration == acceleration &&
+          other.naturalScrolling == naturalScrolling &&
+          other.scrollSensitivity == scrollSensitivity &&
+          other.tapToClick == tapToClick;
+
+  @override
+  int get hashCode => Object.hash(
+        sensitivity,
+        acceleration,
+        naturalScrolling,
+        scrollSensitivity,
+        tapToClick,
+      );
 }
 
 /// Converts touch input into protocol-ready integer deltas.
@@ -62,14 +99,9 @@ final class PointerSettings {
 /// that the user made and the cursor did not. Carrying the remainder forward
 /// makes the mapping exact over any window longer than a single frame.
 final class PointerController {
-  PointerController({PointerSettings settings = const PointerSettings()})
-      : _settings = settings;
+  PointerController({this.settings = const PointerSettings()});
 
-  PointerSettings _settings;
-
-  PointerSettings get settings => _settings;
-
-  set settings(PointerSettings value) => _settings = value;
+  PointerSettings settings;
 
   /// Sub-pixel movement carried between frames.
   double _residualX = 0;
@@ -90,8 +122,8 @@ final class PointerController {
 
     final gain = _gainFor(delta, elapsed);
 
-    final scaledX = delta.dx * _settings.sensitivity * gain + _residualX;
-    final scaledY = delta.dy * _settings.sensitivity * gain + _residualY;
+    final scaledX = delta.dx * settings.sensitivity * gain + _residualX;
+    final scaledY = delta.dy * settings.sensitivity * gain + _residualY;
 
     final deltaX = scaledX.truncate();
     final deltaY = scaledY.truncate();
@@ -111,7 +143,7 @@ final class PointerController {
   /// desktop OSes use — matching it makes the remote feel like the machine's
   /// own trackpad rather than a different device.
   double _gainFor(Offset delta, Duration elapsed) {
-    if (_settings.acceleration <= 1.0) return 1;
+    if (settings.acceleration <= 1.0) return 1;
 
     final millis = elapsed.inMicroseconds / 1000.0;
     if (millis <= 0) return 1;
@@ -125,7 +157,7 @@ final class PointerController {
     if (velocity <= threshold) return 1;
 
     const maximumGain = 3.5;
-    final gain = pow(velocity / threshold, _settings.acceleration - 1.0);
+    final gain = pow(velocity / threshold, settings.acceleration - 1.0);
     return gain.toDouble().clamp(1.0, maximumGain);
   }
 
@@ -138,8 +170,8 @@ final class PointerController {
   ({int linesX, int linesY, int pixelsX, int pixelsY}) translateScroll(
     Offset delta,
   ) {
-    final direction = _settings.naturalScrolling ? 1 : -1;
-    final scaled = delta * _settings.scrollSensitivity * direction.toDouble();
+    final direction = settings.naturalScrolling ? 1 : -1;
+    final scaled = delta * settings.scrollSensitivity * direction.toDouble();
 
     // Roughly one notch per 40 logical pixels, matching the distance a physical
     // wheel click scrolls on both platforms.

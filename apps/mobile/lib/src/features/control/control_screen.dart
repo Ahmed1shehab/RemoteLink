@@ -9,6 +9,7 @@ import '../clipboard/clipboard_controller.dart';
 import '../input/touchpad_screen.dart';
 import '../keyboard/keyboard_screen.dart';
 import '../media/media_screen.dart';
+import '../settings/settings_screen.dart';
 
 /// The connected experience: touchpad, keyboard, and clipboard.
 ///
@@ -58,7 +59,7 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
         actions: <Widget>[
           if (quality != null && state == ClientState.connected)
             Padding(
-              padding: const EdgeInsets.only(right: 16),
+              padding: const EdgeInsets.only(right: 8),
               child: Center(
                 child: Text(
                   '${quality.roundTripMillis.toStringAsFixed(0)} ms',
@@ -66,6 +67,15 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                 ),
               ),
             ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const SettingsScreen(),
+              ),
+            ),
+          ),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(2),
