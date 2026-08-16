@@ -178,7 +178,56 @@ the scanned key or fails.
 
 ---
 
-## 7. Reporting
+## 7. Reporting a vulnerability
 
-Security issues should go to a private channel, not the public issue tracker.
-Until one is set up, this section is a placeholder and that is a gap in itself.
+**Do not open a public issue.** This project is a deliberate hole in a machine's
+input boundary; a public report is a working exploit announcement for everyone
+running it who has not yet updated.
+
+### How to report
+
+Use **GitHub's private vulnerability reporting** on this repository — the
+Security tab, "Report a vulnerability". It creates a private thread visible only
+to maintainers and needs no address to be published or maintained, which is why
+it is preferred here over an email alias.
+
+> **Maintainer action still required:** private reporting must be switched on in
+> the repository settings (Settings → Code security → Private vulnerability
+> reporting), and a security contact chosen for the case where a reporter cannot
+> use GitHub. Until both are done, this section describes an intent rather than a
+> working channel — which is a gap, and is recorded as one.
+
+### What to include
+
+- What an attacker gains, concretely. "A paired phone can read the clipboard" and
+  "an unpaired device on the same Wi-Fi can read the clipboard" are different
+  reports with different urgency.
+- The position the attack requires: same LAN, an already-paired device, physical
+  access to an unlocked machine, or a compromised desktop. §2 lists what is
+  already accepted as out of scope, and a report that assumes one of those is
+  not a vulnerability — though a report showing a *stated* mitigation does not
+  actually hold very much is.
+- Reproduction steps, and the commit or version you tested.
+
+### What to expect
+
+- Acknowledgement that the report was received and understood.
+- An assessment against the threat model in §2, stated plainly — including
+  "this is already accepted as out of scope, and here is why", where that is the
+  honest answer.
+- Credit in the release notes if you want it, and none if you do not.
+
+### Scope
+
+In scope: anything in this repository — the protocol, the cryptography, the
+desktop service, the phone app, and the native input and clipboard paths.
+
+Explicitly not vulnerabilities, because they are documented design decisions in
+§2 and §4: a compromised desktop, a malicious app on an unlocked paired phone,
+traffic analysis of packet sizes and timing, and denial of service from an
+attacker already on the same LAN. Argue that one of those *decisions* is wrong
+by all means — that is a design discussion rather than a disclosure.
+
+The ranked gaps in §4 are known and published. A report that one of them exists
+tells us nothing; a report that one is worse than described tells us a great
+deal.
