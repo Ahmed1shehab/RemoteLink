@@ -690,6 +690,10 @@ final class ServerSocketHarness {
   int get port => _server.port;
 
   Future<void> write(List<int> bytes) async {
+    // A reference to the socket the harness owns via _clientFuture, not a new
+    // one. dispose() destroys it; closing here would tear down the connection
+    // between writes.
+    // ignore: close_sinks
     final socket = await _clientFuture;
     socket.add(bytes);
     await socket.flush();

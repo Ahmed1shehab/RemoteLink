@@ -64,6 +64,11 @@ final class FramedConnection {
     Log? log,
   }) async {
     try {
+      // Ownership transfers to the FramedConnection on the next line, which
+      // closes the socket in close(), destroy(), _fail(), and the socket's own
+      // done handler. The lint cannot see an ownership handoff — only that the
+      // sink opened here is not closed here.
+      // ignore: close_sinks
       final socket = await Socket.connect(host, port, timeout: timeout);
       return FramedConnection.wrap(socket, log: log);
     } on SocketException catch (e) {
