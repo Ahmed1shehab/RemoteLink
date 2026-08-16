@@ -6,9 +6,9 @@ Read the first section before you spend time on simulators. The order matters.
 
 ## 0. Run the tests first
 
-The apps have never been compiled. The packages beneath them carry the hard
-parts — the wire format, the handshake, the reconnect logic — and their tests
-need **no simulator, no entitlements, no permissions, and no platform runners**.
+The packages beneath the apps carry the hard parts — the wire format, the
+handshake, the reconnect logic — and their tests need **no simulator, no
+entitlements, no permissions, and no platform runners**.
 
 **Run from the repository root.** The paths below are relative to it, and a
 stray `cd apps/desktop` from an earlier step is the usual reason this reports
@@ -17,8 +17,16 @@ stray `cd apps/desktop` from an earlier step is the usual reason this reports
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 flutter pub get
-dart test packages/rl_protocol packages/rl_crypto packages/rl_native
+dart test packages/rl_core packages/rl_protocol packages/rl_crypto packages/rl_native
 dart test packages/rl_transport      # opens real loopback sockets
+dart test tool/latency_harness
+```
+
+The two Flutter apps have widget tests of their own:
+
+```bash
+cd apps/desktop && flutter test
+cd apps/mobile  && flutter test
 ```
 
 Or avoid the question — `tool/verify.sh` resolves its own location, so it works
@@ -27,6 +35,12 @@ from any directory:
 ```bash
 ./tool/verify.sh
 ```
+
+**`verify.sh` does not currently pass end to end**, for reasons that predate any
+particular change: `dart format` rewrites a large number of files under the
+tall-style formatter that shipped in Dart 3.7, and two `close_sinks` errors
+remain in `rl_transport`. Every test suite above passes. Until that is resolved,
+run the suites directly rather than concluding the tree is broken.
 
 This is the highest-signal, lowest-setup check available, and it exercises:
 
@@ -121,13 +135,24 @@ Two things to watch:
 
 ### Option C — a real iPhone
 
-Works over Wi-Fi with one caveat that is worth knowing before you plan around
-it: **iOS 14+ requires the `com.apple.developer.networking.multicast`
-entitlement for multicast on real hardware, and Apple grants it by
-application.** Until it is approved, a real device will not receive the
-discovery beacons.
+Works over Wi-Fi. The multicast caveat that used to make this the hard path
+still exists, but it is **no longer the whole story**: there are now two
+discovery routes, and only one of them is gated.
 
-A physical Android device on the same Wi-Fi has no such gate and is the easier
+**iOS 14+ requires the `com.apple.developer.networking.multicast` entitlement
+for multicast on real hardware, and Apple grants it by application.** Until it
+is approved, a real device will not receive the UDP beacons.
+
+**Bonjour / DNS-SD is explicitly exempt from that entitlement**, and the desktop
+now advertises over both. `BonjourAdvertiser` on the desktop and
+`BonjourDiscoveryBackend` on the phone run *in addition to* the UDP beacon, not
+instead of it, and a device found either way produces the same `Beacon` — so
+nothing downstream knows or cares which route found it. A real iPhone therefore
+discovers the computer without the entitlement.
+
+Keep the entitlement in mind anyway: some networks filter mDNS while permitting
+directed UDP, which is exactly why both routes exist. A physical Android device
+on the same Wi-Fi has no gate on either route and remains the simplest
 real-hardware test.
 
 ---
@@ -192,6 +217,11 @@ is off.
 **Digits never appear** — the handshake completed but pairing did not start.
 Check the desktop logs for `security.` codes; `peer_revoked` and
 `server_key_mismatch` are refusals by design, not faults.
+
+**A removed device says "This computer removed your access"** — working as
+intended. A revoked peer is now told so over the encrypted session and stops,
+rather than reconnecting on the backoff curve forever. Pairing it again from
+the phone clears the stored key and starts a fresh exchange.
 
 **Cursor does not move but everything else works** — Accessibility permission.
 See step 2.
