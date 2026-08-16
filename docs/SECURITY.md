@@ -112,24 +112,33 @@ the scanned key or fails.
    secret exist; the server-side ticket sealing does not. Until it does, every
    reconnect is a full handshake — correct, just slower than the design allows.
 
-5. **A revoked device reconnects forever.** The server closes the socket on
-   `security.peer_revoked`, which the client reads as a generic
-   `transport.handshake_closed` — retryable — so it backs off and tries again
-   indefinitely. Observed directly in the loopback test run: six attempts in the
-   first two seconds, then continuing on the backoff curve.
+5. ~~**A revoked device reconnects forever.**~~ **Closed.** The server now sends
+   an `error` frame carrying `ProtocolErrorCode.revoked` over the established,
+   encrypted session before closing, and the client stops on any non-retryable
+   code rather than backing off and retrying indefinitely.
 
-   Nothing is *disclosed* by this, but it drains the phone's battery and lets a
-   removed device keep a server busy. The fix is available and cheap: by the
-   time revocation is checked, the peer has already been authenticated, so the
-   server can send an `error` frame carrying `ProtocolErrorCode.revoked` before
-   closing, and `isRetryable` already returns `false` for it. The client would
-   stop and tell the user why. Deferred only because it changes handshake
-   framing and belongs with the milestone-2 transport work.
+   One consequence is worth stating plainly, because it is a real trade rather
+   than a free win. Making the rejection *encrypted* requires session keys,
+   and session keys require a completed handshake — so the server defers the
+   revocation check until immediately after authentication, and a revoked
+   device now completes a full handshake (four X25519 operations) before being
+   turned away, where previously its lookup failed earlier.
 
-6. **`GetClipboardSequenceNumber` polling has a race.** A clipboard change
-   landing between our write and the counter re-read could be misattributed as
-   our own echo and dropped. The window is under a millisecond and the failure
-   mode is a missed sync rather than a wrong one, but it is real.
+   That is a small amplification available to a revoked peer specifically. It is
+   bounded by the same eight-slot concurrent-handshake cap and ten-second
+   timeout that bound every other pre-authentication cost, and it buys an
+   unambiguous rejection the client can act on. The alternative — refusing at
+   handshake time — can only produce a *plaintext* failure, which would announce
+   "this device is revoked" to anyone watching the network and undo the reason
+   static keys are encrypted in the first place.
+
+6. ~~**`GetClipboardSequenceNumber` polling has a race.**~~ **Closed.**
+   Authorship of a clipboard change is no longer inferred from timing. The
+   desktop records the content hash of each write it performs and treats an
+   observed change as its own only when the content matches. Three hashes are
+   retained, because a rapid remote-then-local sequence produces two of our own
+   writes before the watcher next ticks, and each expires after two seconds so
+   that deliberately re-copying the same text still syncs.
 
 ---
 
