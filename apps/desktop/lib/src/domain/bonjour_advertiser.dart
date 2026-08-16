@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:bonsoir/bonsoir.dart';
 import 'package:rl_core/rl_core.dart';
-import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 /// DNS-SD service type. Must match the client's browse type exactly.
