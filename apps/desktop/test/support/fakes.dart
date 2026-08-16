@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:remotelink_desktop/src/app/providers.dart';
+import 'package:remotelink_desktop/src/domain/command_dispatcher.dart';
 import 'package:remotelink_desktop/src/domain/desktop_service.dart';
 import 'package:rl_core/rl_core.dart';
+import 'package:rl_native/rl_native.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
 /// Fake diagnostics snapshot for widget testing.
@@ -120,3 +122,29 @@ final List<Override> desktopHomeOverrides = <Override>[
   ),
   memoryLogSinkProvider.overrideWithValue(fakeMemoryLogSink),
 ];
+
+/// Helper to create a [CommandDispatcher] for testing.
+CommandDispatcher createTestDispatcher({
+  InputBackend? input,
+  PlatformKind platform = PlatformKind.macos,
+  void Function(PowerCommand)? onPowerCommand,
+  void Function(LaunchApplication)? onLaunchApplication,
+  void Function(OpenUrl)? onOpenUrl,
+  void Function(RunCommand)? onRunCommand,
+  void Function(ClipboardUpdate)? onClipboardUpdate,
+  void Function(MediaCommand)? onMediaCommand,
+  void Function(VolumeCommand)? onVolumeCommand,
+  void Function(DeviceRename)? onDeviceRename,
+}) =>
+    CommandDispatcher(
+      input: input ?? const UnsupportedInputBackend('test'),
+      platform: platform,
+      onPowerCommand: onPowerCommand ?? (_) {},
+      onLaunchApplication: onLaunchApplication ?? (_) {},
+      onOpenUrl: onOpenUrl ?? (_) {},
+      onRunCommand: onRunCommand ?? (_) {},
+      onClipboardUpdate: onClipboardUpdate ?? (_) {},
+      onMediaCommand: onMediaCommand ?? (_) {},
+      onVolumeCommand: onVolumeCommand ?? (_) {},
+      onDeviceRename: onDeviceRename ?? (_) {},
+    );

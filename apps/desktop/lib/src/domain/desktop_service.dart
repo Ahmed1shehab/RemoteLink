@@ -148,6 +148,7 @@ final class DesktopService {
     onRunCommand: _onRunCommand,
     onMediaCommand: _onMediaCommand,
     onVolumeCommand: _onVolumeCommand,
+    onDeviceRename: _onDeviceRename,
   );
 
   RemoteLinkServer? _server;
@@ -157,6 +158,7 @@ final class DesktopService {
   final Map<String, ConnectedDevice> _devices = <String, ConnectedDevice>{};
   final Map<String, StreamSubscription<Message>> _messageSubscriptions =
       <String, StreamSubscription<Message>>{};
+  DeviceId? _activeSessionPeerId;
 
   final StreamController<List<ConnectedDevice>> _deviceChanges =
       StreamController<List<ConnectedDevice>>.broadcast();
@@ -461,16 +463,26 @@ final class DesktopService {
 
     switch (message) {
       case DeviceInfoMessage():
+        final sanitised = sanitiseDeviceName(message.info.name);
+        final effectiveName = sanitised ?? device.name;
         _devices[session.peerId.value] = ConnectedDevice(
           serverSession: session,
           tier: device.tier,
-          name: message.info.name,
+          name: effectiveName,
         );
         _publishDevices();
 
       case ClipboardRequest():
         final snapshot = await clipboard.snapshot();
         if (snapshot != null) await session.session.send(snapshot);
+
+      case DeviceRename():
+        _activeSessionPeerId = session.peerId;
+        try {
+          _dispatcher.dispatch(message, device.tier);
+        } finally {
+          _activeSessionPeerId = null;
+        }
 
       default:
         _dispatcher.dispatch(message, device.tier);
@@ -574,6 +586,49 @@ final class DesktopService {
     _publishDevices();
 
     await device.serverSession.session.send(PermissionGrant(tier: tier));
+  }
+
+  /// Renames a paired device locally from the desktop UI.
+  ///
+  /// Sanitises the input, persists it to the trust store, and updates the
+  /// connected device list. Returns `true` if valid and applied, `false` if rejected.
+  Future<bool> renameDevice(DeviceId peerId, String rawName) async {
+    final sanitised = sanitiseDeviceName(rawName);
+    if (sanitised == null) return false;
+
+    await _renamePeer(peerId, sanitised);
+    return true;
+  }
+
+  void _onDeviceRename(DeviceRename command) {
+    final peerId = _activeSessionPeerId;
+    if (peerId == null) return;
+    unawaited(_renamePeer(peerId, command.name));
+  }
+
+  Future<void> _renamePeer(DeviceId peerId, String newName) async {
+    final peer = await trustStore.findById(peerId);
+    if (peer != null) {
+      await trustStore.upsert(peer.copyWith(name: newName));
+    }
+
+    final device = _devices[peerId.value];
+    if (device != null) {
+      _devices[peerId.value] = ConnectedDevice(
+        serverSession: device.serverSession,
+        tier: device.tier,
+        name: newName,
+      );
+      _publishDevices();
+    }
+
+    _log.info(
+      'peer renamed',
+      fields: <String, Object?>{
+        'peer': peerId.value,
+        'name': newName,
+      },
+    );
   }
 
   /// The QR payload for the pairing sheet.

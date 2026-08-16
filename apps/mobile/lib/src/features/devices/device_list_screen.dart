@@ -156,6 +156,9 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
                     onTap: wasRevoked ? null : () => _connect(context, entry),
                     onPairAgain:
                         wasRevoked ? () => _pairAgain(context, entry) : null,
+                    onRename: entry.isPaired && entry.id != null
+                        ? () => _renameComputer(context, entry)
+                        : null,
                   );
                 },
               ),
@@ -282,6 +285,42 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     if (!context.mounted) return;
     await _connect(context, entry, freshPairing: true);
   }
+
+  Future<void> _renameComputer(BuildContext context, _Entry entry) async {
+    final peerId = entry.id;
+    if (peerId == null) return;
+
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (context) => _RenameComputerDialog(initialName: entry.name),
+    );
+    if (newName == null || !context.mounted) return;
+
+    // 1. Persist new name in mobile's trust store.
+    final trustStore = await ref.read(trustStoreProvider.future);
+    final peer = await trustStore.findById(peerId);
+    if (peer != null) {
+      await trustStore.upsert(peer.copyWith(name: newName));
+      await persistTrustStore(
+        trustStore,
+        await ref.read(identityStoreProvider.future),
+      );
+      ref.invalidate(trustedPeersProvider);
+    }
+
+    // 2. If connected to this peer, send DeviceRename message to the desktop.
+    final client = ref.read(clientProvider).valueOrNull;
+    if (client != null && client.session?.isEstablished == true) {
+      if (client.session?.peerId == peerId ||
+          client.target?.deviceId == peerId) {
+        try {
+          await client.session?.send(DeviceRename(newName));
+        } on TransportError {
+          // Connection in teardown, ignore.
+        }
+      }
+    }
+  }
 }
 
 /// Asks for a host and port.
@@ -399,12 +438,14 @@ class _DeviceTile extends StatelessWidget {
     required this.wasRevoked,
     required this.onTap,
     required this.onPairAgain,
+    this.onRename,
   });
 
   final _Entry entry;
   final bool wasRevoked;
   final VoidCallback? onTap;
   final VoidCallback? onPairAgain;
+  final VoidCallback? onRename;
 
   @override
   Widget build(BuildContext context) {
@@ -441,11 +482,87 @@ class _DeviceTile extends StatelessWidget {
               child: const Text('Pair again'),
             )
           : entry.isPaired
-              ? Icon(Icons.verified_user, color: scheme.primary)
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    if (onRename != null)
+                      IconButton(
+                        icon: const Icon(Icons.edit_outlined),
+                        tooltip: 'Rename computer',
+                        onPressed: onRename,
+                      ),
+                    Icon(Icons.verified_user, color: scheme.primary),
+                  ],
+                )
               : const Icon(Icons.chevron_right),
       onTap: onTap,
     );
   }
+}
+
+class _RenameComputerDialog extends StatefulWidget {
+  const _RenameComputerDialog({required this.initialName});
+
+  final String initialName;
+
+  @override
+  State<_RenameComputerDialog> createState() => _RenameComputerDialogState();
+}
+
+class _RenameComputerDialogState extends State<_RenameComputerDialog> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initialName);
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final raw = _controller.text;
+    final sanitised = sanitiseDeviceName(raw);
+    if (sanitised == null) {
+      setState(() {
+        _error =
+            'Invalid name: 1–64 characters, no control codes or line breaks.';
+      });
+      return;
+    }
+    Navigator.of(context).pop(sanitised);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Rename computer'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'Computer name',
+                errorText: _error,
+                border: const OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: _submit,
+            child: const Text('Save'),
+          ),
+        ],
+      );
 }
 
 /// Shown while reconnecting to the last used computer.
