@@ -94,6 +94,18 @@ final class CommandDispatcher {
           isMomentum: message.isMomentum,
         );
 
+      case GestureZoom():
+        _input.magnify(message.magnificationDelta);
+
+      case GestureRotate():
+        _input.rotate(message.degreesDelta);
+
+      case GestureSwipe():
+        _input.swipe(
+          fingerCount: message.fingerCount,
+          direction: message.direction,
+        );
+
       case KeyEvent():
         // The modifier snapshot is applied first so that a chord arrives in the
         // right order even if an earlier modifier event was lost. Without this,

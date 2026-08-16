@@ -3,6 +3,7 @@ import 'package:remotelink_desktop/src/domain/desktop_service.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_native/rl_native.dart';
+import 'package:rl_protocol/rl_protocol.dart';
 
 /// Counts how many times the host was actually asked for metrics.
 final class SpySystemInfoBackend implements SystemInfoBackend {
@@ -71,5 +72,33 @@ void main() {
       reason: 'the host must not be polled while nobody is watching — that is '
           'battery cost for nobody\'s benefit',
     );
+  });
+
+  group('buildCapabilities gesture advertising', () {
+    test('advertises Capabilities.gestures only when gesturesAvailable is true',
+        () {
+      final capsWithoutGestures = buildCapabilities(
+        inputAvailable: true,
+        clipboardAvailable: true,
+        mediaAvailable: true,
+        gesturesAvailable: false,
+      );
+      expect(capsWithoutGestures.has(Capabilities.gestures), isFalse);
+
+      final capsWithGestures = buildCapabilities(
+        inputAvailable: true,
+        clipboardAvailable: true,
+        mediaAvailable: true,
+        gesturesAvailable: true,
+      );
+      expect(capsWithGestures.has(Capabilities.gestures), isTrue);
+    });
+
+    test(
+        'currentCapabilities does not advertise gestures for unsupported backend',
+        () async {
+      final (service, _) = await buildService();
+      expect(service.currentCapabilities.has(Capabilities.gestures), isFalse);
+    });
   });
 }

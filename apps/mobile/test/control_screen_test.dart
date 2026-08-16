@@ -179,4 +179,41 @@ void main() {
     expect(find.text('CPU 12%'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('renders TouchpadSurfaceView and handles gestures cleanly',
+      (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          identityProvider.overrideWith(
+            (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+          ),
+          clientStateProvider.overrideWith(
+            (ref) => Stream<ClientState>.value(ClientState.connected),
+          ),
+          systemStatusProvider.overrideWith(
+            (ref) => const Stream<SystemStatus?>.empty(),
+          ),
+          connectionQualityProvider.overrideWith(
+            (ref) => const Stream<ConnectionQuality>.empty(),
+          ),
+        ],
+        child: const MaterialApp(home: ControlScreen()),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump();
+
+    // Verify touchpad tab is active and shows instructions
+    expect(find.textContaining('Drag to move'), findsOneWidget);
+    expect(find.text('Left'), findsOneWidget);
+    expect(find.text('Mid'), findsOneWidget);
+    expect(find.text('Right'), findsOneWidget);
+
+    // Tap Left button
+    await tester.tap(find.text('Left'));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
 }

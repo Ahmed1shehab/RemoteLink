@@ -152,12 +152,18 @@ final class Win32InputBackend implements InputBackend {
   (int flags, int data) _buttonFlags(MouseButton button,
           {required bool pressed}) =>
       switch (button) {
-        MouseButton.left =>
-          (pressed ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP, 0),
-        MouseButton.right =>
-          (pressed ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP, 0),
-        MouseButton.middle =>
-          (pressed ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP, 0),
+        MouseButton.left => (
+            pressed ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP,
+            0
+          ),
+        MouseButton.right => (
+            pressed ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP,
+            0
+          ),
+        MouseButton.middle => (
+            pressed ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP,
+            0
+          ),
         MouseButton.back => (
             pressed ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP,
             XBUTTON1,
@@ -217,6 +223,97 @@ final class Win32InputBackend implements InputBackend {
           flags: MOUSEEVENTF_HWHEEL,
         );
       }
+    }
+
+    _flush(count);
+  }
+
+  @override
+  void magnify(double delta) {
+    // DELIBERATE APPROXIMATION:
+    // Windows has no synthetic pinch-to-zoom gesture API; SendInput cannot
+    // inject raw multi-touch or trackpad pinch events. We approximate pinch
+    // by injecting Ctrl + mouse wheel notches, which is the standard shortcut
+    // a human user presses on Windows across browsers, image viewers, and
+    // document editors to zoom in and out.
+    if (delta == 0) return;
+
+    final notches = (delta * 10).round();
+    final wheelNotches = notches != 0 ? notches : (delta > 0 ? 1 : -1);
+
+    final isCtrlDown = _modifiers.hasControl;
+    var count = 0;
+
+    // Press Ctrl if not already held down
+    if (!isCtrlDown) {
+      _writeKey(count++, virtualKey: 0xA2 /* VK_LCONTROL */, pressed: true);
+    }
+
+    _writeMouse(
+      count++,
+      mouseData: wheelNotches * WHEEL_DELTA,
+      flags: MOUSEEVENTF_WHEEL,
+    );
+
+    // Release Ctrl if we pressed it
+    if (!isCtrlDown) {
+      _writeKey(count++, virtualKey: 0xA2 /* VK_LCONTROL */, pressed: false);
+    }
+
+    _flush(count);
+  }
+
+  @override
+  void rotate(double degrees) {
+    // Windows has no synthetic rotation gesture API and no standard universal
+    // shortcut convention for rotating arbitrary content. Per the action safety
+    // guidelines, this is left inert on Windows rather than synthesizing an
+    // unexpected approximation that behaves differently from what was requested.
+  }
+
+  @override
+  void swipe({required int fingerCount, required SwipeDirection direction}) {
+    // DELIBERATE APPROXIMATION:
+    // Windows SendInput cannot inject multi-touch swipe gestures into the OS
+    // gesture engine. We map multi-finger swipes to the exact Windows keyboard
+    // shortcuts a user would press for window and workspace navigation:
+    //   - Swipe up: Task View (Win + Tab)
+    //   - Swipe down: Show Desktop (Win + D)
+    //   - Swipe left: Switch virtual desktop left (Win + Ctrl + Left Arrow)
+    //   - Swipe right: Switch virtual desktop right (Win + Ctrl + Right Arrow)
+    var count = 0;
+    switch (direction) {
+      case SwipeDirection.up:
+        // Win + Tab (Task View)
+        _writeKey(count++, virtualKey: 0x5B /* VK_LWIN */, pressed: true);
+        _writeKey(count++, virtualKey: 0x09 /* VK_TAB */, pressed: true);
+        _writeKey(count++, virtualKey: 0x09 /* VK_TAB */, pressed: false);
+        _writeKey(count++, virtualKey: 0x5B /* VK_LWIN */, pressed: false);
+
+      case SwipeDirection.down:
+        // Win + D (Show Desktop)
+        _writeKey(count++, virtualKey: 0x5B /* VK_LWIN */, pressed: true);
+        _writeKey(count++, virtualKey: 0x44 /* 'D' */, pressed: true);
+        _writeKey(count++, virtualKey: 0x44 /* 'D' */, pressed: false);
+        _writeKey(count++, virtualKey: 0x5B /* VK_LWIN */, pressed: false);
+
+      case SwipeDirection.left:
+        // Win + Ctrl + Left Arrow (Virtual Desktop Left)
+        _writeKey(count++, virtualKey: 0x5B /* VK_LWIN */, pressed: true);
+        _writeKey(count++, virtualKey: 0xA2 /* VK_LCONTROL */, pressed: true);
+        _writeKey(count++, virtualKey: 0x25 /* VK_LEFT */, pressed: true);
+        _writeKey(count++, virtualKey: 0x25 /* VK_LEFT */, pressed: false);
+        _writeKey(count++, virtualKey: 0xA2 /* VK_LCONTROL */, pressed: false);
+        _writeKey(count++, virtualKey: 0x5B /* VK_LWIN */, pressed: false);
+
+      case SwipeDirection.right:
+        // Win + Ctrl + Right Arrow (Virtual Desktop Right)
+        _writeKey(count++, virtualKey: 0x5B /* VK_LWIN */, pressed: true);
+        _writeKey(count++, virtualKey: 0xA2 /* VK_LCONTROL */, pressed: true);
+        _writeKey(count++, virtualKey: 0x27 /* VK_RIGHT */, pressed: true);
+        _writeKey(count++, virtualKey: 0x27 /* VK_RIGHT */, pressed: false);
+        _writeKey(count++, virtualKey: 0xA2 /* VK_LCONTROL */, pressed: false);
+        _writeKey(count++, virtualKey: 0x5B /* VK_LWIN */, pressed: false);
     }
 
     _flush(count);

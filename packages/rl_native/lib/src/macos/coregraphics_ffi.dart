@@ -23,6 +23,11 @@ const int kCGEventOtherMouseDown = 25;
 const int kCGEventOtherMouseUp = 26;
 const int kCGEventOtherMouseDragged = 27;
 
+/// `CGEventType` gesture values.
+const int kCGEventTypeRotate = 18;
+const int kCGEventTypeMagnify = 30;
+const int kCGEventTypeSwipe = 31;
+
 /// `CGMouseButton`.
 const int kCGMouseButtonLeft = 0;
 const int kCGMouseButtonRight = 1;
@@ -137,6 +142,19 @@ typedef CGEventPostDart = void Function(int tap, CGEventRef event);
 typedef _CGEventSetFlagsNative = Void Function(CGEventRef event, Uint64 flags);
 typedef CGEventSetFlagsDart = void Function(CGEventRef event, int flags);
 
+typedef _CGEventSetTypeNative = Void Function(CGEventRef event, Int32 type);
+typedef CGEventSetTypeDart = void Function(CGEventRef event, int type);
+
+typedef _CGEventSetDoubleValueFieldNative = Void Function(
+    CGEventRef event, Int32 field, Double value);
+typedef CGEventSetDoubleValueFieldDart = void Function(
+    CGEventRef event, int field, double value);
+
+typedef _CGEventSetLocationNative = Void Function(
+    CGEventRef event, CGPoint location);
+typedef CGEventSetLocationDart = void Function(
+    CGEventRef event, CGPoint location);
+
 typedef _CGEventSetIntegerValueFieldNative = Void Function(
     CGEventRef event, Int32 field, Int64 value);
 typedef CGEventSetIntegerValueFieldDart = void Function(
@@ -187,8 +205,7 @@ final class CoreGraphicsBindings {
           '/System/Library/Frameworks/ApplicationServices.framework/'
           'ApplicationServices',
         ) {
-    eventSourceCreate = _coreGraphics.lookupFunction<
-        _CGEventSourceCreateNative,
+    eventSourceCreate = _coreGraphics.lookupFunction<_CGEventSourceCreateNative,
         CGEventSourceCreateDart>('CGEventSourceCreate');
     createMouseEvent = _coreGraphics.lookupFunction<
         _CGEventCreateMouseEventNative,
@@ -203,6 +220,14 @@ final class CoreGraphicsBindings {
         .lookupFunction<_CGEventPostNative, CGEventPostDart>('CGEventPost');
     setFlags = _coreGraphics.lookupFunction<_CGEventSetFlagsNative,
         CGEventSetFlagsDart>('CGEventSetFlags');
+    setType =
+        _coreGraphics.lookupFunction<_CGEventSetTypeNative, CGEventSetTypeDart>(
+            'CGEventSetType');
+    setDoubleValueField = _coreGraphics.lookupFunction<
+        _CGEventSetDoubleValueFieldNative,
+        CGEventSetDoubleValueFieldDart>('CGEventSetDoubleValueField');
+    setLocation = _coreGraphics.lookupFunction<_CGEventSetLocationNative,
+        CGEventSetLocationDart>('CGEventSetLocation');
     setIntegerValueField = _coreGraphics.lookupFunction<
         _CGEventSetIntegerValueFieldNative,
         CGEventSetIntegerValueFieldDart>('CGEventSetIntegerValueField');
@@ -211,8 +236,8 @@ final class CoreGraphicsBindings {
         CGEventKeyboardSetUnicodeStringDart>('CGEventKeyboardSetUnicodeString');
     getLocation = _coreGraphics.lookupFunction<_CGEventGetLocationNative,
         CGEventGetLocationDart>('CGEventGetLocation');
-    createEvent = _coreGraphics
-        .lookupFunction<_CGEventCreateNative, CGEventCreateDart>(
+    createEvent =
+        _coreGraphics.lookupFunction<_CGEventCreateNative, CGEventCreateDart>(
             'CGEventCreate');
     mainDisplayId = _coreGraphics.lookupFunction<_CGMainDisplayIDNative,
         CGMainDisplayIDDart>('CGMainDisplayID');
@@ -225,7 +250,8 @@ final class CoreGraphicsBindings {
         .lookupFunction<_CFReleaseNative, CFReleaseDart>('CFRelease');
 
     isProcessTrusted = _applicationServices.lookupFunction<
-        _AXIsProcessTrustedNative, AXIsProcessTrustedDart>('AXIsProcessTrusted');
+        _AXIsProcessTrustedNative,
+        AXIsProcessTrustedDart>('AXIsProcessTrusted');
   }
 
   final DynamicLibrary _coreGraphics;
@@ -238,6 +264,9 @@ final class CoreGraphicsBindings {
   late final CGEventCreateScrollWheelEventDart createScrollEvent;
   late final CGEventPostDart post;
   late final CGEventSetFlagsDart setFlags;
+  late final CGEventSetTypeDart setType;
+  late final CGEventSetDoubleValueFieldDart setDoubleValueField;
+  late final CGEventSetLocationDart setLocation;
   late final CGEventSetIntegerValueFieldDart setIntegerValueField;
   late final CGEventKeyboardSetUnicodeStringDart setUnicodeString;
   late final CGEventGetLocationDart getLocation;

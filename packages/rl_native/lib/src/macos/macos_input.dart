@@ -258,6 +258,86 @@ final class MacosInputBackend implements InputBackend {
   }
 
   @override
+  void magnify(double delta) {
+    if (delta == 0) return;
+    final (x, y) = cursorPosition;
+    _point.ref
+      ..x = x.toDouble()
+      ..y = y.toDouble();
+
+    final event = _bindings.createEvent(_source);
+    if (event == nullptr) return;
+
+    try {
+      _bindings
+        ..setType(event, kCGEventTypeMagnify)
+        ..setLocation(event, _point.ref)
+        ..setDoubleValueField(event, 113, delta)
+        ..setFlags(event, KeyMap.macFlagsFor(_modifiers))
+        ..post(kCGHIDEventTap, event);
+    } finally {
+      _bindings.release(event);
+    }
+  }
+
+  @override
+  void rotate(double degrees) {
+    if (degrees == 0) return;
+    final (x, y) = cursorPosition;
+    _point.ref
+      ..x = x.toDouble()
+      ..y = y.toDouble();
+
+    final event = _bindings.createEvent(_source);
+    if (event == nullptr) return;
+
+    try {
+      _bindings
+        ..setType(event, kCGEventTypeRotate)
+        ..setLocation(event, _point.ref)
+        ..setDoubleValueField(event, 114, degrees)
+        ..setFlags(event, KeyMap.macFlagsFor(_modifiers))
+        ..post(kCGHIDEventTap, event);
+    } finally {
+      _bindings.release(event);
+    }
+  }
+
+  @override
+  void swipe({required int fingerCount, required SwipeDirection direction}) {
+    final (x, y) = cursorPosition;
+    _point.ref
+      ..x = x.toDouble()
+      ..y = y.toDouble();
+
+    // macOS NSEventTypeSwipe convention: deltaX is -1 for swipe right, 1 for
+    // swipe left; deltaY is -1 for swipe down, 1 for swipe up.
+    final (deltaX, deltaY) = switch (direction) {
+      SwipeDirection.up => (0, 1),
+      SwipeDirection.down => (0, -1),
+      SwipeDirection.left => (1, 0),
+      SwipeDirection.right => (-1, 0),
+    };
+
+    final event = _bindings.createEvent(_source);
+    if (event == nullptr) return;
+
+    try {
+      _bindings
+        ..setType(event, kCGEventTypeSwipe)
+        ..setLocation(event, _point.ref)
+        ..setIntegerValueField(event, kCGMouseEventDeltaX, deltaX)
+        ..setIntegerValueField(event, kCGMouseEventDeltaY, deltaY)
+        ..setDoubleValueField(event, 113, deltaX.toDouble())
+        ..setDoubleValueField(event, 114, deltaY.toDouble())
+        ..setFlags(event, KeyMap.macFlagsFor(_modifiers))
+        ..post(kCGHIDEventTap, event);
+    } finally {
+      _bindings.release(event);
+    }
+  }
+
+  @override
   void keyEvent({required int hidUsage, required bool pressed}) {
     final keyCode = KeyMap.hidToMacKeyCode[hidUsage];
     if (keyCode == null) {
@@ -343,8 +423,7 @@ final class MacosInputBackend implements InputBackend {
       final keyCode = KeyMap.hidToMacKeyCode[usage];
       if (keyCode == null) continue;
 
-      _modifiers =
-          shouldBeDown ? _modifiers.plus(bit) : _modifiers.minus(bit);
+      _modifiers = shouldBeDown ? _modifiers.plus(bit) : _modifiers.minus(bit);
 
       final event =
           _bindings.createKeyboardEvent(_source, keyCode, shouldBeDown);

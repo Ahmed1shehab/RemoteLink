@@ -15,6 +15,7 @@ import 'command_dispatcher.dart';
 import 'file_transfer_store.dart';
 import 'transfer_model.dart';
 
+/// Bit for native gesture capability (1 << 17).
 /// Everything the desktop advertises it can do.
 ///
 /// Assembled at run time rather than hard-coded, because two of these depend on
@@ -25,6 +26,7 @@ Capabilities buildCapabilities({
   required bool inputAvailable,
   required bool clipboardAvailable,
   required bool mediaAvailable,
+  bool gesturesAvailable = false,
 }) {
   var capabilities = const Capabilities(
     Capabilities.powerControl |
@@ -48,6 +50,12 @@ Capabilities buildCapabilities({
     capabilities = capabilities
         .plus(Capabilities.mediaControl)
         .plus(Capabilities.mediaMetadata);
+  }
+  if (gesturesAvailable) {
+    // Advertised only when native synthetic gestures exist (macOS). Windows
+    // approximates gestures via keyboard shortcuts and does not claim native
+    // gesture support.
+    capabilities = capabilities.plus(Capabilities.gestures);
   }
   return capabilities;
 }
@@ -245,6 +253,7 @@ final class DesktopService {
         inputAvailable: _input.isAvailable,
         clipboardAvailable: _clipboardBackend.isAvailable,
         mediaAvailable: _media.isAvailable,
+        gesturesAvailable: _input.isAvailable && _input is MacosInputBackend,
       );
 
   /// Emits whenever input availability flips.

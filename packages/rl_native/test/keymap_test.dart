@@ -217,6 +217,9 @@ void main() {
           ..mouseDown(MouseButton.left)
           ..keyEvent(hidUsage: HidKey.keyA, pressed: true)
           ..typeText('hello')
+          ..magnify(0.1)
+          ..rotate(45.0)
+          ..swipe(fingerCount: 3, direction: SwipeDirection.up)
           ..releaseAll()
           ..dispose();
       }, returnsNormally);
