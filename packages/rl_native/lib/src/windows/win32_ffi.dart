@@ -66,6 +66,21 @@ const int SM_CXSCREEN = 0;
 const int SM_CYSCREEN = 1;
 
 const int CF_UNICODETEXT = 13;
+const int CF_DIB = 8;
+const int CF_DIBV5 = 17;
+
+const int BI_RGB = 0;
+const int BI_BITFIELDS = 3;
+
+const int LCS_sRGB = 0x73524742;
+const int LCS_GM_IMAGES = 4;
+
+const int COINIT_APARTMENTTHREADED = 0x2;
+const int COINIT_MULTITHREADED = 0x0;
+const int CLSCTX_INPROC_SERVER = 0x1;
+
+const int WICBitmapEncoderNoCache = 0x2;
+const int WICDecodeMetadataCacheOnDemand = 0x0;
 
 /// `GMEM_MOVEABLE`. Clipboard buffers must be moveable global memory; the
 /// clipboard takes ownership of the handle once `SetClipboardData` succeeds.
@@ -77,6 +92,21 @@ const String kExcludeFromMonitoring =
     'ExcludeClipboardContentFromMonitorProcessing';
 
 // ── Structs ──────────────────────────────────────────────────────────────────
+
+/// Standard COM `GUID` layout (16 bytes).
+final class GUID extends Struct {
+  @Uint32()
+  external int Data1;
+
+  @Uint16()
+  external int Data2;
+
+  @Uint16()
+  external int Data3;
+
+  @Array(8)
+  external Array<Uint8> Data4;
+}
 
 /// `MOUSEINPUT`. On x64 this is 32 bytes: the `ULONG_PTR` forces 8-byte
 /// alignment, so four bytes of padding appear after `time`. Dart FFI computes
@@ -203,6 +233,34 @@ typedef GlobalFreeDart = int Function(int hMem);
 typedef _GlobalSizeNative = IntPtr Function(IntPtr hMem);
 typedef GlobalSizeDart = int Function(int hMem);
 
+typedef _CoInitializeExNative = Int32 Function(
+    Pointer<Void> pvReserved, Uint32 dwCoInit);
+typedef CoInitializeExDart = int Function(
+    Pointer<Void> pvReserved, int dwCoInit);
+
+typedef _CoCreateInstanceNative = Int32 Function(
+    Pointer<GUID> rclsid,
+    Pointer<Void> pUnkOuter,
+    Uint32 dwClsContext,
+    Pointer<GUID> riid,
+    Pointer<Pointer<Void>> ppv);
+typedef CoCreateInstanceDart = int Function(
+    Pointer<GUID> rclsid,
+    Pointer<Void> pUnkOuter,
+    int dwClsContext,
+    Pointer<GUID> riid,
+    Pointer<Pointer<Void>> ppv);
+
+typedef _CreateStreamOnHGlobalNative = Int32 Function(
+    IntPtr hGlobal, Int32 fDeleteOnRelease, Pointer<Pointer<Void>> ppstm);
+typedef CreateStreamOnHGlobalDart = int Function(
+    int hGlobal, int fDeleteOnRelease, Pointer<Pointer<Void>> ppstm);
+
+typedef _GetHGlobalFromStreamNative = Int32 Function(
+    Pointer<Void> pstm, Pointer<IntPtr> phglobal);
+typedef GetHGlobalFromStreamDart = int Function(
+    Pointer<Void> pstm, Pointer<IntPtr> phglobal);
+
 /// Resolved Win32 entry points.
 ///
 /// Looked up once at construction. Repeating `lookupFunction` per call would
@@ -210,7 +268,8 @@ typedef GlobalSizeDart = int Function(int hMem);
 final class Win32Bindings {
   Win32Bindings()
       : _user32 = DynamicLibrary.open('user32.dll'),
-        _kernel32 = DynamicLibrary.open('kernel32.dll') {
+        _kernel32 = DynamicLibrary.open('kernel32.dll'),
+        _ole32 = DynamicLibrary.open('ole32.dll') {
     sendInput =
         _user32.lookupFunction<_SendInputNative, SendInputDart>('SendInput');
     setCursorPos = _user32
@@ -260,10 +319,24 @@ final class Win32Bindings {
         .lookupFunction<_GlobalFreeNative, GlobalFreeDart>('GlobalFree');
     globalSize = _kernel32
         .lookupFunction<_GlobalSizeNative, GlobalSizeDart>('GlobalSize');
+
+    coInitializeEx =
+        _ole32.lookupFunction<_CoInitializeExNative, CoInitializeExDart>(
+            'CoInitializeEx');
+    coCreateInstance =
+        _ole32.lookupFunction<_CoCreateInstanceNative, CoCreateInstanceDart>(
+            'CoCreateInstance');
+    createStreamOnHGlobal = _ole32.lookupFunction<
+        _CreateStreamOnHGlobalNative,
+        CreateStreamOnHGlobalDart>('CreateStreamOnHGlobal');
+    getHGlobalFromStream = _ole32.lookupFunction<
+        _GetHGlobalFromStreamNative,
+        GetHGlobalFromStreamDart>('GetHGlobalFromStream');
   }
 
   final DynamicLibrary _user32;
   final DynamicLibrary _kernel32;
+  final DynamicLibrary _ole32;
 
   late final SendInputDart sendInput;
   late final SetCursorPosDart setCursorPos;
@@ -285,4 +358,9 @@ final class Win32Bindings {
   late final GlobalUnlockDart globalUnlock;
   late final GlobalFreeDart globalFree;
   late final GlobalSizeDart globalSize;
+
+  late final CoInitializeExDart coInitializeEx;
+  late final CoCreateInstanceDart coCreateInstance;
+  late final CreateStreamOnHGlobalDart createStreamOnHGlobal;
+  late final GetHGlobalFromStreamDart getHGlobalFromStream;
 }

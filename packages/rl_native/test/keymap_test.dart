@@ -227,7 +227,12 @@ void main() {
       const backend = UnsupportedClipboardBackend();
       expect(backend.isAvailable, isFalse);
       expect(backend.readText(), isNull);
+      expect(backend.readImagePng(), isNull);
       expect(() => backend.writeText('x'), returnsNormally);
+      expect(
+        () => backend.writeImagePng(const <int>[1, 2, 3]),
+        returnsNormally,
+      );
     });
 
     test('system info backend reports unavailable and returns empty metrics',

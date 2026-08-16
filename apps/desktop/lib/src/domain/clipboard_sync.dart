@@ -29,6 +29,16 @@ const Duration kSelfWriteExpiry = Duration(seconds: 2);
 /// phone over Wi-Fi. Past this size the sync is offered rather than performed.
 const int kMaxAutoSyncTextBytes = 256 * 1024;
 
+/// Largest image payload mirrored automatically (1 MiB).
+///
+/// Images above this size require explicit user action rather than auto-syncing.
+const int kMaxAutoSyncImageBytes = 1024 * 1024;
+
+/// Hard cap on image payload size for clipboard sync (10 MiB).
+///
+/// Images above this size are skipped; large images belong in file transfer.
+const int kMaxImageBytes = 10 * 1024 * 1024;
+
 final class _SelfWrite {
   _SelfWrite({required this.hash, required this.recordedAtMicros});
 
@@ -69,8 +79,10 @@ final class ClipboardSyncService {
     required this.localDeviceId,
     Clock? clock,
     this.pollInterval = kClipboardPollInterval,
+    bool allowImages = true,
   })  : _clipboard = clipboard,
-        _clock = clock ?? SystemClock();
+        _clock = clock ?? SystemClock(),
+        _allowImages = allowImages;
 
   final ClipboardBackend _clipboard;
   final DeviceId localDeviceId;
@@ -92,7 +104,7 @@ final class ClipboardSyncService {
 
   int _localSequence = 0;
   bool _enabled = true;
-  bool _allowImages = false;
+  bool _allowImages = true;
 
   /// Updates to broadcast to connected phones.
   Stream<ClipboardUpdate> get outbound => _outbound.stream;
@@ -100,7 +112,7 @@ final class ClipboardSyncService {
   bool get isEnabled => _enabled;
 
   /// Turns mirroring on or off for this computer.
-  void setEnabled({required bool enabled, bool allowImages = false}) {
+  void setEnabled({required bool enabled, bool allowImages = true}) {
     _enabled = enabled;
     _allowImages = allowImages;
     if (!enabled) {
@@ -175,43 +187,95 @@ final class ClipboardSyncService {
     }
 
     final text = _clipboard.readText();
-    if (text == null || text.isEmpty) return;
+    if (text != null && text.isNotEmpty) {
+      final bytes = utf8.encode(text);
+      if (bytes.length > kMaxAutoSyncTextBytes) {
+        _log.info(
+          'clipboard content too large to mirror automatically',
+          fields: <String, Object?>{'bytes': bytes.length},
+        );
+        return;
+      }
 
-    final bytes = utf8.encode(text);
-    if (bytes.length > kMaxAutoSyncTextBytes) {
-      _log.info(
-        'clipboard content too large to mirror automatically',
-        fields: <String, Object?>{'bytes': bytes.length},
+      final hash = await _hash(bytes);
+      if (_isSelfWrite(hash)) {
+        _log.debug(() => 'suppressed the echo of our own clipboard write');
+        return;
+      }
+
+      _currentHash = hash;
+
+      final update = ClipboardUpdate(
+        items: <ClipboardItem>[
+          // A URL is sent as its own flavour so the phone can offer to open it
+          // and macOS can populate the URL pasteboard type.
+          ClipboardItem(
+            contentType: _looksLikeUrl(text)
+                ? ClipboardContentType.url
+                : ClipboardContentType.text,
+            data: Uint8List.fromList(bytes),
+          ),
+        ],
+        contentHash: hash,
+        originDeviceId: localDeviceId.value,
+        originSequence: ++_localSequence,
       );
+
+      if (!_outbound.isClosed) _outbound.add(update);
+      _log.debug(() => 'broadcasting ${bytes.length} clipboard bytes');
       return;
     }
 
-    final hash = await _hash(bytes);
-    if (_isSelfWrite(hash)) {
-      _log.debug(() => 'suppressed the echo of our own clipboard write');
-      return;
+    if (_allowImages) {
+      final imageBytes = _clipboard.readImagePng();
+      if (imageBytes != null && imageBytes.isNotEmpty) {
+        if (imageBytes.length > kMaxImageBytes) {
+          _log.info(
+            'clipboard image exceeds 10 MiB cap; skipping (large images belong in file transfer)',
+            fields: <String, Object?>{'bytes': imageBytes.length},
+          );
+          return;
+        }
+
+        if (imageBytes.length > kMaxAutoSyncImageBytes) {
+          _log.info(
+            'clipboard image too large to mirror automatically (> 1 MiB requires explicit user action)',
+            fields: <String, Object?>{'bytes': imageBytes.length},
+          );
+          return;
+        }
+
+        final data = imageBytes is Uint8List
+            ? imageBytes
+            : Uint8List.fromList(imageBytes);
+        final hash = await _hash(data);
+        if (_isSelfWrite(hash)) {
+          _log.debug(
+            () => 'suppressed the echo of our own clipboard image write',
+          );
+          return;
+        }
+
+        _currentHash = hash;
+
+        final update = ClipboardUpdate(
+          items: <ClipboardItem>[
+            ClipboardItem(
+              contentType: ClipboardContentType.imagePng,
+              data: data,
+            ),
+          ],
+          contentHash: hash,
+          originDeviceId: localDeviceId.value,
+          originSequence: ++_localSequence,
+        );
+
+        if (!_outbound.isClosed) _outbound.add(update);
+        _log.debug(
+          () => 'broadcasting ${data.length} clipboard image bytes',
+        );
+      }
     }
-
-    _currentHash = hash;
-
-    final update = ClipboardUpdate(
-      items: <ClipboardItem>[
-        // A URL is sent as its own flavour so the phone can offer to open it
-        // and macOS can populate the URL pasteboard type.
-        ClipboardItem(
-          contentType: _looksLikeUrl(text)
-              ? ClipboardContentType.url
-              : ClipboardContentType.text,
-          data: Uint8List.fromList(bytes),
-        ),
-      ],
-      contentHash: hash,
-      originDeviceId: localDeviceId.value,
-      originSequence: ++_localSequence,
-    );
-
-    if (!_outbound.isClosed) _outbound.add(update);
-    _log.debug(() => 'broadcasting ${bytes.length} clipboard bytes');
   }
 
   /// Applies an update received from a phone.
@@ -233,19 +297,45 @@ final class ClipboardSyncService {
     }
 
     final text = update.plainText;
-    if (text == null) {
-      if (!_allowImages) return false;
-      _log.debug(() => 'image clipboard flavours are not yet applied');
+    if (text != null) {
+      _recordSelfWrite(update.contentHash);
+      _clipboard.writeText(text);
+      _currentHash = update.contentHash;
+
+      _log.debug(
+        () => 'applied a clipboard update from ${update.originDeviceId}',
+        fields: <String, Object?>{'bytes': text.length},
+      );
+      return true;
+    }
+
+    if (!_allowImages) return false;
+
+    ClipboardItem? imageItem;
+    for (final item in update.items) {
+      if (item.contentType == ClipboardContentType.imagePng) {
+        imageItem = item;
+        break;
+      }
+    }
+
+    if (imageItem == null) return false;
+
+    if (imageItem.data.length > kMaxImageBytes) {
+      _log.info(
+        'inbound clipboard image exceeds 10 MiB cap; skipping',
+        fields: <String, Object?>{'bytes': imageItem.data.length},
+      );
       return false;
     }
 
     _recordSelfWrite(update.contentHash);
-    _clipboard.writeText(text);
+    _clipboard.writeImagePng(imageItem.data);
     _currentHash = update.contentHash;
 
     _log.debug(
-      () => 'applied a clipboard update from ${update.originDeviceId}',
-      fields: <String, Object?>{'bytes': text.length},
+      () => 'applied a clipboard image update from ${update.originDeviceId}',
+      fields: <String, Object?>{'bytes': imageItem.data.length},
     );
     return true;
   }
@@ -260,25 +350,50 @@ final class ClipboardSyncService {
     if (_clipboard.isConcealed) return null;
 
     final text = _clipboard.readText();
-    if (text == null || text.isEmpty) return null;
+    if (text != null && text.isNotEmpty) {
+      final bytes = utf8.encode(text);
+      if (bytes.length > kMaxAutoSyncTextBytes) return null;
 
-    final bytes = utf8.encode(text);
-    if (bytes.length > kMaxAutoSyncTextBytes) return null;
+      return ClipboardUpdate(
+        items: <ClipboardItem>[
+          ClipboardItem(
+            contentType: _looksLikeUrl(text)
+                ? ClipboardContentType.url
+                : ClipboardContentType.text,
+            data: Uint8List.fromList(bytes),
+          ),
+        ],
+        contentHash: await _hash(bytes),
+        originDeviceId: localDeviceId.value,
+        originSequence: _localSequence,
+        isSensitive: false,
+      );
+    }
 
-    return ClipboardUpdate(
-      items: <ClipboardItem>[
-        ClipboardItem(
-          contentType: _looksLikeUrl(text)
-              ? ClipboardContentType.url
-              : ClipboardContentType.text,
-          data: Uint8List.fromList(bytes),
-        ),
-      ],
-      contentHash: await _hash(bytes),
-      originDeviceId: localDeviceId.value,
-      originSequence: _localSequence,
-      isSensitive: false,
-    );
+    if (_allowImages) {
+      final imageBytes = _clipboard.readImagePng();
+      if (imageBytes != null &&
+          imageBytes.isNotEmpty &&
+          imageBytes.length <= kMaxAutoSyncImageBytes) {
+        final data = imageBytes is Uint8List
+            ? imageBytes
+            : Uint8List.fromList(imageBytes);
+        return ClipboardUpdate(
+          items: <ClipboardItem>[
+            ClipboardItem(
+              contentType: ClipboardContentType.imagePng,
+              data: data,
+            ),
+          ],
+          contentHash: await _hash(data),
+          originDeviceId: localDeviceId.value,
+          originSequence: _localSequence,
+          isSensitive: false,
+        );
+      }
+    }
+
+    return null;
   }
 
   /// Decides a simultaneous-change conflict.
