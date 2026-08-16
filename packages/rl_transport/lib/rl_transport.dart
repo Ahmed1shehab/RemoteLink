@@ -17,6 +17,9 @@ library;
 
 export 'src/discovery/beacon.dart';
 export 'src/discovery/udp_discovery.dart';
+export 'src/transfer/receiver.dart';
+export 'src/transfer/sender.dart';
+export 'src/transfer/storage.dart';
 export 'src/transport/client.dart';
 export 'src/transport/framed_connection.dart';
 export 'src/transport/handshake_driver.dart';

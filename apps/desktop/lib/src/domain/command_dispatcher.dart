@@ -27,6 +27,7 @@ final class CommandDispatcher {
     required this.onMediaCommand,
     required this.onVolumeCommand,
     required this.onDeviceRename,
+    required this.onFileTransferMessage,
   }) : _input = input;
 
   final InputBackend _input;
@@ -43,6 +44,7 @@ final class CommandDispatcher {
   final void Function(MediaCommand command) onMediaCommand;
   final void Function(VolumeCommand command) onVolumeCommand;
   final void Function(DeviceRename command) onDeviceRename;
+  final void Function(Message message) onFileTransferMessage;
 
   final Log _log = Log.scoped('desktop.dispatcher');
 
@@ -143,6 +145,13 @@ final class CommandDispatcher {
           return false;
         }
         onDeviceRename(DeviceRename(sanitised));
+
+      case FileOffer() ||
+            FileAccept() ||
+            FileChunk() ||
+            FileComplete() ||
+            FileAbort():
+        onFileTransferMessage(message);
 
       default:
         _unsupported++;

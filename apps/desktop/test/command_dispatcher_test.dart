@@ -118,4 +118,45 @@ void main() {
       }
     });
   });
+
+  group('CommandDispatcher file transfer', () {
+    final offer = FileOffer(
+      transferId: 'transfer-1',
+      files: <OfferedFile>[
+        OfferedFile(
+          fileId: 'file-1',
+          fileName: 'safe.txt',
+          size: 4,
+          fileType: 'text/plain',
+        ),
+      ],
+    );
+
+    test('refuses a standard-tier offer on the receiving boundary', () {
+      var called = false;
+      final dispatcher = createTestDispatcher(
+        onFileTransferMessage: (_) => called = true,
+      );
+
+      expect(
+        dispatcher.dispatch(offer, PermissionTier.standard),
+        isFalse,
+      );
+      expect(called, isFalse);
+      expect(dispatcher.deniedCount, 1);
+    });
+
+    test('routes an extended-tier offer', () {
+      Message? routed;
+      final dispatcher = createTestDispatcher(
+        onFileTransferMessage: (message) => routed = message,
+      );
+
+      expect(
+        dispatcher.dispatch(offer, PermissionTier.extended),
+        isTrue,
+      );
+      expect(routed, same(offer));
+    });
+  });
 }

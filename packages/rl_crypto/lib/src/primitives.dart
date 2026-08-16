@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:rl_core/rl_core.dart';
 
 /// Thin wrappers over `package:cryptography` with RemoteLink's parameters baked
 /// in.
@@ -49,8 +50,7 @@ abstract final class Primitives {
   static const int secretLength = 32;
 
   /// Generates a fresh X25519 key pair.
-  static Future<SimpleKeyPair> generateKeyPair() =>
-      keyExchange.newKeyPair();
+  static Future<SimpleKeyPair> generateKeyPair() => keyExchange.newKeyPair();
 
   /// Reconstructs a key pair from stored private key bytes.
   static Future<SimpleKeyPair> keyPairFromSeed(List<int> privateKeyBytes) =>
@@ -75,6 +75,16 @@ abstract final class Primitives {
   static Future<Uint8List> sha256(List<int> data) async =>
       Uint8List.fromList((await hash.hash(data)).bytes);
 
+  /// SHA-256 of a byte stream without retaining the whole input in memory.
+  static Future<Uint8List> sha256Stream(Stream<List<int>> data) async {
+    final sink = hash.toSync().newHashSink();
+    await for (final chunk in data) {
+      sink.add(chunk);
+    }
+    sink.close();
+    return Uint8List.fromList((await sink.hash()).bytes);
+  }
+
   /// HKDF (RFC 5869) with SHA-256.
   ///
   /// [salt] is the extract salt and [info] the expand context string. Distinct
@@ -93,6 +103,59 @@ abstract final class Primitives {
       info: info.codeUnits,
     );
     return Uint8List.fromList(await derived.extractBytes());
+  }
+
+  /// Seals one independently addressed payload with ChaCha20-Poly1305.
+  ///
+  /// Unlike [DirectionalCipher], the caller supplies the nonce. This is used
+  /// for file chunks whose address must survive reconnects and random access.
+  static Future<Uint8List> sealAtNonce({
+    required List<int> key,
+    required List<int> nonce,
+    required List<int> plaintext,
+    List<int> aad = const <int>[],
+  }) async {
+    final box = await aead.encrypt(
+      plaintext,
+      secretKey: SecretKey(key),
+      nonce: nonce,
+      aad: aad,
+    );
+    return Uint8List.fromList(<int>[...box.cipherText, ...box.mac.bytes]);
+  }
+
+  /// Opens a payload produced by [sealAtNonce].
+  static Future<Uint8List> openAtNonce({
+    required List<int> key,
+    required List<int> nonce,
+    required List<int> sealed,
+    List<int> aad = const <int>[],
+  }) async {
+    if (sealed.length < macLength) {
+      throw const SecurityError(
+        'ciphertext_too_short',
+        'sealed payload shorter than the authentication tag',
+      );
+    }
+    final splitAt = sealed.length - macLength;
+    try {
+      final opened = await aead.decrypt(
+        SecretBox(
+          sealed.sublist(0, splitAt),
+          nonce: nonce,
+          mac: Mac(sealed.sublist(splitAt)),
+        ),
+        secretKey: SecretKey(key),
+        aad: aad,
+      );
+      return Uint8List.fromList(opened);
+    } on SecretBoxAuthenticationError catch (error) {
+      throw SecurityError(
+        'authentication_failed',
+        'payload authentication failed',
+        cause: error,
+      );
+    }
   }
 
   /// HMAC-SHA256 of [data] under [key].
