@@ -103,10 +103,16 @@ final class DesktopService {
     required this.appVersion,
     required Clock clock,
     this.servicePort = kDefaultServicePort,
+    InputBackend? input,
+    ClipboardBackend? clipboardBackend,
+    MediaBackend? media,
+    SystemInfoBackend? systemInfo,
   })  : _clock = clock,
-        _input = NativeBackends.createInput(),
-        _clipboardBackend = NativeBackends.createClipboard(),
-        _media = NativeBackends.createMedia();
+        _input = input ?? NativeBackends.createInput(),
+        _clipboardBackend =
+            clipboardBackend ?? NativeBackends.createClipboard(),
+        _media = media ?? NativeBackends.createMedia(),
+        _systemInfo = systemInfo ?? NativeBackends.createSystemInfo();
 
   final DeviceIdentity identity;
   final TrustStore trustStore;
@@ -118,6 +124,7 @@ final class DesktopService {
   final InputBackend _input;
   final ClipboardBackend _clipboardBackend;
   final MediaBackend _media;
+  final SystemInfoBackend _systemInfo;
   final Log _log = Log.scoped('desktop.service');
 
   late final PairingCoordinator _pairing = PairingCoordinator(
@@ -300,6 +307,7 @@ final class DesktopService {
 
     _startPermissionWatch();
     _startMediaWatch();
+    _startSystemWatch();
     await _refreshLocalAddresses();
 
     _log.info(
@@ -804,6 +812,33 @@ final class DesktopService {
     }
   }
 
+  /// Publishes host telemetry to all connected sessions.
+  Future<void> _publishSystemStatus() async {
+    if (_devices.isEmpty) return;
+
+    final volume = await _media.volume();
+    final metrics = await _systemInfo.metrics();
+
+    final status = SystemStatus(
+      volume: volume.level,
+      isMuted: volume.muted,
+      uptimeSeconds: metrics.uptimeSeconds ?? 0,
+      batteryPercent: metrics.batteryPercent,
+      isCharging: metrics.isCharging,
+      cpuPercent: metrics.cpuPercent,
+      memoryPercent: metrics.memoryPercent,
+    );
+
+    for (final device in _devices.values) {
+      if (!device.serverSession.session.isEstablished) continue;
+      try {
+        await device.serverSession.session.send(status);
+      } on TransportError {
+        // Tearing down; its watcher will clean up.
+      }
+    }
+  }
+
   /// Polls media state while at least one phone is connected.
   ///
   /// Polling only when someone is watching matters: this shells out to
@@ -817,6 +852,19 @@ final class DesktopService {
   }
 
   Timer? _mediaWatch;
+
+  /// Polls system status (battery, load, uptime) while at least one phone is
+  /// connected.
+  ///
+  /// ZERO work when no device is connected, matching [_startMediaWatch].
+  void _startSystemWatch() {
+    _systemWatch = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (_devices.isEmpty) return;
+      unawaited(_publishSystemStatus());
+    });
+  }
+
+  Timer? _systemWatch;
 
   void _publishDevices() {
     if (!_deviceChanges.isClosed) _deviceChanges.add(devices);
@@ -844,6 +892,8 @@ final class DesktopService {
     _permissionWatch = null;
     _mediaWatch?.cancel();
     _mediaWatch = null;
+    _systemWatch?.cancel();
+    _systemWatch = null;
     await _inputAvailability.close();
 
     await _acceptedSubscription?.cancel();
@@ -864,6 +914,7 @@ final class DesktopService {
     _input.dispose();
     _clipboardBackend.dispose();
     _media.dispose();
+    _systemInfo.dispose();
 
     _devices.clear();
     await _deviceChanges.close();
