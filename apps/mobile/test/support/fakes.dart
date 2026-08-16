@@ -9,15 +9,20 @@ import 'package:rl_transport/rl_transport.dart';
 /// Provider state shared by device-list widget tests.
 List<Override> mobileDeviceListOverrides({
   required bool discoveryOperational,
+  TrustStore? trustStore,
+  RemoteLinkClient? client,
+  List<DiscoveredDevice> discovered = const <DiscoveredDevice>[],
 }) {
   final discovery = FakeDiscoveryBackend(
     isOperational: discoveryOperational,
+    current: discovered,
   );
-  final trustStore = InMemoryTrustStore();
+  final peers = trustStore ?? InMemoryTrustStore();
 
   return <Override>[
     discoveryProvider.overrideWith((ref) async => discovery),
-    trustStoreProvider.overrideWith((ref) async => trustStore),
+    trustStoreProvider.overrideWith((ref) async => peers),
+    if (client != null) clientProvider.overrideWith((ref) async => client),
     identityProvider.overrideWith(
       (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
     ),
@@ -30,13 +35,16 @@ List<Override> mobileDeviceListOverrides({
 
 /// Inert discovery implementation: no sockets, Bonjour, or plugin channels.
 final class FakeDiscoveryBackend implements DiscoveryBackend {
-  FakeDiscoveryBackend({required this.isOperational});
+  FakeDiscoveryBackend({
+    required this.isOperational,
+    this.current = const <DiscoveredDevice>[],
+  });
 
   @override
   final bool isOperational;
 
   @override
-  List<DiscoveredDevice> get current => const <DiscoveredDevice>[];
+  final List<DiscoveredDevice> current;
 
   @override
   Stream<List<DiscoveredDevice>> get devices =>

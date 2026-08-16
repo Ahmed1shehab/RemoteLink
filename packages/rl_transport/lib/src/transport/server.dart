@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
@@ -162,8 +163,20 @@ final class RemoteLinkServer {
         identity: identity,
         capabilities: capabilities,
         clock: _clock,
-        lookupPeer: trustStore.findByPublicKey,
+        lookupPeer: _lookupPeerForHandshake,
       );
+
+      // The crypto handshake cannot return session keys when its lookup sees a
+      // revoked record. Defer that one trust decision until immediately after
+      // authentication so the rejection can use the established session keys
+      // instead of becoming a plaintext handshake error or an ambiguous drop.
+      final peer = await trustStore.findByPublicKey(
+        result.peerStaticPublicKey,
+      );
+      if (peer?.revoked ?? false) {
+        await _rejectRevokedSession(session);
+        return;
+      }
 
       await _register(
         ServerSession(
@@ -187,6 +200,28 @@ final class RemoteLinkServer {
     } finally {
       _handshakesInFlight--;
     }
+  }
+
+  Future<TrustedPeer?> _lookupPeerForHandshake(Uint8List publicKey) async {
+    final peer = await trustStore.findByPublicKey(publicKey);
+    if (peer == null || !peer.revoked) return peer;
+    return peer.copyWith(revoked: false);
+  }
+
+  Future<void> _rejectRevokedSession(Session session) async {
+    if (session.isEstablished) {
+      try {
+        await session.send(
+          const ErrorMessage(
+            code: ProtocolErrorCode.revoked,
+            detail: 'this device was revoked',
+          ),
+        );
+      } on Object {
+        // Best effort; close below still releases the session immediately.
+      }
+    }
+    await session.close(reason: CloseReason.revoked);
   }
 
   Future<void> _register(ServerSession accepted) async {
@@ -235,7 +270,11 @@ final class RemoteLinkServer {
   }) async {
     final session = _sessions[peerId.value];
     if (session == null) return;
-    await session.session.close(reason: reason);
+    if (reason == CloseReason.revoked) {
+      await _rejectRevokedSession(session.session);
+    } else {
+      await session.session.close(reason: reason);
+    }
     await _unregister(peerId);
   }
 

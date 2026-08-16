@@ -115,11 +115,13 @@ final class Session {
     required this.capabilities,
     required this.isServer,
     bool requiresPairing = false,
+    List<Uint8List> initialRecords = const <Uint8List>[],
   })  : _connection = connection,
         _keys = keys,
         _clock = clock,
         _codec = MessageCodec(clock: clock),
-        _state = requiresPairing ? SessionState.pairing : SessionState.established {
+        _state =
+            requiresPairing ? SessionState.pairing : SessionState.established {
     // The handlers are async, but `listen` expects void callbacks. Wrapping in
     // `unawaited` states that the fire-and-forget is intentional rather than an
     // accidentally dropped Future — the analyzer treats those as errors here.
@@ -127,20 +129,29 @@ final class Session {
     // asynchronous, so without this two records arriving in one event-loop turn
     // could finish out of order and be dispatched out of order — a mouse-up
     // delivered before its mouse-down, which the desktop would apply literally.
+    for (final record in initialRecords) {
+      _enqueueRecord(record);
+    }
     _subscription = _connection.records.listen(
-      (record) {
-        _readChain = _readChain
-            .then((_) => _onRecord(record))
-            .then((_) {}, onError: (Object error, StackTrace stack) {
-          _log.error('record handling failed', error: error, stackTrace: stack);
-        });
-      },
+      _enqueueRecord,
       onError: (Object error, StackTrace stack) =>
           unawaited(_onTransportError(error, stack)),
-      onDone: () => unawaited(_teardown(CloseReason.shuttingDown)),
+      // TCP may deliver the final records and EOF in the same event-loop turn.
+      // Drain records already handed to us before disposing the receive key,
+      // or a terminal error immediately followed by close can be lost.
+      onDone: () => unawaited(
+        _readChain.then((_) => _teardown(CloseReason.shuttingDown)),
+      ),
       cancelOnError: false,
     );
     _startHeartbeat();
+  }
+
+  void _enqueueRecord(Uint8List record) {
+    _readChain = _readChain.then((_) => _onRecord(record)).then((_) {},
+        onError: (Object error, StackTrace stack) {
+      _log.error('record handling failed', error: error, stackTrace: stack);
+    });
   }
 
   final FramedConnection _connection;

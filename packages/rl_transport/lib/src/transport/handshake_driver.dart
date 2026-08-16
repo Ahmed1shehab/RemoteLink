@@ -76,7 +76,8 @@ abstract final class HandshakeDriver {
 
         final confirmFrame = await reader.next();
         _requireType(confirmFrame, MessageType.handshakeFinish);
-        final result = await handshake.receiveServerConfirm(confirmFrame.payload);
+        final result =
+            await handshake.receiveServerConfirm(confirmFrame.payload);
 
         log.info(
           'handshake complete',
@@ -87,8 +88,10 @@ abstract final class HandshakeDriver {
           },
         );
 
-        await reader.detach();
-        return Session(
+        // Attach the encrypted-session listener before detaching the handshake
+        // reader. A server may send its first session record immediately after
+        // the confirmation, and broadcast records have no replay buffer.
+        final session = Session(
           connection: connection,
           keys: result.keys,
           clock: clock,
@@ -98,7 +101,10 @@ abstract final class HandshakeDriver {
           capabilities: result.capabilities,
           isServer: false,
           requiresPairing: result.requiresPairing,
+          initialRecords: reader.takePendingRecords(),
         );
+        await reader.detach();
+        return session;
       });
     } on Object {
       await reader.detach();
@@ -241,7 +247,10 @@ abstract final class HandshakeDriver {
 final class _RecordReader {
   _RecordReader(this._connection) {
     _subscription = _connection.records.listen(
-      _queue.add,
+      (record) {
+        _pendingRecords.add(record);
+        _queue.add(record);
+      },
       onError: (Object error, StackTrace stack) {
         if (_queue.hasListener) _queue.addError(error, stack);
       },
@@ -253,6 +262,7 @@ final class _RecordReader {
 
   final FramedConnection _connection;
   final StreamController<Uint8List> _queue = StreamController<Uint8List>();
+  final List<Uint8List> _pendingRecords = <Uint8List>[];
   late final StreamSubscription<Uint8List> _subscription;
   late final StreamIterator<Uint8List> _iterator;
 
@@ -264,7 +274,16 @@ final class _RecordReader {
         'peer closed the connection during the handshake',
       );
     }
+    _pendingRecords.removeAt(0);
     return Frame.readFrom(ByteReader(_iterator.current));
+  }
+
+  /// Records that arrived after the last handshake step but before [Session]
+  /// could attach to the broadcast connection stream.
+  List<Uint8List> takePendingRecords() {
+    final pending = List<Uint8List>.of(_pendingRecords);
+    _pendingRecords.clear();
+    return pending;
   }
 
   Future<void> detach() async {
