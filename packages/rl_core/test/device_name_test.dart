@@ -249,5 +249,75 @@ void main() {
         expect(sanitiseDeviceName(thumbs65), isNull);
       });
     });
+
+    // These are the justification for replacing the hand-written normalisation
+    // table with a complete implementation. Each pair below decomposes outside
+    // the Latin/Greek/Cyrillic range the old table covered, so the old code
+    // passed the decomposed form through unchanged and the two spellings were
+    // stored as different names — which is precisely the aliasing that
+    // normalising exists to prevent.
+    group('normalises beyond the range the previous partial table covered', () {
+      /// Asserts that a decomposed and a precomposed spelling of the same text
+      /// survive sanitisation as one identical string.
+      void expectSameAfterNormalisation(
+        String decomposed,
+        String precomposed,
+        String description,
+      ) {
+        final a = sanitiseDeviceName(decomposed);
+        final b = sanitiseDeviceName(precomposed);
+        expect(a, isNotNull, reason: '$description: decomposed was rejected');
+        expect(b, isNotNull, reason: '$description: precomposed was rejected');
+        expect(a, b, reason: '$description: spellings did not converge');
+      }
+
+      test('Vietnamese with stacked diacritics', () {
+        // U+1EC7 LATIN SMALL LETTER E WITH CIRCUMFLEX AND DOT BELOW, which
+        // decomposes through two combining marks rather than one.
+        expectSameAfterNormalisation(
+          'Tiệ́ng Việt',
+          'Tiệ́ng Việt'.replaceAll('ệ', 'ệ'),
+          'Vietnamese',
+        );
+        expectSameAfterNormalisation(
+          'Việt',
+          'Việt',
+          'Vietnamese e-circumflex-dot-below',
+        );
+      });
+
+      test('Devanagari composed consonant with nukta', () {
+        // U+0929 DEVANAGARI LETTER NNNA = U+0928 + U+093C.
+        expectSameAfterNormalisation(
+          'ऩ',
+          'ऩ',
+          'Devanagari nukta',
+        );
+      });
+
+      test('Arabic letter with hamza above', () {
+        // U+0623 ARABIC LETTER ALEF WITH HAMZA ABOVE = U+0627 + U+0654.
+        expectSameAfterNormalisation(
+          'أ',
+          'أ',
+          'Arabic hamza',
+        );
+      });
+
+      test('Hebrew letter with dagesh', () {
+        // U+FB31 HEBREW LETTER BET WITH DAGESH = U+05D1 + U+05BC.
+        expectSameAfterNormalisation(
+          'בּ',
+          'בּ',
+          'Hebrew dagesh',
+        );
+      });
+
+      test('Hangul syllables still compose, as they did before', () {
+        // The old table handled this correctly via the algorithmic path; the
+        // replacement must not regress it.
+        expectSameAfterNormalisation('가', '가', 'Hangul');
+      });
+    });
   });
 }
