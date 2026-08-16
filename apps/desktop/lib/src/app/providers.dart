@@ -7,8 +7,10 @@ import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_native/rl_native.dart';
 import 'package:rl_protocol/rl_protocol.dart';
+import 'package:rl_transport/rl_transport.dart';
 
 import '../domain/desktop_service.dart';
+import '../domain/file_transfer_store.dart';
 
 /// Riverpod, not Bloc.
 ///
@@ -81,11 +83,21 @@ final deviceNameProvider =
 /// Injectable clock, so tests can drive timing without waiting.
 final clockProvider = Provider<Clock>((ref) => SystemClock());
 
+final incomingTransferStoreProvider =
+    FutureProvider<IncomingTransferStore>((ref) async {
+  final downloads = await getDownloadsDirectory();
+  final Directory base =
+      downloads ?? await ref.watch(appDirectoryProvider.future);
+  final destination = Directory('${base.path}/RemoteLink');
+  return FileTransferStore(destination);
+});
+
 /// The running service.
 final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
   final identity = await ref.watch(identityProvider.future);
   final trustStore = await ref.watch(trustStoreProvider.future);
   final name = ref.watch(deviceNameProvider);
+  final transferStore = await ref.watch(incomingTransferStoreProvider.future);
 
   final service = DesktopService(
     identity: identity,
@@ -93,6 +105,7 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
     deviceName: name,
     appVersion: '0.1.0',
     clock: ref.watch(clockProvider),
+    incomingTransferStore: transferStore,
   );
 
   await service.start();

@@ -216,6 +216,8 @@ final class Session {
 
   /// Lossy messages waiting to go out, keyed by type for coalescing.
   final Map<MessageType, Message> _pendingLossy = <MessageType, Message>{};
+  final Map<int, Completer<void>> _pendingAcknowledgements =
+      <int, Completer<void>>{};
   bool _flushScheduled = false;
 
   SessionState _state;
@@ -236,6 +238,9 @@ final class Session {
   bool get isEstablished => _state == SessionState.established;
 
   String get remoteAddress => _connection.remoteAddress;
+
+  /// A defensive copy of the handshake exporter for session-bound features.
+  Uint8List get exporterSecret => Uint8List.fromList(_keys.exporterSecret);
 
   /// Snapshot of current health.
   ConnectionQuality get currentQuality => ConnectionQuality(
@@ -264,6 +269,42 @@ final class Session {
       return;
     }
     await _writeNow(message, requireAck: requireAck);
+  }
+
+  /// Sends a reliable application message and waits for the peer's frame ack.
+  Future<void> sendAcknowledged(
+    Message message, {
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    if (_state == SessionState.closed) {
+      throw const TransportError('session_closed', 'session is closed');
+    }
+    final acknowledged = Completer<void>();
+    // Attach an error handler immediately. A transport failure can tear the
+    // session down while the write itself is still being awaited.
+    unawaited(acknowledged.future.catchError((Object _) {}));
+    int? sequence;
+    final queued = _writeChain.then((_) async {
+      final frame = _codec.encode(message, requireAck: true);
+      sequence = frame.sequence;
+      _pendingAcknowledgements[frame.sequence] = acknowledged;
+      await _performFrameWrite(frame);
+    });
+    _writeChain = queued.then((_) {}, onError: (Object _) {});
+    try {
+      await queued;
+      await acknowledged.future.timeout(timeout);
+    } on TimeoutException catch (error) {
+      throw TransportError(
+        'ack_timeout',
+        'peer did not acknowledge ${message.type.name}',
+        cause: error,
+      );
+    } finally {
+      if (sequence case final value?) {
+        _pendingAcknowledgements.remove(value);
+      }
+    }
   }
 
   void _enqueueLossy(Message message) {
@@ -331,7 +372,10 @@ final class Session {
     if (_state == SessionState.closed) return;
 
     final frame = _codec.encode(message, requireAck: requireAck);
+    await _performFrameWrite(frame);
+  }
 
+  Future<void> _performFrameWrite(Frame frame) async {
     // The whole frame — header included — is encrypted, so an observer learns
     // only that a message of some size was sent. Message types stay private,
     // which matters because a stream of 22-byte frames at 120 Hz would
@@ -381,6 +425,10 @@ final class Session {
     try {
       message = _codec.decode(frame);
     } on ProtocolError catch (e) {
+      if (e.code == 'protocol.file_chunk_checksum_mismatch') {
+        _log.warn('dropping file chunk with a bad CRC-32C');
+        return;
+      }
       _log.error('payload decode failed', error: e);
       await _teardown(CloseReason.protocolError);
       return;
@@ -415,6 +463,11 @@ final class Session {
       case CloseMessage():
         _closeReason = message.reason;
         await _teardown(message.reason);
+        return;
+      case Ack():
+        _pendingAcknowledgements
+            .remove(message.acknowledgedSequence)
+            ?.complete();
         return;
       // The code is destructured out of the pattern rather than read as
       // `message.code` inside the closure: pattern promotion does not reach
@@ -534,6 +587,15 @@ final class Session {
     _heartbeat?.cancel();
     _heartbeat = null;
     _pendingLossy.clear();
+    final pending = _pendingAcknowledgements.values.toList();
+    _pendingAcknowledgements.clear();
+    for (final acknowledgement in pending) {
+      if (!acknowledgement.isCompleted) {
+        acknowledgement.completeError(
+          const TransportError('session_closed', 'session closed before ack'),
+        );
+      }
+    }
 
     await _subscription.cancel();
     await _connection.close();

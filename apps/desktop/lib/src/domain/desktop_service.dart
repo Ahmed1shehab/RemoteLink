@@ -107,6 +107,7 @@ final class DesktopService {
     ClipboardBackend? clipboardBackend,
     MediaBackend? media,
     SystemInfoBackend? systemInfo,
+    this.incomingTransferStore,
   })  : _clock = clock,
         _input = input ?? NativeBackends.createInput(),
         _clipboardBackend =
@@ -119,6 +120,7 @@ final class DesktopService {
   final String deviceName;
   final String appVersion;
   final int servicePort;
+  final IncomingTransferStore? incomingTransferStore;
 
   final Clock _clock;
   final InputBackend _input;
@@ -149,6 +151,7 @@ final class DesktopService {
     onMediaCommand: _onMediaCommand,
     onVolumeCommand: _onVolumeCommand,
     onDeviceRename: _onDeviceRename,
+    onFileTransferMessage: _onFileTransferMessage,
   );
 
   RemoteLinkServer? _server;
@@ -158,6 +161,8 @@ final class DesktopService {
   final Map<String, ConnectedDevice> _devices = <String, ConnectedDevice>{};
   final Map<String, StreamSubscription<Message>> _messageSubscriptions =
       <String, StreamSubscription<Message>>{};
+  final Map<String, FileTransferReceiver> _transferReceivers =
+      <String, FileTransferReceiver>{};
   DeviceId? _activeSessionPeerId;
 
   final StreamController<List<ConnectedDevice>> _deviceChanges =
@@ -407,6 +412,15 @@ final class DesktopService {
     );
     _publishDevices();
 
+    final store = incomingTransferStore;
+    if (store != null) {
+      _transferReceivers[session.peerId.value] = FileTransferReceiver(
+        exporterSecret: session.session.exporterSecret,
+        store: store,
+        storageNamespace: session.peerId.value,
+      );
+    }
+
     _messageSubscriptions[session.peerId.value] = session.session.messages
         .listen((message) => unawaited(_onMessage(session, message)));
 
@@ -485,13 +499,27 @@ final class DesktopService {
         }
 
       default:
-        _dispatcher.dispatch(message, device.tier);
+        _activeSessionPeerId = session.peerId;
+        try {
+          final applied = _dispatcher.dispatch(message, device.tier);
+          if (!applied && message is FileOffer) {
+            await session.session.send(
+              FileAbort(
+                transferId: message.transferId,
+                reason: FileAbortReason.declined,
+              ),
+            );
+          }
+        } finally {
+          _activeSessionPeerId = null;
+        }
     }
   }
 
   Future<void> _onEnded(ServerSession session) async {
     await _messageSubscriptions.remove(session.peerId.value)?.cancel();
     _devices.remove(session.peerId.value);
+    await _transferReceivers.remove(session.peerId.value)?.dispose();
     _publishDevices();
 
     // Releasing held input is not optional. Without it a session that dropped
@@ -604,6 +632,102 @@ final class DesktopService {
     final peerId = _activeSessionPeerId;
     if (peerId == null) return;
     unawaited(_renamePeer(peerId, command.name));
+  }
+
+  void _onFileTransferMessage(Message message) {
+    final peerId = _activeSessionPeerId;
+    if (peerId == null) return;
+    unawaited(_handleFileTransferMessage(peerId, message));
+  }
+
+  Future<void> _handleFileTransferMessage(
+    DeviceId peerId,
+    Message message,
+  ) async {
+    final device = _devices[peerId.value];
+    final receiver = _transferReceivers[peerId.value];
+    if (device == null || receiver == null) {
+      if (message is FileOffer && device != null) {
+        await device.serverSession.session.send(
+          FileAbort(
+            transferId: message.transferId,
+            reason: FileAbortReason.ioError,
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      switch (message) {
+        case FileOffer():
+          final decision =
+              await receiver.acceptOffer(message, tier: device.tier);
+          await device.serverSession.session.send(decision.accept);
+          if (decision.abort case final abort?) {
+            await device.serverSession.session.send(abort);
+          }
+        case FileChunk():
+          final result =
+              await receiver.receiveChunk(message, tier: device.tier);
+          if (result == ChunkDisposition.refused) {
+            await device.serverSession.session.send(
+              FileAbort(
+                transferId: message.transferId,
+                fileId: message.fileId,
+                reason: FileAbortReason.declined,
+              ),
+            );
+          }
+        case FileComplete():
+          final result = await receiver.complete(message, tier: device.tier);
+          if (result == CompletionDisposition.hashMismatch ||
+              result == CompletionDisposition.incomplete) {
+            await device.serverSession.session.send(
+              FileAbort(
+                transferId: message.transferId,
+                fileId: message.fileId,
+                reason: result == CompletionDisposition.hashMismatch
+                    ? FileAbortReason.hashMismatch
+                    : FileAbortReason.ioError,
+              ),
+            );
+          }
+        case FileAbort():
+          await receiver.abort(message, tier: device.tier);
+        case FileAccept():
+        // Desktop-originated sending is intentionally outside this task.
+        default:
+          break;
+      }
+    } on Object catch (error, stackTrace) {
+      _log.error(
+        'incoming file transfer failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      final transferId = switch (message) {
+        FileOffer(:final transferId) ||
+        FileAccept(:final transferId) ||
+        FileChunk(:final transferId) ||
+        FileComplete(:final transferId) ||
+        FileAbort(:final transferId) =>
+          transferId,
+        _ => null,
+      };
+      if (transferId != null && device.serverSession.session.isEstablished) {
+        try {
+          await device.serverSession.session.send(
+            FileAbort(
+              transferId: transferId,
+              reason: FileAbortReason.ioError,
+            ),
+          );
+        } on TransportError {
+          // The session is already closing; the partial remains resumable.
+        }
+      }
+    }
   }
 
   Future<void> _renamePeer(DeviceId peerId, String newName) async {

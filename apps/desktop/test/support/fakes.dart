@@ -135,6 +135,7 @@ CommandDispatcher createTestDispatcher({
   void Function(MediaCommand)? onMediaCommand,
   void Function(VolumeCommand)? onVolumeCommand,
   void Function(DeviceRename)? onDeviceRename,
+  void Function(Message)? onFileTransferMessage,
 }) =>
     CommandDispatcher(
       input: input ?? const UnsupportedInputBackend('test'),
@@ -147,4 +148,5 @@ CommandDispatcher createTestDispatcher({
       onMediaCommand: onMediaCommand ?? (_) {},
       onVolumeCommand: onVolumeCommand ?? (_) {},
       onDeviceRename: onDeviceRename ?? (_) {},
+      onFileTransferMessage: onFileTransferMessage ?? (_) {},
     );
