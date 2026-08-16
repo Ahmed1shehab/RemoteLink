@@ -48,6 +48,7 @@ void main() {
       input: const UnsupportedInputBackend('test'),
       clipboardBackend: const UnsupportedClipboardBackend(),
       media: const UnsupportedMediaBackend(),
+      brightness: const UnsupportedBrightnessBackend('test'),
       systemInfo: spy,
     );
     return (service, spy);
@@ -99,6 +100,35 @@ void main() {
         () async {
       final (service, _) = await buildService();
       expect(service.currentCapabilities.has(Capabilities.gestures), isFalse);
+    });
+  });
+
+  group('buildCapabilities brightness advertising', () {
+    test(
+        'advertises Capabilities.brightness only when brightnessAvailable is true',
+        () {
+      final capsWithoutBrightness = buildCapabilities(
+        inputAvailable: true,
+        clipboardAvailable: true,
+        mediaAvailable: true,
+        brightnessAvailable: false,
+      );
+      expect(capsWithoutBrightness.has(Capabilities.brightness), isFalse);
+
+      final capsWithBrightness = buildCapabilities(
+        inputAvailable: true,
+        clipboardAvailable: true,
+        mediaAvailable: true,
+        brightnessAvailable: true,
+      );
+      expect(capsWithBrightness.has(Capabilities.brightness), isTrue);
+    });
+
+    test(
+        'currentCapabilities does not advertise brightness for unsupported backend',
+        () async {
+      final (service, _) = await buildService();
+      expect(service.currentCapabilities.has(Capabilities.brightness), isFalse);
     });
   });
 }

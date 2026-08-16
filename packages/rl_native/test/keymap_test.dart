@@ -238,6 +238,15 @@ void main() {
       );
     });
 
+    test('brightness backend reports unavailable and does nothing', () async {
+      const backend = UnsupportedBrightnessBackend('no driver');
+      expect(backend.isAvailable, isFalse);
+      expect(backend.unavailableReason, 'no driver');
+      expect(await backend.level(), 0.0);
+      expect(() async => backend.setLevel(0.5), returnsNormally);
+      expect(() => backend.dispose(), returnsNormally);
+    });
+
     test('system info backend reports unavailable and returns empty metrics',
         () async {
       const backend = UnsupportedSystemInfoBackend('no driver');

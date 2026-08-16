@@ -26,6 +26,7 @@ final class CommandDispatcher {
     required this.onClipboardUpdate,
     required this.onMediaCommand,
     required this.onVolumeCommand,
+    required this.onBrightnessCommand,
     required this.onDeviceRename,
     required this.onFileTransferMessage,
   }) : _input = input;
@@ -43,6 +44,7 @@ final class CommandDispatcher {
   final void Function(ClipboardUpdate update) onClipboardUpdate;
   final void Function(MediaCommand command) onMediaCommand;
   final void Function(VolumeCommand command) onVolumeCommand;
+  final void Function(BrightnessCommand command) onBrightnessCommand;
   final void Function(DeviceRename command) onDeviceRename;
   final void Function(Message message) onFileTransferMessage;
 
@@ -134,6 +136,9 @@ final class CommandDispatcher {
 
       case VolumeCommand():
         onVolumeCommand(message);
+
+      case BrightnessCommand():
+        onBrightnessCommand(message);
 
       case PowerCommand():
         onPowerCommand(message);

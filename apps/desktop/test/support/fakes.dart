@@ -141,6 +141,7 @@ CommandDispatcher createTestDispatcher({
   void Function(ClipboardUpdate)? onClipboardUpdate,
   void Function(MediaCommand)? onMediaCommand,
   void Function(VolumeCommand)? onVolumeCommand,
+  void Function(BrightnessCommand)? onBrightnessCommand,
   void Function(DeviceRename)? onDeviceRename,
   void Function(Message)? onFileTransferMessage,
 }) =>
@@ -154,6 +155,7 @@ CommandDispatcher createTestDispatcher({
       onClipboardUpdate: onClipboardUpdate ?? (_) {},
       onMediaCommand: onMediaCommand ?? (_) {},
       onVolumeCommand: onVolumeCommand ?? (_) {},
+      onBrightnessCommand: onBrightnessCommand ?? (_) {},
       onDeviceRename: onDeviceRename ?? (_) {},
       onFileTransferMessage: onFileTransferMessage ?? (_) {},
     );

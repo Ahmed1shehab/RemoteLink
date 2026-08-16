@@ -26,6 +26,7 @@ Capabilities buildCapabilities({
   required bool clipboardAvailable,
   required bool mediaAvailable,
   bool gesturesAvailable = false,
+  bool brightnessAvailable = false,
 }) {
   var capabilities = const Capabilities(
     Capabilities.powerControl |
@@ -55,6 +56,10 @@ Capabilities buildCapabilities({
     // approximates gestures via keyboard shortcuts and does not claim native
     // gesture support.
     capabilities = capabilities.plus(Capabilities.gestures);
+  }
+  if (brightnessAvailable) {
+    // Advertised only when a working brightness backend is detected.
+    capabilities = capabilities.plus(Capabilities.brightness);
   }
   return capabilities;
 }
@@ -116,6 +121,7 @@ final class DesktopService {
     InputBackend? input,
     ClipboardBackend? clipboardBackend,
     MediaBackend? media,
+    BrightnessBackend? brightness,
     SystemInfoBackend? systemInfo,
     this.incomingTransferStore,
   })  : _clock = clock,
@@ -123,6 +129,7 @@ final class DesktopService {
         _clipboardBackend =
             clipboardBackend ?? NativeBackends.createClipboard(),
         _media = media ?? NativeBackends.createMedia(),
+        _brightness = brightness ?? NativeBackends.createBrightness(),
         _systemInfo = systemInfo ?? NativeBackends.createSystemInfo();
 
   final DeviceIdentity identity;
@@ -136,6 +143,7 @@ final class DesktopService {
   final InputBackend _input;
   final ClipboardBackend _clipboardBackend;
   final MediaBackend _media;
+  final BrightnessBackend _brightness;
   final SystemInfoBackend _systemInfo;
   final Log _log = Log.scoped('desktop.service');
 
@@ -160,6 +168,7 @@ final class DesktopService {
     onRunCommand: _onRunCommand,
     onMediaCommand: _onMediaCommand,
     onVolumeCommand: _onVolumeCommand,
+    onBrightnessCommand: _onBrightnessCommand,
     onDeviceRename: _onDeviceRename,
     onFileTransferMessage: _onFileTransferMessage,
   );
@@ -238,6 +247,10 @@ final class DesktopService {
           ? 'Media control is not supported on ${NativeBackends.currentPlatform.name}'
           : 'Media backend unavailable');
 
+  bool get brightnessAvailable => _brightness.isAvailable;
+
+  String? get brightnessUnavailableReason => _brightness.unavailableReason;
+
   int get commandAppliedCount => _dispatcher.appliedCount;
 
   int get commandDeniedCount => _dispatcher.deniedCount;
@@ -253,6 +266,7 @@ final class DesktopService {
         clipboardAvailable: _clipboardBackend.isAvailable,
         mediaAvailable: _media.isAvailable,
         gesturesAvailable: _input.isAvailable && _input is MacosInputBackend,
+        brightnessAvailable: _brightness.isAvailable,
       );
 
   /// Emits whenever input availability flips.
@@ -1537,6 +1551,23 @@ final class DesktopService {
     unawaited(_publishMediaState());
   }
 
+  void _onBrightnessCommand(BrightnessCommand command) =>
+      unawaited(_runBrightnessCommand(command));
+
+  Future<void> _runBrightnessCommand(BrightnessCommand command) async {
+    if (!_brightness.isAvailable) return;
+    try {
+      if (command.relative) {
+        final current = await _brightness.level();
+        await _brightness.setLevel((current + command.value).clamp(0.0, 1.0));
+      } else {
+        await _brightness.setLevel(command.value.clamp(0.0, 1.0));
+      }
+    } catch (e, stack) {
+      _log.error('failed to set brightness', error: e, stackTrace: stack);
+    }
+  }
+
   /// Sends the current media state to every session that can use it.
   Future<void> _publishMediaState() async {
     if (_devices.isEmpty || !_media.isAvailable) return;
@@ -1684,6 +1715,7 @@ final class DesktopService {
     _input.dispose();
     _clipboardBackend.dispose();
     _media.dispose();
+    _brightness.dispose();
     _systemInfo.dispose();
 
     _devices.clear();
