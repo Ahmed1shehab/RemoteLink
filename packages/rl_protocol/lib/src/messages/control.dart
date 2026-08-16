@@ -31,6 +31,13 @@ extension type const Capabilities(int bits) {
   static const int unreliableChannel = 1 << 15;
   static const int sessionResumption = 1 << 16;
 
+  /// Display brightness adjustment.
+  ///
+  /// Set only where a working path was detected — a DDC/CI-capable external
+  /// monitor or a panel the OS exposes. A phone that never sees this bit shows
+  /// no slider, which is better than a slider that moves and changes nothing.
+  static const int brightness = 1 << 18;
+
   /// Pinch, rotate, and multi-finger swipe.
   ///
   /// Advertised only where the host can express them as real gestures. Windows

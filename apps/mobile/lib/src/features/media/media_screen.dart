@@ -17,6 +17,7 @@ final mediaStateProvider = StreamProvider<MediaState?>((ref) async* {
   }
 });
 
+/// Capability bit for display brightness adjustment (RL-202).
 /// Transport controls, volume, and now playing.
 class MediaScreen extends ConsumerStatefulWidget {
   const MediaScreen({super.key});
@@ -32,6 +33,10 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
   /// from the desktop's reported value otherwise. Without it, every state push
   /// from the computer would yank the slider back mid-gesture.
   double? _dragging;
+
+  /// Brightness being dragged, before the finger lifts.
+  double? _brightnessDragging;
+  double _brightness = 0.5;
 
   Future<void> _send(Message message) async {
     final client = ref.read(clientProvider).valueOrNull;
@@ -52,6 +57,8 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
     // so this is not defensive noise — a Windows build genuinely cannot do this
     // yet, and showing dead buttons would be worse than saying so.
     final supported = capabilities?.has(Capabilities.mediaControl) ?? connected;
+    final brightnessSupported =
+        capabilities?.has(Capabilities.brightness) ?? false;
 
     if (connected && !supported) {
       return const _Unsupported();
@@ -122,6 +129,47 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
             style: Theme.of(context).textTheme.labelMedium,
           ),
         ),
+        if (brightnessSupported) ...<Widget>[
+          const SizedBox(height: 24),
+          Row(
+            children: <Widget>[
+              const Padding(
+                padding: EdgeInsets.all(12.0),
+                child: Icon(Icons.brightness_low),
+              ),
+              Expanded(
+                child: Slider(
+                  value: (_brightnessDragging ?? _brightness).clamp(0.0, 1.0),
+                  onChanged: connected
+                      ? (value) => setState(() => _brightnessDragging = value)
+                      : null,
+                  onChangeEnd: (value) {
+                    setState(() {
+                      _brightness = value;
+                      _brightnessDragging = null;
+                    });
+                    unawaited(
+                      _send(
+                        BrightnessCommand(relative: false, value: value),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.all(12.0),
+                child: Icon(Icons.brightness_high),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Center(
+            child: Text(
+              '${((_brightnessDragging ?? _brightness) * 100).round()}%',
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
+          ),
+        ],
       ],
     );
   }

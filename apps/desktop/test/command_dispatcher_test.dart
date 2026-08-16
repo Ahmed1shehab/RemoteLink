@@ -222,6 +222,27 @@ void main() {
       }
     }
   });
+
+  group('CommandDispatcher brightness matrix across PermissionTier', () {
+    const brightnessCommand = BrightnessCommand(relative: false, value: 0.75);
+
+    for (final tier in PermissionTier.values) {
+      test('applies BrightnessCommand at ${tier.name} tier', () {
+        BrightnessCommand? received;
+        final dispatcher = createTestDispatcher(
+          onBrightnessCommand: (cmd) => received = cmd,
+        );
+
+        final result = dispatcher.dispatch(brightnessCommand, tier);
+
+        expect(result, isTrue);
+        expect(dispatcher.appliedCount, 1);
+        expect(dispatcher.deniedCount, 0);
+        expect(received?.relative, isFalse);
+        expect(received?.value, 0.75);
+      });
+    }
+  });
 }
 
 class _RecordingInputBackend implements InputBackend {

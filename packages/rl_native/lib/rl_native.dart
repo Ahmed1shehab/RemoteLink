@@ -14,26 +14,32 @@ import 'dart:io';
 
 import 'package:rl_core/rl_core.dart';
 
+import 'src/brightness_backend.dart';
 import 'src/input_backend.dart';
+import 'src/macos/macos_brightness.dart';
 import 'src/macos/macos_clipboard.dart';
 import 'src/macos/macos_input.dart';
 import 'src/macos/macos_media.dart';
 import 'src/macos/macos_system_info.dart';
 import 'src/media_backend.dart';
 import 'src/system_info_backend.dart';
+import 'src/windows/win32_brightness.dart';
 import 'src/windows/win32_clipboard.dart';
 import 'src/windows/win32_input.dart';
 import 'src/windows/win32_system_info.dart';
 
+export 'src/brightness_backend.dart';
 export 'src/input_backend.dart';
 export 'src/keymap.dart';
 export 'src/macos/coreaudio_ffi.dart';
+export 'src/macos/macos_brightness.dart';
 export 'src/macos/macos_clipboard.dart';
 export 'src/macos/macos_input.dart';
 export 'src/macos/macos_media.dart';
 export 'src/macos/macos_system_info.dart';
 export 'src/media_backend.dart';
 export 'src/system_info_backend.dart';
+export 'src/windows/win32_brightness.dart';
 export 'src/windows/win32_clipboard.dart';
 export 'src/windows/win32_input.dart';
 export 'src/windows/win32_system_info.dart';
@@ -94,6 +100,23 @@ abstract final class NativeBackends {
     } on ArgumentError catch (e) {
       log.error('could not load native media libraries', error: e);
       return const UnsupportedMediaBackend();
+    }
+  }
+
+  /// Builds the brightness backend, or an unsupported stub.
+  static BrightnessBackend createBrightness() {
+    final log = Log.scoped('native.factory');
+    try {
+      if (Platform.isMacOS) return MacosBrightnessBackend();
+      if (Platform.isWindows) return Win32BrightnessBackend();
+      return const UnsupportedBrightnessBackend(
+        'brightness is not supported on this platform',
+      );
+    } on ArgumentError catch (e) {
+      log.error('could not load native brightness libraries', error: e);
+      return const UnsupportedBrightnessBackend(
+        'native brightness libraries could not be loaded',
+      );
     }
   }
 
