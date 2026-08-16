@@ -8,6 +8,7 @@ import 'frame.dart';
 import 'message_type.dart';
 import 'messages/clipboard.dart';
 import 'messages/control.dart';
+import 'messages/file_transfer.dart';
 import 'messages/input.dart';
 import 'messages/keyboard.dart';
 import 'messages/media.dart';
@@ -102,9 +103,8 @@ final class MessageCodec {
   /// the session must close, because a truncated payload means the stream may
   /// be desynchronised.
   Message decode(Frame frame) {
-    final payload = frame.flags.isCompressed
-        ? _decompress(frame.payload)
-        : frame.payload;
+    final payload =
+        frame.flags.isCompressed ? _decompress(frame.payload) : frame.payload;
     final reader = ByteReader(payload);
 
     // Bytes left over after a decoder finishes are not an error: a newer peer
@@ -163,6 +163,13 @@ final class MessageCodec {
         MessageType.mediaState => MediaState.readFrom(reader),
         MessageType.brightnessCommand => BrightnessCommand.readFrom(reader),
 
+        // File transfer.
+        MessageType.fileOffer => FileOffer.readFrom(reader),
+        MessageType.fileAccept => FileAccept.readFrom(reader),
+        MessageType.fileChunk => FileChunk.readFrom(reader),
+        MessageType.fileComplete => FileComplete.readFrom(reader),
+        MessageType.fileAbort => FileAbort.readFrom(reader),
+
         // System.
         MessageType.powerCommand => PowerCommand.readFrom(reader),
         MessageType.launchApplication => LaunchApplication.readFrom(reader),
@@ -184,18 +191,12 @@ final class MessageCodec {
         MessageType.screenFrame ||
         MessageType.screenConfigure ||
         MessageType.screenTopology ||
-        MessageType.fileOffer ||
-        MessageType.fileAccept ||
-        MessageType.fileChunk ||
-        MessageType.fileComplete ||
-        MessageType.fileAbort ||
         MessageType.slideCommand ||
         MessageType.laserPointer ||
         MessageType.presentationBlank ||
         MessageType.gamepadState ||
         MessageType.motionState =>
           UnknownMessage(type.code, raw),
-
         MessageType.unknown => UnknownMessage(type.code, raw),
       };
 
