@@ -9,11 +9,6 @@ import 'package:rl_transport/rl_transport.dart';
 import '../../app/providers.dart';
 import 'pointer_controller.dart';
 
-/// User-tunable pointer behaviour.
-final pointerSettingsProvider = StateProvider<PointerSettings>(
-  (ref) => const PointerSettings(),
-);
-
 /// The main control surface: the whole screen is a trackpad.
 ///
 /// Gesture handling is written against `Listener` rather than `GestureDetector`
@@ -70,9 +65,8 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
 
   void _onPointerDown(PointerDownEvent event) {
     _pointers[event.pointer] = event.localPosition;
-    _peakFingers = _pointers.length > _peakFingers
-        ? _pointers.length
-        : _peakFingers;
+    _peakFingers =
+        _pointers.length > _peakFingers ? _pointers.length : _peakFingers;
 
     if (_pointers.length == 1) {
       _gestureOrigin = event.localPosition;
@@ -137,7 +131,8 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
         MouseButtonEvent(button: button, pressed: true, clickCount: clickCount),
       );
       unawaitedSend(
-        MouseButtonEvent(button: button, pressed: false, clickCount: clickCount),
+        MouseButtonEvent(
+            button: button, pressed: false, clickCount: clickCount),
       );
       HapticFeedback.selectionClick();
     }
@@ -335,4 +330,3 @@ class _PadButton extends StatelessWidget {
         child: Text(label),
       );
 }
-

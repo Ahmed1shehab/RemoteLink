@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:meta/meta.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
@@ -12,6 +13,7 @@ import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../features/devices/bonjour_discovery.dart';
+import '../features/input/pointer_controller.dart';
 
 /// What this phone can do, advertised during the handshake.
 const Capabilities kMobileCapabilities = Capabilities(
@@ -28,6 +30,9 @@ const Capabilities kMobileCapabilities = Capabilities(
 
 const String _identityKey = 'remotelink.identity.private';
 const String _trustKey = 'remotelink.trust.peers';
+const String _deviceNameKey = 'remotelink.device.name';
+const String _pointerSettingsKey = 'remotelink.settings.pointer';
+const String _clipboardSettingsKey = 'remotelink.settings.clipboard';
 
 /// Where the client keeps its long-term key and trust list.
 ///
@@ -369,4 +374,198 @@ final systemStatusProvider = StreamProvider<SystemStatus?>((ref) async* {
   await for (final message in client.messages) {
     if (message is SystemStatus) yield message;
   }
+});
+
+/// The user-visible name of this phone, persisted in [IdentityStore].
+final class DeviceNameNotifier extends StateNotifier<String> {
+  DeviceNameNotifier(this._ref) : super(_defaultName()) {
+    unawaited(_load());
+  }
+
+  final Ref _ref;
+
+  static String _defaultName() {
+    try {
+      final host = Platform.localHostname;
+      if (host.isNotEmpty) return host;
+    } catch (_) {}
+    if (Platform.isIOS) return 'iPhone';
+    if (Platform.isAndroid) return 'Android Phone';
+    return 'Phone';
+  }
+
+  Future<void> _load() async {
+    final storage = await _ref.read(identityStoreProvider.future);
+    final stored = await storage.read(_deviceNameKey);
+    if (stored != null) {
+      final sanitised = sanitiseDeviceName(stored);
+      if (sanitised != null) {
+        state = sanitised;
+      }
+    }
+  }
+
+  /// Sets the device name if valid according to [sanitiseDeviceName].
+  ///
+  /// Returns null on success, or an error message if [newName] is invalid.
+  Future<String?> setDeviceName(String newName) async {
+    final sanitised = sanitiseDeviceName(newName);
+    if (sanitised == null) {
+      return 'Invalid name: 1–64 characters, no control codes or line breaks.';
+    }
+
+    state = sanitised;
+    final storage = await _ref.read(identityStoreProvider.future);
+    await storage.write(_deviceNameKey, sanitised);
+
+    final client = _ref.read(clientProvider).valueOrNull;
+    if (client != null && client.isConnected) {
+      try {
+        await client.send(DeviceRename(sanitised));
+      } catch (_) {}
+    }
+    return null;
+  }
+}
+
+final deviceNameProvider = StateNotifierProvider<DeviceNameNotifier, String>(
+  DeviceNameNotifier.new,
+);
+
+/// Pointer settings notifier backed by [IdentityStore].
+final class PointerSettingsNotifier extends StateNotifier<PointerSettings> {
+  PointerSettingsNotifier(this._ref) : super(const PointerSettings()) {
+    unawaited(_load());
+  }
+
+  final Ref _ref;
+
+  Future<void> _load() async {
+    final storage = await _ref.read(identityStoreProvider.future);
+    final raw = await storage.read(_pointerSettingsKey);
+    if (raw != null) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic>) {
+          state = PointerSettings.fromJson(decoded);
+        }
+      } on FormatException {
+        // Corrupted settings, keep defaults.
+      }
+    }
+  }
+
+  Future<void> update(PointerSettings settings) async {
+    state = settings;
+    final storage = await _ref.read(identityStoreProvider.future);
+    await storage.write(_pointerSettingsKey, jsonEncode(settings.toJson()));
+  }
+
+  Future<void> setSensitivity(double sensitivity) =>
+      update(state.copyWith(sensitivity: sensitivity));
+
+  Future<void> setNaturalScrolling(bool naturalScrolling) =>
+      update(state.copyWith(naturalScrolling: naturalScrolling));
+
+  Future<void> setTapToClick(bool tapToClick) =>
+      update(state.copyWith(tapToClick: tapToClick));
+}
+
+final pointerSettingsProvider =
+    StateNotifierProvider<PointerSettingsNotifier, PointerSettings>(
+  PointerSettingsNotifier.new,
+);
+
+/// Independent toggles for clipboard synchronization directions.
+@immutable
+final class ClipboardSettings {
+  const ClipboardSettings({
+    this.syncFromDesktop = true,
+    this.syncToDesktop = true,
+  });
+
+  final bool syncFromDesktop;
+  final bool syncToDesktop;
+
+  ClipboardSettings copyWith({
+    bool? syncFromDesktop,
+    bool? syncToDesktop,
+  }) =>
+      ClipboardSettings(
+        syncFromDesktop: syncFromDesktop ?? this.syncFromDesktop,
+        syncToDesktop: syncToDesktop ?? this.syncToDesktop,
+      );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'syncFromDesktop': syncFromDesktop,
+        'syncToDesktop': syncToDesktop,
+      };
+
+  factory ClipboardSettings.fromJson(Map<String, dynamic> json) =>
+      ClipboardSettings(
+        syncFromDesktop: json['syncFromDesktop'] as bool? ?? true,
+        syncToDesktop: json['syncToDesktop'] as bool? ?? true,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ClipboardSettings &&
+          other.syncFromDesktop == syncFromDesktop &&
+          other.syncToDesktop == syncToDesktop;
+
+  @override
+  int get hashCode => Object.hash(syncFromDesktop, syncToDesktop);
+}
+
+final class ClipboardSettingsNotifier extends StateNotifier<ClipboardSettings> {
+  ClipboardSettingsNotifier(this._ref) : super(const ClipboardSettings()) {
+    unawaited(_load());
+  }
+
+  final Ref _ref;
+
+  Future<void> _load() async {
+    final storage = await _ref.read(identityStoreProvider.future);
+    final raw = await storage.read(_clipboardSettingsKey);
+    if (raw != null) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic>) {
+          state = ClipboardSettings.fromJson(decoded);
+        }
+      } on FormatException {
+        // Corrupted settings, keep defaults.
+      }
+    }
+  }
+
+  Future<void> update(ClipboardSettings settings) async {
+    state = settings;
+    final storage = await _ref.read(identityStoreProvider.future);
+    await storage.write(_clipboardSettingsKey, jsonEncode(settings.toJson()));
+  }
+
+  Future<void> setSyncFromDesktop(bool enabled) =>
+      update(state.copyWith(syncFromDesktop: enabled));
+
+  Future<void> setSyncToDesktop(bool enabled) =>
+      update(state.copyWith(syncToDesktop: enabled));
+}
+
+final clipboardSettingsProvider =
+    StateNotifierProvider<ClipboardSettingsNotifier, ClipboardSettings>(
+  ClipboardSettingsNotifier.new,
+);
+
+/// In-memory log buffer backing the diagnostics view.
+final memoryLogSinkProvider = Provider<MemoryLogSink>((ref) {
+  final sink = Log.sink;
+  if (sink is MemoryLogSink) return sink;
+  if (sink is MultiLogSink) {
+    for (final s in sink.sinks) {
+      if (s is MemoryLogSink) return s;
+    }
+  }
+  return MemoryLogSink();
 });

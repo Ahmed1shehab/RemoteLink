@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +11,7 @@ import 'package:rl_transport/rl_transport.dart';
 import '../../app/providers.dart';
 import '../control/control_screen.dart';
 import '../pairing/pairing_screen.dart';
+import '../settings/settings_screen.dart';
 import 'auto_connect.dart';
 
 /// One row in the list, from either discovery or the trust store.
@@ -125,6 +125,15 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
               final backend = await ref.read(discoveryProvider.future);
               await backend.refresh();
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const SettingsScreen(),
+              ),
+            ),
           ),
         ],
       ),
