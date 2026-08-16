@@ -2,12 +2,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:remotelink_desktop/src/app/providers.dart';
 import 'package:remotelink_desktop/src/domain/command_dispatcher.dart';
 import 'package:remotelink_desktop/src/domain/desktop_service.dart';
+import 'package:remotelink_desktop/src/domain/transfer_model.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_native/rl_native.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
 /// Fake diagnostics snapshot for widget testing.
-final fakeDiagnostics = DiagnosticsInfo(
+const fakeDiagnostics = DiagnosticsInfo(
   serviceStatus: const DesktopStatus(
     isRunning: true,
     deviceName: 'Test computer',
@@ -116,6 +117,12 @@ final List<Override> desktopHomeOverrides = <Override>[
   ),
   pairingRequestProvider.overrideWith(
     (ref) => const Stream<PendingPairing>.empty(),
+  ),
+  incomingTransferRequestProvider.overrideWith(
+    (ref) => const Stream<PendingIncomingTransfer>.empty(),
+  ),
+  transfersProvider.overrideWith(
+    (ref) => Stream<List<TransferRecord>>.value(const <TransferRecord>[]),
   ),
   desktopDiagnosticsProvider.overrideWith(
     (ref) => Stream<DiagnosticsInfo>.value(fakeDiagnostics),
