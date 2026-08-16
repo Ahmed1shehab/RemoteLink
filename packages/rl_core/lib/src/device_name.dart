@@ -1,6 +1,5 @@
 import 'package:characters/characters.dart';
-
-import 'device_name_tables.dart';
+import 'package:unorm_dart/unorm_dart.dart' as unicode;
 
 /// Validates and normalises a peer or device display name.
 ///
@@ -58,7 +57,7 @@ String? sanitiseDeviceName(String? raw) {
   }
 
   // 5. Normalise to Unicode NFC.
-  final normalised = normalizeNfc(trimmed);
+  final normalised = unicode.nfc(trimmed);
 
   // 6. Cap at 64 user-perceived characters (grapheme clusters).
   if (normalised.characters.length > 64) {
