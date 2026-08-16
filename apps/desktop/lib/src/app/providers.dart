@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_native/rl_native.dart';
+import 'package:rl_protocol/rl_protocol.dart';
 
 import '../domain/desktop_service.dart';
 
@@ -191,3 +193,163 @@ final inputAvailabilityProvider =
 final platformProvider = Provider<PlatformKind>(
   (ref) => NativeBackends.currentPlatform,
 );
+
+/// In-memory log buffer backing the diagnostics panel.
+final memoryLogSinkProvider = Provider<MemoryLogSink>((ref) {
+  final sink = Log.sink;
+  if (sink is MemoryLogSink) return sink;
+  if (sink is MultiLogSink) {
+    for (final s in sink.sinks) {
+      if (s is MemoryLogSink) return s;
+    }
+  }
+  return MemoryLogSink();
+});
+
+/// Diagnostic snapshot provider for the diagnostics panel.
+///
+/// Keeping this projection separate from [desktopServiceProvider] lets the UI
+/// be exercised without constructing the native-backed service.
+final desktopDiagnosticsProvider =
+    StreamProvider<DiagnosticsInfo>((ref) async* {
+  final service = await ref.watch(desktopServiceProvider.future);
+
+  DiagnosticsInfo buildSnapshot() => DiagnosticsInfo(
+        serviceStatus: DesktopStatus(
+          isRunning: service.isRunning,
+          deviceName: service.deviceName,
+          boundPort: service.boundPort,
+          localAddresses: service.localAddresses,
+          deviceId: service.identity.id.value,
+        ),
+        dispatcherCounters: DispatcherCounters(
+          applied: service.commandAppliedCount,
+          denied: service.commandDeniedCount,
+          unsupported: service.commandUnsupportedCount,
+        ),
+        backends: BackendAvailability(
+          input: BackendDiagnostic(
+            name: 'Input injection',
+            isAvailable: service.inputAvailable,
+            unavailableReason: service.inputUnavailableReason,
+          ),
+          clipboard: BackendDiagnostic(
+            name: 'Clipboard sync',
+            isAvailable: service.clipboardAvailable,
+            unavailableReason: service.clipboardUnavailableReason,
+          ),
+          media: BackendDiagnostic(
+            name: 'Media control',
+            isAvailable: service.mediaAvailable,
+            unavailableReason: service.mediaUnavailableReason,
+          ),
+        ),
+        devices: <DeviceDiagnostic>[
+          for (final device in service.devices)
+            DeviceDiagnostic(
+              id: device.id.value,
+              name: device.name,
+              address: device.address,
+              tier: device.tier,
+              roundTripMillis: device.quality.roundTripMillis,
+              qualityBars: device.quality.bars,
+              awaitingPairing: device.awaitingPairing,
+            ),
+        ],
+      );
+
+  yield buildSnapshot();
+
+  final controller = StreamController<void>();
+  final sub1 = service.deviceChanges.listen((_) => controller.add(null));
+  final sub2 =
+      service.inputAvailabilityChanges.listen((_) => controller.add(null));
+  final timer =
+      Timer.periodic(const Duration(seconds: 1), (_) => controller.add(null));
+
+  ref.onDispose(() {
+    sub1.cancel();
+    sub2.cancel();
+    timer.cancel();
+    controller.close();
+  });
+
+  await for (final _ in controller.stream) {
+    yield buildSnapshot();
+  }
+});
+
+/// Diagnostic snapshot data structure.
+final class DiagnosticsInfo {
+  const DiagnosticsInfo({
+    required this.serviceStatus,
+    required this.dispatcherCounters,
+    required this.backends,
+    required this.devices,
+  });
+
+  final DesktopStatus serviceStatus;
+  final DispatcherCounters dispatcherCounters;
+  final BackendAvailability backends;
+  final List<DeviceDiagnostic> devices;
+}
+
+/// Statistics from [CommandDispatcher].
+final class DispatcherCounters {
+  const DispatcherCounters({
+    required this.applied,
+    required this.denied,
+    required this.unsupported,
+  });
+
+  final int applied;
+  final int denied;
+  final int unsupported;
+}
+
+/// Status and optional unavailable reason for a single native backend.
+final class BackendDiagnostic {
+  const BackendDiagnostic({
+    required this.name,
+    required this.isAvailable,
+    this.unavailableReason,
+  });
+
+  final String name;
+  final bool isAvailable;
+  final String? unavailableReason;
+}
+
+/// Availability of all platform backends.
+final class BackendAvailability {
+  const BackendAvailability({
+    required this.input,
+    required this.clipboard,
+    required this.media,
+  });
+
+  final BackendDiagnostic input;
+  final BackendDiagnostic clipboard;
+  final BackendDiagnostic media;
+}
+
+/// Diagnostic view of a connected peer device.
+final class DeviceDiagnostic {
+  const DeviceDiagnostic({
+    required this.id,
+    required this.name,
+    required this.address,
+    required this.tier,
+    required this.roundTripMillis,
+    required this.qualityBars,
+    this.awaitingPairing = false,
+  });
+
+  final String id;
+  final String name;
+  final String address;
+  final PermissionTier tier;
+  final double roundTripMillis;
+  final int qualityBars;
+  final bool awaitingPairing;
+}

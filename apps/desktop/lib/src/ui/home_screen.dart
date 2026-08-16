@@ -5,6 +5,7 @@ import 'package:rl_protocol/rl_protocol.dart';
 
 import '../app/providers.dart';
 import '../domain/desktop_service.dart';
+import 'diagnostics_screen.dart';
 
 /// The desktop's only window: status, connected devices, and pairing.
 class HomeScreen extends ConsumerStatefulWidget {
@@ -31,6 +32,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('RemoteLink'),
+        actions: <Widget>[
+          IconButton(
+            icon: const Icon(Icons.analytics_outlined),
+            tooltip: 'Diagnostics',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (context) => const DiagnosticsScreen(),
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: status.when(
         loading: () => const Center(child: CircularProgressIndicator()),

@@ -1,6 +1,93 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:remotelink_desktop/src/app/providers.dart';
 import 'package:remotelink_desktop/src/domain/desktop_service.dart';
+import 'package:rl_core/rl_core.dart';
+import 'package:rl_protocol/rl_protocol.dart';
+
+/// Fake diagnostics snapshot for widget testing.
+final fakeDiagnostics = DiagnosticsInfo(
+  serviceStatus: const DesktopStatus(
+    isRunning: true,
+    deviceName: 'Test computer',
+    boundPort: 41234,
+    localAddresses: <String>['192.168.1.100', '10.0.0.5'],
+    deviceId: 'test-device-id',
+  ),
+  dispatcherCounters: const DispatcherCounters(
+    applied: 128,
+    denied: 7,
+    unsupported: 3,
+  ),
+  backends: const BackendAvailability(
+    input: BackendDiagnostic(
+      name: 'Input injection',
+      isAvailable: false,
+      unavailableReason:
+          'RemoteLink needs Accessibility permission. Enable it in System Settings.',
+    ),
+    clipboard: BackendDiagnostic(
+      name: 'Clipboard sync',
+      isAvailable: true,
+      unavailableReason: null,
+    ),
+    media: BackendDiagnostic(
+      name: 'Media control',
+      isAvailable: false,
+      unavailableReason: 'Media control is not supported on this platform',
+    ),
+  ),
+  devices: const <DeviceDiagnostic>[
+    DeviceDiagnostic(
+      id: 'test-phone-1',
+      name: 'Pixel 8 Pro',
+      address: '192.168.1.50',
+      tier: PermissionTier.standard,
+      roundTripMillis: 12.5,
+      qualityBars: 4,
+    ),
+  ],
+);
+
+/// Fake memory log sink pre-populated with test log records.
+MemoryLogSink createFakeMemoryLogSink() {
+  final sink = MemoryLogSink();
+  sink.write(
+    LogRecord(
+      level: LogLevel.info,
+      scope: 'desktop.service',
+      message: 'desktop service started',
+      time: DateTime(2026, 8, 16, 12, 0, 0),
+      fields: const <String, Object?>{'port': 41234},
+    ),
+  );
+  sink.write(
+    LogRecord(
+      level: LogLevel.debug,
+      scope: 'desktop.dispatcher',
+      message: 'dispatching MouseMove',
+      time: DateTime(2026, 8, 16, 12, 0, 1),
+    ),
+  );
+  sink.write(
+    LogRecord(
+      level: LogLevel.warn,
+      scope: 'desktop.service',
+      message: 'rate limit warning',
+      time: DateTime(2026, 8, 16, 12, 0, 2),
+    ),
+  );
+  sink.write(
+    LogRecord(
+      level: LogLevel.error,
+      scope: 'native.input',
+      message: 'permission missing error',
+      time: DateTime(2026, 8, 16, 12, 0, 3),
+    ),
+  );
+  return sink;
+}
+
+final fakeMemoryLogSink = createFakeMemoryLogSink();
 
 /// Safe provider state for rendering the desktop home screen in widget tests.
 ///
@@ -28,4 +115,8 @@ final List<Override> desktopHomeOverrides = <Override>[
   pairingRequestProvider.overrideWith(
     (ref) => const Stream<PendingPairing>.empty(),
   ),
+  desktopDiagnosticsProvider.overrideWith(
+    (ref) => Stream<DiagnosticsInfo>.value(fakeDiagnostics),
+  ),
+  memoryLogSinkProvider.overrideWithValue(fakeMemoryLogSink),
 ];
