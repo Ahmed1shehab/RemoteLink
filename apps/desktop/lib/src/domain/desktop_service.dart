@@ -914,10 +914,26 @@ final class DesktopService {
   ///
   /// ZERO work when no device is connected, matching [_startMediaWatch].
   void _startSystemWatch() {
-    _systemWatch = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (_devices.isEmpty) return;
-      unawaited(_publishSystemStatus());
-    });
+    _systemWatch = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => unawaited(telemetryTick()),
+    );
+  }
+
+  /// One iteration of the system-status watcher.
+  ///
+  /// Named and visible rather than inlined into the timer callback so the
+  /// "no work when nobody is watching" guarantee can be tested by calling it
+  /// directly. Reaching it through [start] instead would mean binding a TCP
+  /// listener, a UDP multicast beacon, and a Bonjour advertiser — fixed ports
+  /// that collide the moment two test runs overlap — and then waiting out a
+  /// real five-second timer to observe a single boolean.
+  ///
+  /// This is the same code path the timer drives; the test is not asserting
+  /// against a parallel implementation.
+  Future<void> telemetryTick() async {
+    if (_devices.isEmpty) return;
+    await _publishSystemStatus();
   }
 
   Timer? _systemWatch;

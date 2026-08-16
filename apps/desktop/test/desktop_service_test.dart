@@ -4,6 +4,7 @@ import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_native/rl_native.dart';
 
+/// Counts how many times the host was actually asked for metrics.
 final class SpySystemInfoBackend implements SystemInfoBackend {
   int metricsCallCount = 0;
 
@@ -16,8 +17,8 @@ final class SpySystemInfoBackend implements SystemInfoBackend {
     return const SystemMetrics(
       batteryPercent: 90,
       isCharging: true,
-      cpuPercent: 10.0,
-      memoryPercent: 50.0,
+      cpuPercent: 10,
+      memoryPercent: 50,
       uptimeSeconds: 120,
     );
   }
@@ -29,39 +30,46 @@ final class SpySystemInfoBackend implements SystemInfoBackend {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('system watch performs zero collection when no device is connected',
-      () async {
-    final identity = await DeviceIdentity.generate();
-    final trustStore = InMemoryTrustStore();
-    final spySystemInfo = SpySystemInfoBackend();
-
+  /// Builds a service with every native backend stubbed out.
+  ///
+  /// Note this never calls `start()`. Starting binds a TCP listener, a UDP
+  /// multicast beacon on a fixed port, and a Bonjour advertiser — which
+  /// collide as soon as two test runs overlap, and which have nothing to do
+  /// with the property under test.
+  Future<(DesktopService, SpySystemInfoBackend)> buildService() async {
+    final spy = SpySystemInfoBackend();
     final service = DesktopService(
-      identity: identity,
-      trustStore: trustStore,
+      identity: await DeviceIdentity.generate(),
+      trustStore: InMemoryTrustStore(),
       deviceName: 'Test Computer',
       appVersion: '0.1.0',
       clock: SystemClock(),
       input: const UnsupportedInputBackend('test'),
       clipboardBackend: const UnsupportedClipboardBackend(),
       media: const UnsupportedMediaBackend(),
-      systemInfo: spySystemInfo,
+      systemInfo: spy,
     );
+    return (service, spy);
+  }
 
-    await service.start();
+  test('the telemetry watcher does no work when no device is connected',
+      () async {
+    final (service, spy) = await buildService();
 
-    // Verify no devices are connected.
     expect(service.devices, isEmpty);
 
-    // Wait past the 5-second periodic timer tick.
-    await Future<void>.delayed(const Duration(milliseconds: 5500));
+    // Drive the watcher's own tick directly, several times over. The timer
+    // calls exactly this method, so the guarantee is being asserted against the
+    // real code path rather than a reimplementation of it.
+    for (var i = 0; i < 5; i++) {
+      await service.telemetryTick();
+    }
 
-    // Must be ZERO collection when no device is connected.
     expect(
-      spySystemInfo.metricsCallCount,
+      spy.metricsCallCount,
       0,
-      reason: 'Watcher must do ZERO work when _devices is empty',
+      reason: 'the host must not be polled while nobody is watching — that is '
+          'battery cost for nobody\'s benefit',
     );
-
-    await service.stop();
   });
 }
