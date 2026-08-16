@@ -18,6 +18,7 @@ export 'src/frame.dart';
 export 'src/message_type.dart';
 export 'src/messages/clipboard.dart';
 export 'src/messages/control.dart';
+export 'src/messages/file_transfer.dart';
 export 'src/messages/input.dart';
 export 'src/messages/keyboard.dart';
 export 'src/messages/media.dart';

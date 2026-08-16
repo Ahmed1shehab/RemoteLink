@@ -11,6 +11,7 @@ environment:
 dependencies:
   meta: ^1.15.0
   rl_core: ^0.1.0
+  unorm_dart: ^0.3.2
 
 dev_dependencies:
   lints: ^5.0.0
