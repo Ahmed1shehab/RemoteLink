@@ -86,6 +86,16 @@ abstract interface class InputBackend {
   /// and presses the key locally.
   void releaseAll();
 
+  /// Magnifies by [delta], matching macOS pinch gesture convention
+  /// (e.g. `0.1` means 10% larger).
+  void magnify(double delta);
+
+  /// Rotates by [degrees] (positive is clockwise).
+  void rotate(double degrees);
+
+  /// Multi-finger swipe mapped to OS navigation (Mission Control, Task View, Spaces).
+  void swipe({required int fingerCount, required SwipeDirection direction});
+
   /// Geometry of every display, primary first.
   List<ScreenBounds> get displays;
 
@@ -179,6 +189,15 @@ final class UnsupportedInputBackend implements InputBackend {
 
   @override
   void releaseAll() {}
+
+  @override
+  void magnify(double delta) {}
+
+  @override
+  void rotate(double degrees) {}
+
+  @override
+  void swipe({required int fingerCount, required SwipeDirection direction}) {}
 
   @override
   List<ScreenBounds> get displays => const <ScreenBounds>[];

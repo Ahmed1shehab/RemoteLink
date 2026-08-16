@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rl_native/rl_native.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
 import 'support/fakes.dart';
@@ -159,4 +160,138 @@ void main() {
       expect(routed, same(offer));
     });
   });
+
+  group('CommandDispatcher gesture matrix across PermissionTier', () {
+    final gestureMessages = <Message>[
+      const GestureZoom(
+        magnificationDelta: 0.15,
+        phase: GesturePhase.changed,
+      ),
+      const GestureRotate(
+        degreesDelta: 45.0,
+        phase: GesturePhase.changed,
+      ),
+      const GestureSwipe(
+        fingerCount: 3,
+        direction: SwipeDirection.up,
+      ),
+    ];
+
+    for (final message in gestureMessages) {
+      test('denies ${message.runtimeType} at readOnly tier', () {
+        final backend = _RecordingInputBackend();
+        final dispatcher = createTestDispatcher(input: backend);
+
+        final result = dispatcher.dispatch(message, PermissionTier.readOnly);
+
+        expect(result, isFalse);
+        expect(dispatcher.deniedCount, 1);
+        expect(dispatcher.appliedCount, 0);
+        expect(backend.magnifyDelta, isNull);
+        expect(backend.rotateDegrees, isNull);
+        expect(backend.swipeDetails, isNull);
+      });
+
+      for (final tier in <PermissionTier>[
+        PermissionTier.standard,
+        PermissionTier.extended,
+        PermissionTier.admin,
+      ]) {
+        test('applies ${message.runtimeType} at ${tier.name} tier', () {
+          final backend = _RecordingInputBackend();
+          final dispatcher = createTestDispatcher(input: backend);
+
+          final result = dispatcher.dispatch(message, tier);
+
+          expect(result, isTrue);
+          expect(dispatcher.appliedCount, 1);
+          expect(dispatcher.deniedCount, 0);
+
+          switch (message) {
+            case GestureZoom(:final magnificationDelta):
+              expect(backend.magnifyDelta, magnificationDelta);
+            case GestureRotate(:final degreesDelta):
+              expect(backend.rotateDegrees, degreesDelta);
+            case GestureSwipe(:final fingerCount, :final direction):
+              expect(backend.swipeDetails?.fingerCount, fingerCount);
+              expect(backend.swipeDetails?.direction, direction);
+            default:
+              fail('Unexpected gesture message type: $message');
+          }
+        });
+      }
+    }
+  });
+}
+
+class _RecordingInputBackend implements InputBackend {
+  double? magnifyDelta;
+  double? rotateDegrees;
+  ({int fingerCount, SwipeDirection direction})? swipeDetails;
+
+  @override
+  bool get isAvailable => true;
+
+  @override
+  String? get unavailableReason => null;
+
+  @override
+  (int, int) get cursorPosition => (0, 0);
+
+  @override
+  ScreenBounds get virtualBounds => const ScreenBounds(
+        x: 0,
+        y: 0,
+        width: 1920,
+        height: 1080,
+      );
+
+  @override
+  List<ScreenBounds> get displays => const <ScreenBounds>[];
+
+  @override
+  void moveCursorBy(int dx, int dy) {}
+
+  @override
+  void moveCursorTo(int x, int y) {}
+
+  @override
+  void mouseDown(MouseButton button, {int clickCount = 1}) {}
+
+  @override
+  void mouseUp(MouseButton button, {int clickCount = 1}) {}
+
+  @override
+  void scroll({
+    int linesX = 0,
+    int linesY = 0,
+    int pixelsX = 0,
+    int pixelsY = 0,
+    bool isMomentum = false,
+  }) {}
+
+  @override
+  void magnify(double delta) => magnifyDelta = delta;
+
+  @override
+  void rotate(double degrees) => rotateDegrees = degrees;
+
+  @override
+  void swipe({required int fingerCount, required SwipeDirection direction}) =>
+      swipeDetails = (fingerCount: fingerCount, direction: direction);
+
+  @override
+  void keyEvent({required int hidUsage, required bool pressed}) {}
+
+  @override
+  void typeText(String text) {}
+
+  @override
+  void setModifiers(Modifiers modifiers) {}
+
+  @override
+  void releaseAll() {}
+
+  @override
+  void dispose() {}
 }

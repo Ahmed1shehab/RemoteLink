@@ -25,7 +25,8 @@ const Capabilities kMobileCapabilities = Capabilities(
       Capabilities.presentation |
       Capabilities.gamepad |
       Capabilities.compression |
-      Capabilities.sessionResumption,
+      Capabilities.sessionResumption |
+      Capabilities.gestures,
 );
 
 const String _identityKey = 'remotelink.identity.private';

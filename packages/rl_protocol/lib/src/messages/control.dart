@@ -31,6 +31,15 @@ extension type const Capabilities(int bits) {
   static const int unreliableChannel = 1 << 15;
   static const int sessionResumption = 1 << 16;
 
+  /// Pinch, rotate, and multi-finger swipe.
+  ///
+  /// Advertised only where the host can express them as real gestures. Windows
+  /// has no synthetic gesture API, so its backend approximates with the
+  /// shortcuts a person would press and does not set this bit — a phone that
+  /// never sees it can decline to offer pinch-zoom rather than offering one
+  /// that behaves subtly differently.
+  static const int gestures = 1 << 17;
+
   bool has(int capability) => bits & capability != 0;
 
   /// Capabilities present on both sides — the effective feature set.

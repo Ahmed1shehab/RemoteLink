@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -47,6 +48,19 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
 
   bool _dragging = false;
 
+  // Continuous gesture tracking for scale / zoom and rotation.
+  double? _lastSpan;
+  double? _lastAngle;
+  bool _isZooming = false;
+  bool _isRotating = false;
+  DateTime _lastZoomTime = DateTime.fromMicrosecondsSinceEpoch(0);
+  DateTime _lastRotateTime = DateTime.fromMicrosecondsSinceEpoch(0);
+
+  // Multi-finger swipe tracking.
+  double _swipeDeltaX = 0;
+  double _swipeDeltaY = 0;
+  bool _swipeDispatched = false;
+
   @override
   void dispose() {
     _taps.reset();
@@ -71,6 +85,15 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
     if (_pointers.length == 1) {
       _gestureOrigin = event.localPosition;
       _travelled = 0;
+    } else if (_pointers.length == 2) {
+      final pList = _pointers.values.toList();
+      _lastSpan = (pList[0] - pList[1]).distance;
+      _lastAngle = math.atan2(
+            pList[1].dy - pList[0].dy,
+            pList[1].dx - pList[0].dx,
+          ) *
+          180 /
+          math.pi;
     }
   }
 
@@ -81,7 +104,107 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
     final settings = ref.read(pointerSettingsProvider);
     _pointer.settings = settings;
 
-    if (_pointers.length >= 2) {
+    if (_pointers.length >= 3) {
+      // Multi-finger swipe navigation (e.g. Mission Control, Spaces, Task View).
+      _swipeDeltaX += event.delta.dx;
+      _swipeDeltaY += event.delta.dy;
+
+      if (!_swipeDispatched) {
+        if (_swipeDeltaX.abs() > 40 || _swipeDeltaY.abs() > 40) {
+          _swipeDispatched = true;
+          final isVertical = _swipeDeltaY.abs() > _swipeDeltaX.abs();
+          final direction = isVertical
+              ? (_swipeDeltaY < 0 ? SwipeDirection.up : SwipeDirection.down)
+              : (_swipeDeltaX < 0 ? SwipeDirection.left : SwipeDirection.right);
+          unawaitedSend(
+            GestureSwipe(
+              fingerCount: _peakFingers >= 3 ? _peakFingers : _pointers.length,
+              direction: direction,
+            ),
+          );
+          HapticFeedback.mediumImpact();
+        }
+      }
+      return;
+    }
+
+    if (_pointers.length == 2) {
+      final pList = _pointers.values.toList();
+      final currentSpan = (pList[0] - pList[1]).distance;
+      final currentAngle = math.atan2(
+            pList[1].dy - pList[0].dy,
+            pList[1].dx - pList[0].dx,
+          ) *
+          180 /
+          math.pi;
+
+      final capabilities =
+          ref.read(clientProvider).valueOrNull?.session?.capabilities;
+      final gesturesAvailable = capabilities?.has(Capabilities.gestures) ?? false;
+
+      if (gesturesAvailable && _lastSpan != null && _lastSpan! > 0) {
+        final spanDelta = (currentSpan - _lastSpan!) / _lastSpan!;
+        var angleDelta = currentAngle - (_lastAngle ?? currentAngle);
+        while (angleDelta < -180) {
+          angleDelta += 360;
+        }
+        while (angleDelta > 180) {
+          angleDelta -= 360;
+        }
+
+        // Scale / Zoom gesture detection
+        if (_isZooming || (!_isRotating && spanDelta.abs() > 0.03)) {
+          final now = DateTime.now();
+          if (!_isZooming) {
+            _isZooming = true;
+            _lastZoomTime = now;
+            unawaitedSend(
+              GestureZoom(
+                magnificationDelta: spanDelta,
+                phase: GesturePhase.began,
+              ),
+            );
+          } else if (now.difference(_lastZoomTime).inMicroseconds >= 8333) {
+            // Rate limit to at most 120 Hz (~8.33 ms)
+            _lastZoomTime = now;
+            unawaitedSend(
+              GestureZoom(
+                magnificationDelta: spanDelta,
+                phase: GesturePhase.changed,
+              ),
+            );
+          }
+          _lastSpan = currentSpan;
+          return;
+        }
+
+        // Rotation gesture detection
+        if (_isRotating || (!_isZooming && angleDelta.abs() > 3.0)) {
+          final now = DateTime.now();
+          if (!_isRotating) {
+            _isRotating = true;
+            _lastRotateTime = now;
+            unawaitedSend(
+              GestureRotate(
+                degreesDelta: angleDelta,
+                phase: GesturePhase.began,
+              ),
+            );
+          } else if (now.difference(_lastRotateTime).inMicroseconds >= 8333) {
+            // Rate limit to at most 120 Hz
+            _lastRotateTime = now;
+            unawaitedSend(
+              GestureRotate(
+                degreesDelta: angleDelta,
+                phase: GesturePhase.changed,
+              ),
+            );
+          }
+          _lastAngle = currentAngle;
+          return;
+        }
+      }
+
       // Two fingers scroll. The delta of whichever finger moved is used rather
       // than an average, because averaging halves the reported movement when
       // one finger is stationary — which is exactly how people scroll.
@@ -105,6 +228,24 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
 
   void _onPointerUp(PointerUpEvent event) {
     _pointers.remove(event.pointer);
+
+    if (_pointers.length < 2) {
+      if (_isZooming) {
+        _isZooming = false;
+        unawaitedSend(
+          const GestureZoom(magnificationDelta: 0, phase: GesturePhase.ended),
+        );
+      }
+      if (_isRotating) {
+        _isRotating = false;
+        unawaitedSend(
+          const GestureRotate(degreesDelta: 0, phase: GesturePhase.ended),
+        );
+      }
+      _lastSpan = null;
+      _lastAngle = null;
+    }
+
     if (_pointers.isNotEmpty) return;
 
     final settings = ref.read(pointerSettingsProvider);
@@ -141,10 +282,37 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
     _gestureOrigin = null;
     _travelled = 0;
     _peakFingers = 0;
+    _swipeDispatched = false;
+    _swipeDeltaX = 0;
+    _swipeDeltaY = 0;
   }
 
   void _onPointerCancel(PointerCancelEvent event) {
     _pointers.remove(event.pointer);
+
+    if (_pointers.length < 2) {
+      if (_isZooming) {
+        _isZooming = false;
+        unawaitedSend(
+          const GestureZoom(
+            magnificationDelta: 0,
+            phase: GesturePhase.cancelled,
+          ),
+        );
+      }
+      if (_isRotating) {
+        _isRotating = false;
+        unawaitedSend(
+          const GestureRotate(
+            degreesDelta: 0,
+            phase: GesturePhase.cancelled,
+          ),
+        );
+      }
+      _lastSpan = null;
+      _lastAngle = null;
+    }
+
     if (_pointers.isNotEmpty) return;
 
     // A cancelled gesture mid-drag must still release the button, or the
@@ -157,6 +325,9 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
     }
     _pointer.endGesture();
     _peakFingers = 0;
+    _swipeDispatched = false;
+    _swipeDeltaX = 0;
+    _swipeDeltaY = 0;
   }
 
   /// Long press starts a drag: the button goes down and stays down until lift.
