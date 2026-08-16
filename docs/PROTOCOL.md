@@ -281,7 +281,119 @@ See `docs/adr/0001-discovery-and-transport.md` for why this is not mDNS.
 
 ---
 
-## 9. Keyboard representation
+## 9. File transfer
+
+Subsystem `0x07xx`. The shape follows the
+[LocalSend](https://github.com/localsend/protocol) v2.2 model rather than an
+invention of our own — it is a proven design for exactly this problem, and its
+flow maps almost one-to-one onto the codes reserved here. It is implemented from
+their published specification; no LocalSend code is used.
+
+### 9.1 Flow
+
+```text
+sender → receiver   fileOffer      transfer id + one entry per file
+receiver → sender   fileAccept     session id + a token per ACCEPTED file
+sender → receiver   fileChunk      repeated, per file, in offset order
+sender → receiver   fileComplete   whole-file SHA-256, per file
+either direction    fileAbort      at any point
+```
+
+**A declined file is simply absent from the token map.** This is adopted
+directly from LocalSend and is better than the obvious alternative: it expresses
+partial acceptance without a second message type, and there is no state in which
+a file is both accepted and rejected.
+
+### 9.2 Divergences from LocalSend
+
+LocalSend runs over HTTP with TLS, so its session identifier and token travel as
+URL query parameters and it offers an optional PIN. None of that applies here:
+these messages ride the authenticated, encrypted session of §6 and §7. The
+per-file token is therefore a **replay guard inside an already-authenticated
+channel**, not the primary authentication, and there is no PIN because the SAS
+comparison at pairing time already did that job.
+
+### 9.3 Payloads
+
+`fileOffer` carries a transfer id and a count-prefixed list of file entries:
+
+| Field | Type | Notes |
+|---|---|---|
+| `fileId` | string | ≤ 128 bytes, unique within the transfer |
+| `fileName` | string | ≤ 255 bytes, **sanitised — see §9.5** |
+| `size` | u64 | bytes |
+| `fileType` | string | MIME type, ≤ 255 bytes |
+| presence bits | u8 | bit 0 `sha256`, bit 1 `modifiedAt`, bit 2 `accessedAt` |
+| `sha256` | 32 bytes | present only if bit 0 |
+| `modifiedAt` / `accessedAt` | u64 | microseconds since epoch, UTC, if their bit is set |
+
+At most **1024** files per offer, and a chunk payload is capped at **1 MiB**.
+Both are checked before allocating, as §2 requires of every length on the wire.
+
+`fileAccept` carries the transfer id, a session id, and a count-prefixed map of
+`fileId → token`. `fileChunk` carries transfer id, session id, file id, token,
+a u64 offset, length-prefixed bytes, and a CRC-32C of those bytes.
+`fileComplete` carries transfer id, file id, and the 32-byte whole-file digest.
+`fileAbort` carries the transfer id, an optional file id, and a reason:
+`declined`, `cancelled`, `ioError`, `hashMismatch`, `tooLarge`, `timeout`.
+
+### 9.4 Per-transfer encryption
+
+Chunks are sealed a second time, under a key derived per transfer:
+
+```text
+k_transfer = HKDF(ikm = exporter, salt = "", info = "rl1 file " ‖ transferId)
+nonce      = u32_be(fileIndex) ‖ u64_be(offset)
+aad        = transferId ‖ 0x00 ‖ fileId ‖ 0x00 ‖ offset
+```
+
+Two things about this are load-bearing.
+
+**The nonce is supplied by the caller**, which §7 deliberately forbids for the
+session cipher. It is safe here only because it is *structural rather than
+chosen*: `(fileIndex, offset)` is unique by construction within a transfer, and
+each transfer has its own key. The associated data binds the identifiers as
+well, so a chunk cannot be replayed into a different file or a different offset
+even within the same transfer.
+
+**The exporter secret is per session.** A transfer resumed after a reconnect
+therefore derives a *different* key, which is what makes re-sending an offset
+safe. Encrypting different bytes at the same offset under the same key would be
+a catastrophic nonce reuse; the per-session derivation is what prevents it, and
+any future change that lets a sender re-read a file mid-transfer must preserve
+that property.
+
+Deriving per transfer also keeps a long file out of the session's own nonce
+space, and means a compromised transfer key does not expose the session.
+
+### 9.5 Filenames are hostile input
+
+`fileName` arrives from a peer and becomes a path on disk. It is the highest-risk
+field in the protocol, and it passes through one sanitiser with no bypass. That
+sanitiser rejects:
+
+- path separators, in either direction, and `..` in literal, mixed-case, nested,
+  and repeatedly percent-encoded forms
+- over-long UTF-8 encodings of `.`
+- absolute paths and drive-rooted paths
+- Windows reserved device names — `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`,
+  `LPT1`–`LPT9` — with or without an extension, case-insensitively
+- trailing dots and trailing spaces, which Windows strips silently, turning two
+  different names into one file
+- control characters, and anything over 255 bytes encoded
+
+Accepted names are normalised to Unicode NFC **once**, in the decoder. The
+filesystem layer does not normalise again — one canonicalisation point, so two
+spellings cannot diverge between the check and the write.
+
+Containment is enforced structurally rather than by inspecting strings: peer and
+transfer identifiers become SHA-256-derived internal names, every path is
+canonicalised and checked against the canonical root, pre-existing symlinks at
+the destination are refused, and final names are reserved atomically.
+
+---
+
+## 10. Keyboard representation
 
 The canonical key identity on the wire is the **USB HID usage ID** (usage page
 `0x07`). Neither platform's native codes are a superset of the other, so
