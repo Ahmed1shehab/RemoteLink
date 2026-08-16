@@ -15,7 +15,6 @@ import 'command_dispatcher.dart';
 import 'file_transfer_store.dart';
 import 'transfer_model.dart';
 
-/// Bit for native gesture capability (1 << 17).
 /// Everything the desktop advertises it can do.
 ///
 /// Assembled at run time rather than hard-coded, because two of these depend on

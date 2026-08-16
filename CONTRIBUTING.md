@@ -143,13 +143,18 @@ every merge.
 
 ## Licence
 
-**This project currently has no `LICENSE` file**, which means it is
-all-rights-reserved by default regardless of intent. That needs a decision from
-the owner before outside contribution is meaningful, and before any third-party
-code can be incorporated — notably for the planned LocalSend compatibility work,
-where Apache-2.0 attribution and NOTICE obligations would attach.
+Apache-2.0. See [LICENSE](LICENSE).
 
-Until then, treat contributions as being made with no licence grant in place.
+Chosen over MIT for two reasons that matter to this project specifically. It
+grants patent rights explicitly, which is worth having in something that
+synthesises input events and speaks a protocol. And it matches
+[LocalSend](https://github.com/localsend/localsend), whose protocol model the
+file-transfer work is built on — sharing a licence removes any friction if
+compatibility work later wants to borrow more than a specification.
+
+Contributions are accepted under the same licence. If you incorporate
+third-party code, check its licence is compatible and add the attribution and
+`NOTICE` entries it requires.
 
 ---
 
