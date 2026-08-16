@@ -262,7 +262,6 @@ abstract final class KeyMap {
               Modifiers.leftControl | Modifiers.leftShift,
               HidKey.escape,
             ),
-
       NamedShortcut.switchApplication => platform.usesCommandModifier
           ? combo(Modifiers.leftMeta, HidKey.tab)
           : combo(Modifiers.leftAlt, HidKey.tab),
@@ -284,7 +283,6 @@ abstract final class KeyMap {
       NamedShortcut.fullscreen => platform.usesCommandModifier
           ? combo(primary | Modifiers.leftControl, HidKey.keyF)
           : combo(0, HidKey.f11),
-
       NamedShortcut.unrecognised => null,
     };
   }

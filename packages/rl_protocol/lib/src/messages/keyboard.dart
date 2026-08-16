@@ -180,7 +180,8 @@ abstract final class HidKey {
   static const int metaRight = 0xE7;
 
   /// True when [usage] is one of the eight modifier keys.
-  static bool isModifier(int usage) => usage >= controlLeft && usage <= metaRight;
+  static bool isModifier(int usage) =>
+      usage >= controlLeft && usage <= metaRight;
 
   /// The [Modifiers] bit corresponding to a modifier [usage], or `0`.
   static int modifierBit(int usage) => switch (usage) {

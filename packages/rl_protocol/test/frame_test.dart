@@ -33,7 +33,8 @@ void main() {
       final view = ByteData.sublistView(bytes);
 
       expect(view.getUint8(0), kProtocolVersion, reason: 'version at 0');
-      expect(view.getUint16(1), MessageType.mouseMove.code, reason: 'type at 1');
+      expect(view.getUint16(1), MessageType.mouseMove.code,
+          reason: 'type at 1');
       expect(view.getUint32(3), 42, reason: 'sequence at 3');
       expect(view.getUint64(7), 1234567890, reason: 'timestamp at 7');
       expect(view.getUint8(15), 0, reason: 'flags at 15');

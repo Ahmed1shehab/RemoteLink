@@ -51,8 +51,7 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
     // The desktop only advertises media control when it has a working backend,
     // so this is not defensive noise — a Windows build genuinely cannot do this
     // yet, and showing dead buttons would be worse than saying so.
-    final supported =
-        capabilities?.has(Capabilities.mediaControl) ?? connected;
+    final supported = capabilities?.has(Capabilities.mediaControl) ?? connected;
 
     if (connected && !supported) {
       return const _Unsupported();

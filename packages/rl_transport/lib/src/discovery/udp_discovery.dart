@@ -107,7 +107,8 @@ final class UdpDiscoveryClient implements DiscoveryBackend {
   };
 
   bool _refused = false;
-  final StreamController<bool> _operational = StreamController<bool>.broadcast();
+  final StreamController<bool> _operational =
+      StreamController<bool>.broadcast();
 
   @override
   Stream<List<DiscoveredDevice>> get devices => _controller.stream;
@@ -416,7 +417,8 @@ final class UdpDiscoveryServer {
     }
   }
 
-  void _sendTo(RawDatagramSocket socket, InternetAddress target, BeaconKind kind) {
+  void _sendTo(
+      RawDatagramSocket socket, InternetAddress target, BeaconKind kind) {
     try {
       final beacon = _describe();
       final payload = kind == beacon.kind

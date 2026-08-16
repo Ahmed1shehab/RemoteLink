@@ -92,14 +92,13 @@ final class MacosClipboardBackend implements ClipboardBackend {
         _appKit = DynamicLibrary.open(
           '/System/Library/Frameworks/AppKit.framework/AppKit',
         ) {
-    _getClass = _objc
-        .lookupFunction<_ObjcGetClassNative, _ObjcGetClassDart>(
-            'objc_getClass');
+    _getClass = _objc.lookupFunction<_ObjcGetClassNative, _ObjcGetClassDart>(
+        'objc_getClass');
     _registerSelector =
         _objc.lookupFunction<_SelRegisterNameNative, _SelRegisterNameDart>(
             'sel_registerName');
-    _retain = _objc
-        .lookupFunction<_ObjcRetainNative, _ObjcRetainDart>('objc_retain');
+    _retain =
+        _objc.lookupFunction<_ObjcRetainNative, _ObjcRetainDart>('objc_retain');
     _release = _objc
         .lookupFunction<_ObjcReleaseNative, _ObjcReleaseDart>('objc_release');
 
@@ -348,7 +347,8 @@ final class MacosClipboardBackend implements ClipboardBackend {
     }
 
     // 2. Fallback: NSImage -> NSBitmapImageRep -> representationUsingType:NSBitmapImageFileTypePNG
-    final canInit = _send1Bool(_nsImage, _selCanInitWithPasteboard, _pasteboard);
+    final canInit =
+        _send1Bool(_nsImage, _selCanInitWithPasteboard, _pasteboard);
     if (!canInit) return null;
 
     final allocImage = _send0(_nsImage, _selAlloc);
@@ -463,4 +463,3 @@ final class MacosClipboardBackend implements ClipboardBackend {
     _release(_concealedType);
   }
 }
-

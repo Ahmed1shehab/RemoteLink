@@ -80,6 +80,17 @@ final class _FakeInputBackend implements InputBackend {
   @override
   void releaseAll() {}
 
+  // Gestures are irrelevant to latency calibration, which only moves the cursor
+  // and reads it back — but the interface requires them.
+  @override
+  void magnify(double delta) {}
+
+  @override
+  void rotate(double degrees) {}
+
+  @override
+  void swipe({required int fingerCount, required SwipeDirection direction}) {}
+
   @override
   void dispose() {}
 }

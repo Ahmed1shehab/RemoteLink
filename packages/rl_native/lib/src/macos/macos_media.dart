@@ -203,7 +203,9 @@ final class MacosMediaBackend implements MediaBackend {
   @override
   Future<void> command(MediaAction action, {int seekSeconds = 10}) async {
     final key = switch (action) {
-      MediaAction.playPause || MediaAction.play || MediaAction.pause =>
+      MediaAction.playPause ||
+      MediaAction.play ||
+      MediaAction.pause =>
         _nxKeyPlay,
       MediaAction.stop => _nxKeyPlay,
       MediaAction.next => _nxKeyNext,

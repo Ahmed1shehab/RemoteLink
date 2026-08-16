@@ -38,7 +38,8 @@ final class DeviceIdentity {
   /// Throws [SecurityError] on a wrong-length seed rather than silently
   /// producing a different identity, which would look to the user like every
   /// paired device had spontaneously forgotten them.
-  static Future<DeviceIdentity> fromPrivateKey(List<int> privateKeyBytes) async {
+  static Future<DeviceIdentity> fromPrivateKey(
+      List<int> privateKeyBytes) async {
     if (privateKeyBytes.length != Primitives.keyLength) {
       throw SecurityError(
         'bad_identity_seed',

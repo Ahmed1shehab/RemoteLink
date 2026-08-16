@@ -208,7 +208,8 @@ final class PairingState {
 /// class is what turns that into a practical impossibility, and it is why the
 /// numeric methods are safe to offer at all.
 final class PairingRateLimiter {
-  PairingRateLimiter({required Clock clock, this.maxAttempts = kMaxPairingAttempts})
+  PairingRateLimiter(
+      {required Clock clock, this.maxAttempts = kMaxPairingAttempts})
       : _clock = clock;
 
   final Clock _clock;
@@ -285,8 +286,7 @@ final class PairingCoordinator {
     required Clock clock,
     PairingRateLimiter? rateLimiter,
   })  : _clock = clock,
-        _rateLimiter =
-            rateLimiter ?? PairingRateLimiter(clock: clock);
+        _rateLimiter = rateLimiter ?? PairingRateLimiter(clock: clock);
 
   final DeviceIdentity identity;
   final Clock _clock;

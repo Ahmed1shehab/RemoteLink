@@ -19,7 +19,8 @@ const String kBonjourServiceType = '_remotelink._tcp';
 /// build an identical [Beacon] from either source and everything downstream is
 /// unaware of which route found the computer.
 final class BonjourAdvertiser {
-  BonjourAdvertiser({required Beacon Function() describe}) : _describe = describe;
+  BonjourAdvertiser({required Beacon Function() describe})
+      : _describe = describe;
 
   /// Read fresh on every (re)publish, so a capability change — Accessibility
   /// being granted, say — reaches new browsers rather than being frozen at

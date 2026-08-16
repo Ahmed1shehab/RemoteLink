@@ -306,7 +306,8 @@ final class ByteReader {
     try {
       return utf8.decode(bytes);
     } on FormatException catch (e) {
-      throw ProtocolError('bad_utf8', 'invalid UTF-8 in string field', cause: e);
+      throw ProtocolError('bad_utf8', 'invalid UTF-8 in string field',
+          cause: e);
     }
   }
 

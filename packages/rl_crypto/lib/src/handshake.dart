@@ -228,8 +228,7 @@ abstract base class _HandshakeCore {
     _masterSalt = Uint8List.fromList(_transcript);
   }
 
-  Future<Uint8List> _derive(String label, {int length = 32}) =>
-      Primitives.hkdf(
+  Future<Uint8List> _derive(String label, {int length = 32}) => Primitives.hkdf(
         secret: _masterIkm,
         salt: _masterSalt,
         info: label,

@@ -273,13 +273,11 @@ final class FileTrustStore implements TrustStore {
       pairedAt: rawPairedAt is String
           ? (DateTime.tryParse(rawPairedAt) ?? DateTime.now())
           : DateTime.now(),
-      permissionTier: json['permissionTier'] is int
-          ? json['permissionTier'] as int
-          : 2,
+      permissionTier:
+          json['permissionTier'] is int ? json['permissionTier'] as int : 2,
       lastSeenAt: rawLastSeen is String ? DateTime.tryParse(rawLastSeen) : null,
-      lastAddress: json['lastAddress'] is String
-          ? json['lastAddress'] as String
-          : null,
+      lastAddress:
+          json['lastAddress'] is String ? json['lastAddress'] as String : null,
       revoked: json['revoked'] == true,
     );
   }

@@ -387,10 +387,9 @@ class _TypedEcho extends StatelessWidget {
                       ),
                       child: Text(
                         'Clear',
-                        style:
-                            Theme.of(context).textTheme.labelSmall?.copyWith(
-                                  color: scheme.primary,
-                                ),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: scheme.primary,
+                            ),
                       ),
                     ),
                   ),
@@ -458,7 +457,11 @@ class _ShortcutGrid extends StatelessWidget {
     (proto.NamedShortcut.switchApplication, 'Switch app', Icons.apps),
     (proto.NamedShortcut.closeTab, 'Close tab', Icons.tab_unselected),
     (proto.NamedShortcut.refresh, 'Refresh', Icons.refresh),
-    (proto.NamedShortcut.taskManager, 'Task manager', Icons.monitor_heart_outlined),
+    (
+      proto.NamedShortcut.taskManager,
+      'Task manager',
+      Icons.monitor_heart_outlined
+    ),
   ];
 
   @override
@@ -507,9 +510,8 @@ class _ModifierRow extends StatelessWidget {
               // A locked modifier is visually distinct from a one-shot one,
               // because "Shift is stuck on" is otherwise invisible and produces
               // baffling results three keystrokes later.
-              avatar: locked & bit != 0
-                  ? const Icon(Icons.lock, size: 16)
-                  : null,
+              avatar:
+                  locked & bit != 0 ? const Icon(Icons.lock, size: 16) : null,
               onSelected: enabled ? (_) => onToggle(bit) : null,
             ),
         ],

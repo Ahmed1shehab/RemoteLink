@@ -38,8 +38,7 @@ sealed class Result<T, E extends Object> {
   /// [isOk] check or in tests.
   T unwrap() => switch (this) {
         Ok<T, E>(:final value) => value,
-        Err<T, E>(:final error) =>
-          throw StateError('unwrap() on Err: $error'),
+        Err<T, E>(:final error) => throw StateError('unwrap() on Err: $error'),
       };
 
   /// Transforms the success value, leaving a failure untouched.

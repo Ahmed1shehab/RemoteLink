@@ -52,10 +52,10 @@ typedef _CreateEncoderDart = int Function(
     Pointer<GUID> pguidVendor,
     Pointer<Pointer<Pointer<IntPtr>>> ppIEncoder);
 
-typedef _CreateFormatConverterNative = Int32 Function(
-    Pointer<Void> thisPtr, Pointer<Pointer<Pointer<IntPtr>>> ppIFormatConverter);
-typedef _CreateFormatConverterDart = int Function(
-    Pointer<Void> thisPtr, Pointer<Pointer<Pointer<IntPtr>>> ppIFormatConverter);
+typedef _CreateFormatConverterNative = Int32 Function(Pointer<Void> thisPtr,
+    Pointer<Pointer<Pointer<IntPtr>>> ppIFormatConverter);
+typedef _CreateFormatConverterDart = int Function(Pointer<Void> thisPtr,
+    Pointer<Pointer<Pointer<IntPtr>>> ppIFormatConverter);
 
 typedef _CreateWicStreamNative = Int32 Function(
     Pointer<Void> thisPtr, Pointer<Pointer<Pointer<IntPtr>>> ppIWICStream);
@@ -96,15 +96,19 @@ typedef _GetFrameNative = Int32 Function(Pointer<Void> thisPtr, Uint32 index,
 typedef _GetFrameDart = int Function(Pointer<Void> thisPtr, int index,
     Pointer<Pointer<Pointer<IntPtr>>> ppIBitmapFrame);
 
-typedef _GetSizeNative = Int32 Function(Pointer<Void> thisPtr,
-    Pointer<Uint32> puiWidth, Pointer<Uint32> puiHeight);
+typedef _GetSizeNative = Int32 Function(
+    Pointer<Void> thisPtr, Pointer<Uint32> puiWidth, Pointer<Uint32> puiHeight);
 typedef _GetSizeDart = int Function(
     Pointer<Void> thisPtr, Pointer<Uint32> puiWidth, Pointer<Uint32> puiHeight);
 
-typedef _CopyPixelsNative = Int32 Function(Pointer<Void> thisPtr,
-    Pointer<Void> prc, Uint32 cbStride, Uint32 cbBufferSize, Pointer<Uint8> pbBuffer);
-typedef _CopyPixelsDart = int Function(Pointer<Void> thisPtr,
-    Pointer<Void> prc, int cbStride, int cbBufferSize, Pointer<Uint8> pbBuffer);
+typedef _CopyPixelsNative = Int32 Function(
+    Pointer<Void> thisPtr,
+    Pointer<Void> prc,
+    Uint32 cbStride,
+    Uint32 cbBufferSize,
+    Pointer<Uint8> pbBuffer);
+typedef _CopyPixelsDart = int Function(Pointer<Void> thisPtr, Pointer<Void> prc,
+    int cbStride, int cbBufferSize, Pointer<Uint8> pbBuffer);
 
 typedef _InitConverterNative = Int32 Function(
     Pointer<Void> thisPtr,
@@ -533,10 +537,11 @@ final class Win32ClipboardBackend implements ClipboardBackend {
 
                 try {
                   // Initialize frame (vtable index 3 on IWICBitmapFrameEncode)
-                  final initFrame =
-                      Pointer<NativeFunction<_InitFrameEncodeNative>>.fromAddress(
-                              pFrame.value[3])
-                          .asFunction<_InitFrameEncodeDart>();
+                  final initFrame = Pointer<
+                              NativeFunction<
+                                  _InitFrameEncodeNative>>.fromAddress(
+                          pFrame.value[3])
+                      .asFunction<_InitFrameEncodeDart>();
                   if (initFrame(pFrame.cast(), nullptr) != 0) return null;
 
                   // SetSize (vtable index 4 on IWICBitmapFrameEncode)
@@ -682,10 +687,11 @@ final class Win32ClipboardBackend implements ClipboardBackend {
 
             // CreateDecoderFromStream (vtable index 4 on IWICImagingFactory)
             final ppDecoder = calloc<Pointer<Pointer<IntPtr>>>();
-            final createDecoder =
-                Pointer<NativeFunction<_CreateDecoderFromStreamNative>>.fromAddress(
-                        pFactory.value[4])
-                    .asFunction<_CreateDecoderFromStreamDart>();
+            final createDecoder = Pointer<
+                        NativeFunction<
+                            _CreateDecoderFromStreamNative>>.fromAddress(
+                    pFactory.value[4])
+                .asFunction<_CreateDecoderFromStreamDart>();
             if (createDecoder(
                   pFactory.cast(),
                   pWicStream.cast(),
@@ -717,10 +723,11 @@ final class Win32ClipboardBackend implements ClipboardBackend {
               try {
                 // CreateFormatConverter (vtable index 10 on IWICImagingFactory)
                 final ppConverter = calloc<Pointer<Pointer<IntPtr>>>();
-                final createConverter =
-                    Pointer<NativeFunction<_CreateFormatConverterNative>>.fromAddress(
-                            pFactory.value[10])
-                        .asFunction<_CreateFormatConverterDart>();
+                final createConverter = Pointer<
+                            NativeFunction<
+                                _CreateFormatConverterNative>>.fromAddress(
+                        pFactory.value[10])
+                    .asFunction<_CreateFormatConverterDart>();
                 if (createConverter(pFactory.cast(), ppConverter) != 0) {
                   calloc.free(ppConverter);
                   return;
@@ -730,8 +737,16 @@ final class Win32ClipboardBackend implements ClipboardBackend {
 
                 try {
                   final guidBgra = calloc<GUID>();
-                  _setGuid(guidBgra, 0x6fddc324, 0x4e03, 0x4b15,
-                      const <int>[0x83, 0x2c, 0x5a, 0xe5, 0x0d, 0x93, 0x4b, 0x9d]);
+                  _setGuid(guidBgra, 0x6fddc324, 0x4e03, 0x4b15, const <int>[
+                    0x83,
+                    0x2c,
+                    0x5a,
+                    0xe5,
+                    0x0d,
+                    0x93,
+                    0x4b,
+                    0x9d
+                  ]);
 
                   // Initialize converter (vtable index 8 on IWICFormatConverter)
                   final initConv =
@@ -883,4 +898,3 @@ final class Win32ClipboardBackend implements ClipboardBackend {
   @override
   void dispose() => _disposed = true;
 }
-

@@ -230,8 +230,7 @@ enum MessageType {
   };
 
   /// Resolves a wire code, returning [unknown] rather than throwing.
-  static MessageType fromCode(int code) =>
-      _byCode[code] ?? MessageType.unknown;
+  static MessageType fromCode(int code) => _byCode[code] ?? MessageType.unknown;
 
   /// Subsystem byte, for routing and metrics bucketing.
   int get subsystem => (code >> 8) & 0xFF;

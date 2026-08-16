@@ -56,7 +56,8 @@ final class BonjourDiscoveryBackend implements DiscoveryBackend {
   final Map<String, DiscoveredDevice> _devices = <String, DiscoveredDevice>{};
   final StreamController<List<DiscoveredDevice>> _controller =
       StreamController<List<DiscoveredDevice>>.broadcast();
-  final StreamController<bool> _operational = StreamController<bool>.broadcast();
+  final StreamController<bool> _operational =
+      StreamController<bool>.broadcast();
 
   BonsoirDiscovery? _discovery;
   StreamSubscription<BonsoirDiscoveryEvent>? _subscription;
@@ -149,8 +150,8 @@ final class BonjourDiscoveryBackend implements DiscoveryBackend {
         int.tryParse(attributes[_txtPlatform] ?? '') ?? 0,
       ),
       servicePort: service.port,
-      protocolVersion: int.tryParse(attributes[_txtProtocol] ?? '') ??
-          kProtocolVersion,
+      protocolVersion:
+          int.tryParse(attributes[_txtProtocol] ?? '') ?? kProtocolVersion,
       publicKeyFingerprint: fingerprint,
       capabilities:
           Capabilities(int.tryParse(attributes[_txtCapabilities] ?? '') ?? 0),
@@ -235,7 +236,8 @@ final class CompositeDiscoveryBackend implements DiscoveryBackend {
 
   final StreamController<List<DiscoveredDevice>> _controller =
       StreamController<List<DiscoveredDevice>>.broadcast();
-  final StreamController<bool> _operational = StreamController<bool>.broadcast();
+  final StreamController<bool> _operational =
+      StreamController<bool>.broadcast();
   final List<StreamSubscription<Object?>> _subscriptions =
       <StreamSubscription<Object?>>[];
 

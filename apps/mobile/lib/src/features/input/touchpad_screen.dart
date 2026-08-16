@@ -140,7 +140,8 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
 
       final capabilities =
           ref.read(clientProvider).valueOrNull?.session?.capabilities;
-      final gesturesAvailable = capabilities?.has(Capabilities.gestures) ?? false;
+      final gesturesAvailable =
+          capabilities?.has(Capabilities.gestures) ?? false;
 
       if (gesturesAvailable && _lastSpan != null && _lastSpan! > 0) {
         final spanDelta = (currentSpan - _lastSpan!) / _lastSpan!;

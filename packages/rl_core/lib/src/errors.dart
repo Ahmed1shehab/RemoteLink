@@ -7,7 +7,8 @@ import 'package:meta/meta.dart';
 /// failures across versions.
 @immutable
 sealed class RemoteLinkError implements Exception {
-  const RemoteLinkError({required this.code, required this.message, this.cause});
+  const RemoteLinkError(
+      {required this.code, required this.message, this.cause});
 
   /// Stable machine-readable identifier, e.g. `protocol.short_frame`.
   final String code;
@@ -26,8 +27,7 @@ sealed class RemoteLinkError implements Exception {
   /// that already encodes the category as its prefix, making the type name
   /// redundant as well as unreliable.
   @override
-  String toString() =>
-      '$code: $message${cause == null ? '' : ' <- $cause'}';
+  String toString() => '$code: $message${cause == null ? '' : ' <- $cause'}';
 }
 
 /// The peer sent bytes that do not conform to the wire format.

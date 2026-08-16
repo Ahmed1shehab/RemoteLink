@@ -279,9 +279,8 @@ final class Win32Bindings {
     getSystemMetrics =
         _user32.lookupFunction<_GetSystemMetricsNative, GetSystemMetricsDart>(
             'GetSystemMetrics');
-    getLastError =
-        _kernel32.lookupFunction<_GetLastErrorNative, GetLastErrorDart>(
-            'GetLastError');
+    getLastError = _kernel32
+        .lookupFunction<_GetLastErrorNative, GetLastErrorDart>('GetLastError');
 
     openClipboard =
         _user32.lookupFunction<_OpenClipboardNative, OpenClipboardDart>(
@@ -308,9 +307,8 @@ final class Win32Bindings {
         _RegisterClipboardFormatNative,
         RegisterClipboardFormatDart>('RegisterClipboardFormatW');
 
-    globalAlloc =
-        _kernel32.lookupFunction<_GlobalAllocNative, GlobalAllocDart>(
-            'GlobalAlloc');
+    globalAlloc = _kernel32
+        .lookupFunction<_GlobalAllocNative, GlobalAllocDart>('GlobalAlloc');
     globalLock = _kernel32
         .lookupFunction<_GlobalLockNative, GlobalLockDart>('GlobalLock');
     globalUnlock = _kernel32
@@ -326,11 +324,9 @@ final class Win32Bindings {
     coCreateInstance =
         _ole32.lookupFunction<_CoCreateInstanceNative, CoCreateInstanceDart>(
             'CoCreateInstance');
-    createStreamOnHGlobal = _ole32.lookupFunction<
-        _CreateStreamOnHGlobalNative,
+    createStreamOnHGlobal = _ole32.lookupFunction<_CreateStreamOnHGlobalNative,
         CreateStreamOnHGlobalDart>('CreateStreamOnHGlobal');
-    getHGlobalFromStream = _ole32.lookupFunction<
-        _GetHGlobalFromStreamNative,
+    getHGlobalFromStream = _ole32.lookupFunction<_GetHGlobalFromStreamNative,
         GetHGlobalFromStreamDart>('GetHGlobalFromStream');
   }
 

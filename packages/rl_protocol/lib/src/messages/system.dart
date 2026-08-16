@@ -161,7 +161,8 @@ final class OpenUrl extends Message {
 /// commands its owner already approved and nothing else.
 @immutable
 final class RunCommand extends Message {
-  const RunCommand({required this.commandId, this.parameters = const <String>[]});
+  const RunCommand(
+      {required this.commandId, this.parameters = const <String>[]});
 
   final String commandId;
 

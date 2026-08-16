@@ -32,7 +32,8 @@ Future<(HandshakeResult, HandshakeResult)> _run({
   );
 
   final hello = await clientSide.createHello();
-  final (serverHello, sealedStatic) = await serverSide.receiveClientHello(hello);
+  final (serverHello, sealedStatic) =
+      await serverSide.receiveClientHello(hello);
   await clientSide.receiveServerHello(serverHello);
   await clientSide.receiveServerStatic(sealedStatic);
   final clientFinish = await clientSide.createClientFinish();
@@ -53,7 +54,8 @@ void main() {
   });
 
   group('identity', () {
-    test('device id is derived deterministically from the public key', () async {
+    test('device id is derived deterministically from the public key',
+        () async {
       final privateKey = await phone.extractPrivateKey();
       final restored = await DeviceIdentity.fromPrivateKey(privateKey);
       expect(restored.id, phone.id);

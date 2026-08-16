@@ -441,14 +441,16 @@ void main() {
       service.start();
       await Future<void>.delayed(const Duration(milliseconds: 25));
 
-      final samplePng = Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 1, 2, 3]);
+      final samplePng =
+          Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 1, 2, 3]);
       backend.copyImageLocally(samplePng);
       await Future<void>.delayed(const Duration(milliseconds: 25));
 
       expect(outboundUpdates, hasLength(1));
       final update = outboundUpdates.first;
       expect(update.items, hasLength(1));
-      expect(update.items.first.contentType, equals(ClipboardContentType.imagePng));
+      expect(update.items.first.contentType,
+          equals(ClipboardContentType.imagePng));
       expect(update.items.first.data, equals(samplePng));
 
       await sub.cancel();
@@ -531,7 +533,8 @@ void main() {
       service.start();
       await Future<void>.delayed(const Duration(milliseconds: 25));
 
-      final samplePng = Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 4, 5, 6]);
+      final samplePng =
+          Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 4, 5, 6]);
       backend.copyImageLocally(samplePng, concealed: true);
       await Future<void>.delayed(const Duration(milliseconds: 25));
 
@@ -562,7 +565,8 @@ void main() {
       service.start();
       await Future<void>.delayed(const Duration(milliseconds: 25));
 
-      final samplePng = Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 7, 8, 9]);
+      final samplePng =
+          Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 7, 8, 9]);
       final update = await _makeImageUpdate(samplePng);
 
       final applied = await service.applyRemote(update);
@@ -579,7 +583,8 @@ void main() {
 
     test('snapshot returns current image or null if concealed or > 1 MiB',
         () async {
-      final samplePng = Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 10, 11]);
+      final samplePng =
+          Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 10, 11]);
       final backend = FakeClipboardBackend();
       backend.writeImagePng(samplePng);
 
@@ -591,7 +596,8 @@ void main() {
       final snap = await service.snapshot();
       expect(snap, isNotNull);
       expect(snap!.items, hasLength(1));
-      expect(snap.items.first.contentType, equals(ClipboardContentType.imagePng));
+      expect(
+          snap.items.first.contentType, equals(ClipboardContentType.imagePng));
       expect(snap.items.first.data, equals(samplePng));
 
       // Concealed image snapshot returns null
@@ -607,4 +613,3 @@ void main() {
     });
   });
 }
-

@@ -65,7 +65,13 @@ void main() {
     });
 
     test('strings round trip multi-byte UTF-8 exactly', () {
-      const samples = <String>['', 'hello', 'héllo wörld', '日本語', '👨‍👩‍👧‍👦'];
+      const samples = <String>[
+        '',
+        'hello',
+        'héllo wörld',
+        '日本語',
+        '👨‍👩‍👧‍👦'
+      ];
       final writer = ByteWriter();
       for (final sample in samples) {
         writer.writeString(sample);
