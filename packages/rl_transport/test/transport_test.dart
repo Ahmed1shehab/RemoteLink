@@ -100,8 +100,8 @@ void main() {
       );
 
       expect(
-        device.isStale(DateTime.utc(2026).add(const Duration(seconds: 3)),
-            kDeviceTimeout),
+        device.isStale(
+            DateTime.utc(2026).add(const Duration(seconds: 3)), kDeviceTimeout),
         isFalse,
       );
       expect(
@@ -412,7 +412,8 @@ void main() {
       expect(client.isConnected, isFalse);
     });
 
-    test('a revoked device is refused', () async {
+    test('a revoked device receives a terminal error and stops reconnecting',
+        () async {
       await trustStore.upsert(
         TrustedPeer(
           id: phoneIdentity.id,
@@ -425,10 +426,21 @@ void main() {
         ),
       );
 
+      await client.dispose();
+      final reconnectClock = FakeClock();
+      client = RemoteLinkClient(
+        identity: phoneIdentity,
+        capabilities: _caps,
+        clock: reconnectClock,
+        backoff: const BackoffPolicy(jitter: 0),
+      );
+
       var accepted = false;
-      final subscription =
-          server.accepted.listen((_) => accepted = true);
+      final subscription = server.accepted.listen((_) => accepted = true);
       addTearDown(subscription.cancel);
+      final failed = client.states.firstWhere(
+        (state) => state == ClientState.failed,
+      );
 
       await client.connect(
         ConnectionTarget(
@@ -439,9 +451,117 @@ void main() {
         ),
       );
 
-      await Future<void>.delayed(const Duration(seconds: 2));
+      await failed.timeout(const Duration(seconds: 10));
       expect(accepted, isFalse);
       expect(server.sessionCount, 0);
+      expect(client.failureCode, ProtocolErrorCode.revoked);
+      expect(client.connectionAttemptCount, 1);
+
+      // A fake clock makes the negative assertion deterministic: advancing
+      // beyond the maximum backoff would release every retry timer if the
+      // supervisor had armed one.
+      reconnectClock.advance(const Duration(days: 1));
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        client.connectionAttemptCount,
+        1,
+        reason: 'a revoked peer must not make a second connection attempt',
+      );
+    });
+
+    test('live revocation fails the client without another attempt', () async {
+      await trustStore.upsert(
+        TrustedPeer(
+          id: phoneIdentity.id,
+          publicKey: phoneIdentity.publicKey,
+          name: 'Test Phone',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: 2,
+        ),
+      );
+
+      await client.dispose();
+      final reconnectClock = FakeClock();
+      client = RemoteLinkClient(
+        identity: phoneIdentity,
+        capabilities: _caps,
+        clock: reconnectClock,
+        backoff: const BackoffPolicy(jitter: 0),
+      );
+
+      final acceptedFuture = server.accepted.first;
+      await client.connect(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: server.boundPort,
+          deviceId: desktopIdentity.id,
+          serverPublicKey: desktopIdentity.publicKey,
+        ),
+      );
+      await acceptedFuture.timeout(const Duration(seconds: 10));
+      await client.waitUntilConnected();
+
+      final failed = client.states.firstWhere(
+        (state) => state == ClientState.failed,
+      );
+      final attemptsAtRevocation = client.connectionAttemptCount;
+      await server.revokePeer(phoneIdentity.id);
+      await failed.timeout(const Duration(seconds: 10));
+
+      expect(client.failureCode, ProtocolErrorCode.revoked);
+      reconnectClock.advance(const Duration(days: 1));
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        client.connectionAttemptCount - attemptsAtRevocation,
+        lessThanOrEqualTo(1),
+        reason: 'revocation permits at most one racing reconnect attempt',
+      );
+    });
+
+    test('every non-retryable protocol error fails with its code', () async {
+      await trustStore.upsert(
+        TrustedPeer(
+          id: phoneIdentity.id,
+          publicKey: phoneIdentity.publicKey,
+          name: 'Test Phone',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: 2,
+        ),
+      );
+
+      final terminalCodes =
+          ProtocolErrorCode.values.where((code) => !code.isRetryable).toList();
+
+      for (final code in terminalCodes) {
+        final acceptedFuture = server.accepted.first;
+        await client.connect(
+          ConnectionTarget(
+            host: '127.0.0.1',
+            port: server.boundPort,
+            deviceId: desktopIdentity.id,
+            serverPublicKey: desktopIdentity.publicKey,
+          ),
+        );
+        final accepted =
+            await acceptedFuture.timeout(const Duration(seconds: 10));
+        await client.waitUntilConnected();
+
+        final failed = client.states.firstWhere(
+          (state) => state == ClientState.failed,
+        );
+        final ended = server.ended.first;
+        await accepted.session.send(
+          ErrorMessage(code: code, detail: 'terminal test error'),
+        );
+
+        await failed.timeout(const Duration(seconds: 10));
+        expect(client.failureCode, code);
+        await ended.timeout(const Duration(seconds: 10));
+      }
     });
 
     test('a reconnect replaces the earlier session for the same device',

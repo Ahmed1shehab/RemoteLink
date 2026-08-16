@@ -108,6 +108,8 @@ final class RemoteLinkClient {
   StreamSubscription<SessionState>? _sessionStateSubscription;
 
   ClientState _state = ClientState.idle;
+  ProtocolErrorCode? _failureCode;
+  int _connectionAttemptCount = 0;
   int _attempt = 0;
   bool _stopRequested = false;
   Completer<void>? _backoffTimer;
@@ -116,6 +118,16 @@ final class RemoteLinkClient {
   final List<Completer<Session>> _readyWaiters = <Completer<Session>>[];
 
   ClientState get state => _state;
+
+  /// Protocol reason for the current terminal failure, when supplied by the
+  /// peer. Cleared when [connect] starts a new connection lifecycle.
+  ProtocolErrorCode? get failureCode => _failureCode;
+
+  ConnectionTarget? get target => _target;
+
+  /// Number of socket connection attempts made during this client's lifetime.
+  @visibleForTesting
+  int get connectionAttemptCount => _connectionAttemptCount;
 
   Stream<ClientState> get states => _states.stream;
 
@@ -144,6 +156,7 @@ final class RemoteLinkClient {
   Future<void> connect(ConnectionTarget target) async {
     await disconnect();
     _stopRequested = false;
+    _failureCode = null;
     _target = target;
     _attempt = 0;
     unawaited(_runSupervisor());
@@ -253,6 +266,7 @@ final class RemoteLinkClient {
   }
 
   Future<void> _attemptConnection(ConnectionTarget target) async {
+    _connectionAttemptCount++;
     final connection = await FramedConnection.connect(target.host, target.port);
 
     final session = await HandshakeDriver.runClient(
@@ -277,6 +291,19 @@ final class RemoteLinkClient {
 
     _messageSubscription = session.messages.listen(
       (message) {
+        if (message case ErrorMessage(:final code) when !code.isRetryable) {
+          _failureCode = code;
+          _stopRequested = true;
+          _setState(ClientState.failed);
+          _failWaiters(
+            TransportError(
+              'protocol_${code.name}',
+              'peer reported a terminal protocol error',
+              retryable: false,
+            ),
+          );
+          unawaited(session.close(reason: CloseReason.protocolError));
+        }
         if (!_messages.isClosed) _messages.add(message);
       },
       cancelOnError: false,

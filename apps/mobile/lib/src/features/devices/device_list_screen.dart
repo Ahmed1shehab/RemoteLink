@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
+import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
@@ -22,6 +23,7 @@ import 'auto_connect.dart';
 /// broken on exactly the networks where discovery fails.
 class _Entry {
   const _Entry({
+    this.id,
     required this.name,
     required this.host,
     required this.port,
@@ -31,6 +33,7 @@ class _Entry {
     this.publicKey,
   });
 
+  final DeviceId? id;
   final String name;
   final String host;
   final int port;
@@ -94,10 +97,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     if (stage == AutoConnectStage.deciding ||
         stage == AutoConnectStage.connecting) {
       return _Reconnecting(
-        name: ref
-            .watch(autoConnectTargetProvider)
-            .valueOrNull
-            ?.displayName,
+        name: ref.watch(autoConnectTargetProvider).valueOrNull?.displayName,
         onCancel: () => ref.read(autoConnectProvider.notifier).cancel(),
       );
     }
@@ -107,6 +107,12 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     final paired =
         ref.watch(trustedPeersProvider).valueOrNull ?? const <TrustedPeer>[];
     final entries = _merge(discovered, paired);
+    final clientState = ref.watch(clientStateProvider).valueOrNull;
+    final client = ref.watch(clientProvider).valueOrNull;
+    final revokedPeerId = clientState == ClientState.failed &&
+            client?.failureCode == ProtocolErrorCode.revoked
+        ? client?.target?.deviceId
+        : null;
 
     return Scaffold(
       appBar: AppBar(
@@ -141,10 +147,17 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
                 // Leaves room for the FAB so the last row is never covered.
                 padding: const EdgeInsets.only(bottom: 88),
                 itemCount: entries.length,
-                itemBuilder: (context, index) => _DeviceTile(
-                  entry: entries[index],
-                  onTap: () => _connect(context, entries[index]),
-                ),
+                itemBuilder: (context, index) {
+                  final entry = entries[index];
+                  final wasRevoked = entry.id == revokedPeerId;
+                  return _DeviceTile(
+                    entry: entry,
+                    wasRevoked: wasRevoked,
+                    onTap: wasRevoked ? null : () => _connect(context, entry),
+                    onPairAgain:
+                        wasRevoked ? () => _pairAgain(context, entry) : null,
+                  );
+                },
               ),
             ),
     );
@@ -166,6 +179,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
       seen.add(device.id.value);
       entries.add(
         _Entry(
+          id: device.id,
           name: peer?.name ?? device.name,
           // The live address wins over the stored one: a computer that moved to
           // a new DHCP lease is announcing where it actually is now.
@@ -185,6 +199,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
       if (address == null) continue;
       entries.add(
         _Entry(
+          id: peer.id,
           name: peer.name,
           host: address,
           port: kDefaultServicePort,
@@ -213,7 +228,11 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     await _connect(context, entry);
   }
 
-  Future<void> _connect(BuildContext context, _Entry entry) async {
+  Future<void> _connect(
+    BuildContext context,
+    _Entry entry, {
+    bool freshPairing = false,
+  }) async {
     final client = await ref.read(clientProvider.future);
     if (!context.mounted) return;
 
@@ -225,7 +244,8 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
       ConnectionTarget(
         host: entry.host,
         port: entry.port,
-        serverPublicKey: entry.publicKey,
+        deviceId: entry.id,
+        serverPublicKey: freshPairing ? null : entry.publicKey,
         displayName: entry.name,
       ),
     );
@@ -233,7 +253,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     if (!context.mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => entry.isPaired
+        builder: (_) => entry.isPaired && !freshPairing
             ? const ControlScreen()
             : PairingScreen(
                 deviceName: entry.name,
@@ -242,6 +262,25 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
               ),
       ),
     );
+  }
+
+  Future<void> _pairAgain(BuildContext context, _Entry entry) async {
+    final peerId = entry.id;
+    if (peerId == null) return;
+
+    final client = await ref.read(clientProvider.future);
+    await client.disconnect();
+
+    final trustStore = await ref.read(trustStoreProvider.future);
+    await trustStore.forget(peerId);
+    await persistTrustStore(
+      trustStore,
+      await ref.read(identityStoreProvider.future),
+    );
+    ref.invalidate(trustedPeersProvider);
+
+    if (!context.mounted) return;
+    await _connect(context, entry, freshPairing: true);
   }
 }
 
@@ -355,10 +394,17 @@ class _ManualAddressDialogState extends State<_ManualAddressDialog> {
 }
 
 class _DeviceTile extends StatelessWidget {
-  const _DeviceTile({required this.entry, required this.onTap});
+  const _DeviceTile({
+    required this.entry,
+    required this.wasRevoked,
+    required this.onTap,
+    required this.onPairAgain,
+  });
 
   final _Entry entry;
-  final VoidCallback onTap;
+  final bool wasRevoked;
+  final VoidCallback? onTap;
+  final VoidCallback? onPairAgain;
 
   @override
   Widget build(BuildContext context) {
@@ -374,20 +420,29 @@ class _DeviceTile extends StatelessWidget {
         // Dimmed when the computer is paired but not currently announcing: the
         // address may be stale, and the tap may fail. Better to show it looking
         // uncertain than to hide it or pretend it is online.
-        color: entry.isLive ? null : scheme.onSurfaceVariant.withValues(alpha: 0.5),
+        color: entry.isLive
+            ? null
+            : scheme.onSurfaceVariant.withValues(alpha: 0.5),
       ),
       title: Text(entry.name),
       subtitle: Text(
-        switch ((entry.isPaired, entry.isLive)) {
-          (true, true) => 'Paired · ${entry.host}',
-          (true, false) => 'Paired · not seen right now · ${entry.host}',
-          (false, true) => 'Tap to pair · ${entry.host}',
-          (false, false) => entry.host,
-        },
+        wasRevoked
+            ? 'This computer removed your access'
+            : switch ((entry.isPaired, entry.isLive)) {
+                (true, true) => 'Paired · ${entry.host}',
+                (true, false) => 'Paired · not seen right now · ${entry.host}',
+                (false, true) => 'Tap to pair · ${entry.host}',
+                (false, false) => entry.host,
+              },
       ),
-      trailing: entry.isPaired
-          ? Icon(Icons.verified_user, color: scheme.primary)
-          : const Icon(Icons.chevron_right),
+      trailing: wasRevoked
+          ? TextButton(
+              onPressed: onPairAgain,
+              child: const Text('Pair again'),
+            )
+          : entry.isPaired
+              ? Icon(Icons.verified_user, color: scheme.primary)
+              : const Icon(Icons.chevron_right),
       onTap: onTap,
     );
   }
