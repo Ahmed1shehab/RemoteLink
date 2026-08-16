@@ -20,10 +20,11 @@ import 'src/ui/home_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  final memorySink = MemoryLogSink();
   Log.level = kReleaseBuild ? LogLevel.info : LogLevel.debug;
   Log.sink = MultiLogSink(<LogSink>[
     const ConsoleLogSink(),
-    MemoryLogSink(),
+    memorySink,
   ]);
 
   await windowManager.ensureInitialized();
@@ -50,7 +51,14 @@ Future<void> main() async {
 
   await _configureAutoLaunch();
 
-  runApp(const ProviderScope(child: RemoteLinkDesktopApp()));
+  runApp(
+    ProviderScope(
+      overrides: <Override>[
+        memoryLogSinkProvider.overrideWithValue(memorySink),
+      ],
+      child: const RemoteLinkDesktopApp(),
+    ),
+  );
 }
 
 /// Set by the build system for release binaries.

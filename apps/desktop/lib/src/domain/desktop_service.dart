@@ -173,6 +173,28 @@ final class DesktopService {
 
   String? get inputUnavailableReason => _input.unavailableReason;
 
+  bool get clipboardAvailable => _clipboardBackend.isAvailable;
+
+  String? get clipboardUnavailableReason => _clipboardBackend.isAvailable
+      ? null
+      : (_clipboardBackend is UnsupportedClipboardBackend
+          ? 'Clipboard sync is not supported on ${NativeBackends.currentPlatform.name}'
+          : 'Clipboard backend unavailable');
+
+  bool get mediaAvailable => _media.isAvailable;
+
+  String? get mediaUnavailableReason => _media.isAvailable
+      ? null
+      : (_media is UnsupportedMediaBackend
+          ? 'Media control is not supported on ${NativeBackends.currentPlatform.name}'
+          : 'Media backend unavailable');
+
+  int get commandAppliedCount => _dispatcher.appliedCount;
+
+  int get commandDeniedCount => _dispatcher.deniedCount;
+
+  int get commandUnsupportedCount => _dispatcher.unsupportedCount;
+
   /// Capabilities computed from the backends' *current* state.
   ///
   /// Recomputed on every read rather than cached at startup, because on macOS
@@ -502,7 +524,10 @@ final class DesktopService {
 
     _log.info(
       'paired',
-      fields: <String, Object?>{'peer': request.peerId.value, 'tier': tier.name},
+      fields: <String, Object?>{
+        'peer': request.peerId.value,
+        'tier': tier.name
+      },
     );
   }
 
@@ -585,8 +610,8 @@ final class DesktopService {
     // native API, because the platform utilities already handle the parts that
     // matter: warning about unsaved work, notifying other applications, and
     // respecting group policy.
-    final (executable, arguments) = switch (
-        (NativeBackends.currentPlatform, command.action)) {
+    final (executable, arguments) =
+        switch ((NativeBackends.currentPlatform, command.action)) {
       (PlatformKind.windows, PowerAction.shutdown) => (
           'shutdown',
           <String>['/s', '/t', '${command.delaySeconds}'],
