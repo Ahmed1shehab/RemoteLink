@@ -1,30 +1,52 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:remotelink_mobile/src/features/devices/device_list_screen.dart';
 
-import 'package:remotelink_mobile/main.dart';
+import 'support/fakes.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('renders the empty state when no computers are discovered',
+      (tester) async {
+    await _pumpDeviceList(tester, discoveryOperational: true);
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.text('Computers'), findsOneWidget);
+    expect(find.text('Looking for computers'), findsOneWidget);
+    expect(find.text('Connect by address'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
+
+  testWidgets('explains when automatic discovery is unavailable',
+      (tester) async {
+    await _pumpDeviceList(tester, discoveryOperational: false);
+
+    expect(
+      find.text('This device can’t search automatically'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('iPhones need a special Apple permission'),
+      findsOneWidget,
+    );
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+}
+
+Future<void> _pumpDeviceList(
+  WidgetTester tester, {
+  required bool discoveryOperational,
+}) async {
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: mobileDeviceListOverrides(
+        discoveryOperational: discoveryOperational,
+      ),
+      child: const MaterialApp(home: DeviceListScreen()),
+    ),
+  );
+
+  // Flush the overridden FutureProvider and the derived stream providers.
+  await tester.pump();
+  await tester.pump();
 }

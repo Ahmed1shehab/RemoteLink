@@ -26,13 +26,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if (request != null) _showPairingDialog(request);
     });
 
-    final service = ref.watch(desktopServiceProvider);
+    final status = ref.watch(desktopStatusProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('RemoteLink'),
       ),
-      body: service.when(
+      body: status.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, stack) => _StartupError(error: error),
         data: _buildBody,
@@ -40,7 +40,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Widget _buildBody(DesktopService service) {
+  Widget _buildBody(DesktopStatus status) {
     final input = ref.watch(inputAvailabilityProvider).valueOrNull;
     final devices = ref.watch(connectedDevicesProvider);
 
@@ -50,9 +50,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         if (input != null && !input.available && input.reason != null)
           _PermissionBanner(
             reason: input.reason!,
-            onOpenSettings: service.openAccessibilitySettings,
+            onOpenSettings: _openAccessibilitySettings,
           ),
-        _StatusCard(service: service),
+        _StatusCard(status: status),
         const SizedBox(height: 24),
         Text(
           'Connected devices',
@@ -74,15 +74,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     for (final device in list)
                       _DeviceTile(
                         device: device,
-                        onRevoke: () => service.revoke(device.id),
-                        onTierChanged: (tier) =>
-                            service.setTier(device.id, tier),
+                        onRevoke: () => _revoke(device.id),
+                        onTierChanged: (tier) => _setTier(device.id, tier),
                       ),
                   ],
                 ),
         ),
       ],
     );
+  }
+
+  Future<void> _openAccessibilitySettings() async {
+    final service = await ref.read(desktopServiceProvider.future);
+    await service.openAccessibilitySettings();
+  }
+
+  Future<void> _revoke(DeviceId deviceId) async {
+    final service = await ref.read(desktopServiceProvider.future);
+    await service.revoke(deviceId);
+  }
+
+  Future<void> _setTier(DeviceId deviceId, PermissionTier tier) async {
+    final service = await ref.read(desktopServiceProvider.future);
+    await service.setTier(deviceId, tier);
   }
 
   Future<void> _showPairingDialog(PendingPairing request) async {
@@ -104,13 +118,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       await service.declinePairing(request);
     }
   }
-
 }
 
 class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.service});
+  const _StatusCard({required this.status});
 
-  final DesktopService service;
+  final DesktopStatus status;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -119,7 +132,7 @@ class _StatusCard extends StatelessWidget {
           child: Row(
             children: <Widget>[
               Icon(
-                service.isRunning ? Icons.wifi_tethering : Icons.wifi_off,
+                status.isRunning ? Icons.wifi_tethering : Icons.wifi_off,
                 size: 40,
                 color: Theme.of(context).colorScheme.primary,
               ),
@@ -129,14 +142,14 @@ class _StatusCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      service.isRunning
+                      status.isRunning
                           ? 'Discoverable on this network'
                           : 'Not running',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${service.deviceName} · port ${service.boundPort}',
+                      '${status.deviceName} · port ${status.boundPort}',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     const SizedBox(height: 2),
@@ -144,22 +157,21 @@ class _StatusCard extends StatelessWidget {
                     // user reads off the screen and types into a phone that
                     // cannot discover automatically, and resolving the `.local`
                     // hostname needs the very mDNS that is unavailable then.
-                    if (service.localAddresses.isNotEmpty)
+                    if (status.localAddresses.isNotEmpty)
                       SelectableText(
-                        service.localAddresses
-                            .map((address) => '$address:${service.boundPort}')
+                        status.localAddresses
+                            .map((address) => '$address:${status.boundPort}')
                             .join('  ·  '),
-                        style:
-                            Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  fontFamily: 'monospace',
-                                ),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              fontFamily: 'monospace',
+                            ),
                       ),
                     const SizedBox(height: 2),
                     // The device ID is shown because it is the only thing a
                     // user can compare when they have two identically named
                     // computers on one network.
                     SelectableText(
-                      service.identity.id.value,
+                      status.deviceId,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             fontFamily: 'monospace',
                           ),

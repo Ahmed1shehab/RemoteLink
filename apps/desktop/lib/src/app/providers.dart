@@ -73,7 +73,8 @@ final trustStoreProvider = FutureProvider<TrustStore>((ref) async {
 });
 
 /// The name shown to phones. Defaults to the machine's hostname.
-final deviceNameProvider = StateProvider<String>((ref) => Platform.localHostname);
+final deviceNameProvider =
+    StateProvider<String>((ref) => Platform.localHostname);
 
 /// Injectable clock, so tests can drive timing without waiting.
 final clockProvider = Provider<Clock>((ref) => SystemClock());
@@ -96,6 +97,40 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
   ref.onDispose(service.stop);
   return service;
 });
+
+/// The service state rendered by the home screen.
+///
+/// Keeping this projection separate from [desktopServiceProvider] lets the UI
+/// be exercised without constructing the native-backed service. Commands still
+/// reach the service when the user invokes them, while passive rendering only
+/// depends on these inert values.
+final desktopStatusProvider = FutureProvider<DesktopStatus>((ref) async {
+  final service = await ref.watch(desktopServiceProvider.future);
+  return DesktopStatus(
+    isRunning: service.isRunning,
+    deviceName: service.deviceName,
+    boundPort: service.boundPort,
+    localAddresses: service.localAddresses,
+    deviceId: service.identity.id.value,
+  );
+});
+
+/// Render-only state exposed by [desktopStatusProvider].
+final class DesktopStatus {
+  const DesktopStatus({
+    required this.isRunning,
+    required this.deviceName,
+    required this.boundPort,
+    required this.localAddresses,
+    required this.deviceId,
+  });
+
+  final bool isRunning;
+  final String deviceName;
+  final int boundPort;
+  final List<String> localAddresses;
+  final String deviceId;
+}
 
 /// Connected devices, live.
 final connectedDevicesProvider =
