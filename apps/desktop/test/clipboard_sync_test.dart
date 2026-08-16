@@ -53,6 +53,14 @@ final class FakeClipboardBackend implements ClipboardBackend {
 
   void copyLocally(String text, {bool concealed = false}) {
     _text = text;
+    _imagePng = null;
+    _isConcealed = concealed;
+    _changeCount++;
+  }
+
+  void copyImageLocally(List<int> pngBytes, {bool concealed = false}) {
+    _imagePng = pngBytes;
+    _text = null;
     _isConcealed = concealed;
     _changeCount++;
   }
@@ -79,6 +87,27 @@ Future<ClipboardUpdate> _makeUpdate(
       ClipboardItem(
         contentType: ClipboardContentType.text,
         data: Uint8List.fromList(bytes),
+      ),
+    ],
+    contentHash: hash,
+    originDeviceId: originDeviceId,
+    originSequence: originSequence,
+  );
+}
+
+Future<ClipboardUpdate> _makeImageUpdate(
+  List<int> pngBytes, {
+  String originDeviceId = 'phone-device-1',
+  int originSequence = 1,
+}) async {
+  final data = pngBytes is Uint8List ? pngBytes : Uint8List.fromList(pngBytes);
+  final digest = await Primitives.sha256(data);
+  final hash = Uint8List.sublistView(digest, 0, 16);
+  return ClipboardUpdate(
+    items: <ClipboardItem>[
+      ClipboardItem(
+        contentType: ClipboardContentType.imagePng,
+        data: data,
       ),
     ],
     contentHash: hash,
@@ -397,5 +426,185 @@ void main() {
       );
       expect(service.remoteWins(tieLowerDevice), isFalse);
     });
+
+    test('an image under the auto-sync threshold syncs', () async {
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        pollInterval: testPollInterval,
+      );
+
+      final outboundUpdates = <ClipboardUpdate>[];
+      final sub = service.outbound.listen(outboundUpdates.add);
+
+      service.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      final samplePng = Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 1, 2, 3]);
+      backend.copyImageLocally(samplePng);
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(outboundUpdates, hasLength(1));
+      final update = outboundUpdates.first;
+      expect(update.items, hasLength(1));
+      expect(update.items.first.contentType, equals(ClipboardContentType.imagePng));
+      expect(update.items.first.data, equals(samplePng));
+
+      await sub.cancel();
+      await service.dispose();
+    });
+
+    test('an image over 1 MiB does not sync automatically', () async {
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        pollInterval: testPollInterval,
+      );
+
+      final outboundUpdates = <ClipboardUpdate>[];
+      final sub = service.outbound.listen(outboundUpdates.add);
+
+      service.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      // 1 MiB + 1 byte
+      final largeImage = Uint8List(1024 * 1024 + 1);
+      backend.copyImageLocally(largeImage);
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(outboundUpdates, isEmpty);
+
+      await sub.cancel();
+      await service.dispose();
+    });
+
+    test('an image over 10 MiB is skipped entirely', () async {
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        pollInterval: testPollInterval,
+      );
+
+      final outboundUpdates = <ClipboardUpdate>[];
+      final sub = service.outbound.listen(outboundUpdates.add);
+
+      service.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      // 10 MiB + 1 byte
+      final oversizedImage = Uint8List(10 * 1024 * 1024 + 1);
+      backend.copyImageLocally(oversizedImage);
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(outboundUpdates, isEmpty);
+
+      // Inbound oversized image is also skipped
+      final inboundBackend = FakeClipboardBackend();
+      final inboundService = ClipboardSyncService(
+        clipboard: inboundBackend,
+        localDeviceId: localDeviceId,
+      );
+      final oversizedUpdate = await _makeImageUpdate(oversizedImage);
+      final applied = await inboundService.applyRemote(oversizedUpdate);
+      expect(applied, isFalse);
+      expect(inboundBackend.readImagePng(), isNull);
+      await inboundService.dispose();
+
+      await sub.cancel();
+      await service.dispose();
+    });
+
+    test('a concealed image is never broadcast', () async {
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        pollInterval: testPollInterval,
+      );
+
+      final outboundUpdates = <ClipboardUpdate>[];
+      final sub = service.outbound.listen(outboundUpdates.add);
+
+      service.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      final samplePng = Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 4, 5, 6]);
+      backend.copyImageLocally(samplePng, concealed: true);
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(outboundUpdates, isEmpty);
+
+      // Normal un-concealed image copy should sync
+      backend.copyImageLocally(samplePng, concealed: false);
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(outboundUpdates, hasLength(1));
+      expect(outboundUpdates.first.items.first.data, equals(samplePng));
+
+      await sub.cancel();
+      await service.dispose();
+    });
+
+    test('an inbound image update is applied to the local clipboard', () async {
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        pollInterval: testPollInterval,
+      );
+
+      final outboundUpdates = <ClipboardUpdate>[];
+      final sub = service.outbound.listen(outboundUpdates.add);
+
+      service.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      final samplePng = Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 7, 8, 9]);
+      final update = await _makeImageUpdate(samplePng);
+
+      final applied = await service.applyRemote(update);
+      expect(applied, isTrue);
+      expect(backend.readImagePng(), equals(samplePng));
+
+      // Echo suppression: poller tick should not produce an outbound echo
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      expect(outboundUpdates, isEmpty);
+
+      await sub.cancel();
+      await service.dispose();
+    });
+
+    test('snapshot returns current image or null if concealed or > 1 MiB',
+        () async {
+      final samplePng = Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 10, 11]);
+      final backend = FakeClipboardBackend();
+      backend.writeImagePng(samplePng);
+
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+      );
+
+      final snap = await service.snapshot();
+      expect(snap, isNotNull);
+      expect(snap!.items, hasLength(1));
+      expect(snap.items.first.contentType, equals(ClipboardContentType.imagePng));
+      expect(snap.items.first.data, equals(samplePng));
+
+      // Concealed image snapshot returns null
+      backend.isConcealed = true;
+      expect(await service.snapshot(), isNull);
+
+      // Unconcealed but > 1 MiB returns null
+      backend.isConcealed = false;
+      backend.writeImagePng(Uint8List(1024 * 1024 + 1));
+      expect(await service.snapshot(), isNull);
+
+      await service.dispose();
+    });
   });
 }
+

@@ -1,4 +1,5 @@
 import 'dart:ffi';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:rl_core/rl_core.dart';
@@ -31,6 +32,9 @@ typedef _MsgSend0Dart = _Id Function(_Id target, _Sel selector);
 typedef _MsgSend0IntNative = Int64 Function(_Id target, _Sel selector);
 typedef _MsgSend0IntDart = int Function(_Id target, _Sel selector);
 
+typedef _MsgSend0PtrNative = Pointer<Void> Function(_Id target, _Sel selector);
+typedef _MsgSend0PtrDart = Pointer<Void> Function(_Id target, _Sel selector);
+
 typedef _MsgSend1Native = _Id Function(_Id target, _Sel selector, _Id argument);
 typedef _MsgSend1Dart = _Id Function(_Id target, _Sel selector, _Id argument);
 
@@ -48,6 +52,21 @@ typedef _MsgSend2BoolNative = Bool Function(
     _Id target, _Sel selector, _Id first, _Id second);
 typedef _MsgSend2BoolDart = bool Function(
     _Id target, _Sel selector, _Id first, _Id second);
+
+typedef _MsgSend2IntNative = _Id Function(
+    _Id target, _Sel selector, Uint64 first, _Id second);
+typedef _MsgSend2IntDart = _Id Function(
+    _Id target, _Sel selector, int first, _Id second);
+
+typedef _MsgSend2PtrIntNative = _Id Function(
+    _Id target, _Sel selector, Pointer<Void> bytes, IntPtr length);
+typedef _MsgSend2PtrIntDart = _Id Function(
+    _Id target, _Sel selector, Pointer<Void> bytes, int length);
+
+typedef _MsgSend3PtrNative = _Id Function(
+    _Id target, _Sel selector, Pointer<Void> p1, _Id p2, _Id p3);
+typedef _MsgSend3PtrDart = _Id Function(
+    _Id target, _Sel selector, Pointer<Void> p1, _Id p2, _Id p3);
 
 typedef _MsgSend0CStrNative = Pointer<Utf8> Function(_Id target, _Sel selector);
 typedef _MsgSend0CStrDart = Pointer<Utf8> Function(_Id target, _Sel selector);
@@ -90,6 +109,9 @@ final class MacosClipboardBackend implements ClipboardBackend {
     _send0Int = _objc.lookupFunction<_MsgSend0IntNative, _MsgSend0IntDart>(
       'objc_msgSend',
     );
+    _send0Ptr = _objc.lookupFunction<_MsgSend0PtrNative, _MsgSend0PtrDart>(
+      'objc_msgSend',
+    );
     _send1 = _objc.lookupFunction<_MsgSend1Native, _MsgSend1Dart>(
       'objc_msgSend',
     );
@@ -102,12 +124,26 @@ final class MacosClipboardBackend implements ClipboardBackend {
     _send2Bool = _objc.lookupFunction<_MsgSend2BoolNative, _MsgSend2BoolDart>(
       'objc_msgSend',
     );
+    _send2Int = _objc.lookupFunction<_MsgSend2IntNative, _MsgSend2IntDart>(
+      'objc_msgSend',
+    );
+    _send2PtrInt =
+        _objc.lookupFunction<_MsgSend2PtrIntNative, _MsgSend2PtrIntDart>(
+      'objc_msgSend',
+    );
+    _send3Ptr = _objc.lookupFunction<_MsgSend3PtrNative, _MsgSend3PtrDart>(
+      'objc_msgSend',
+    );
     _send0CStr = _objc.lookupFunction<_MsgSend0CStrNative, _MsgSend0CStrDart>(
       'objc_msgSend',
     );
 
     _nsPasteboard = _classNamed('NSPasteboard');
     _nsString = _classNamed('NSString');
+    _nsImage = _classNamed('NSImage');
+    _nsBitmapImageRep = _classNamed('NSBitmapImageRep');
+    _nsDictionary = _classNamed('NSDictionary');
+    _nsData = _classNamed('NSData');
 
     _selGeneralPasteboard = _selector('generalPasteboard');
     _selChangeCount = _selector('changeCount');
@@ -118,11 +154,31 @@ final class MacosClipboardBackend implements ClipboardBackend {
     _selStringWithUtf8 = _selector('stringWithUTF8String:');
     _selTypes = _selector('types');
     _selContainsObject = _selector('containsObject:');
+    _selDataForType = _selector('dataForType:');
+    _selSetDataForType = _selector('setData:forType:');
+    _selCanInitWithPasteboard = _selector('canInitWithPasteboard:');
+    _selAlloc = _selector('alloc');
+    _selInitWithPasteboard = _selector('initWithPasteboard:');
+    _selTIFFRepresentation = _selector('TIFFRepresentation');
+    _selImageRepWithData = _selector('imageRepWithData:');
+    _selCGImageForProposedRect =
+        _selector('CGImageForProposedRect:context:hints:');
+    _selInitWithCGImage = _selector('initWithCGImage:');
+    _selRepresentationUsingTypeProperties =
+        _selector('representationUsingType:properties:');
+    _selDictionary = _selector('dictionary');
+    _selDataWithBytesLength = _selector('dataWithBytes:length:');
+    _selLength = _selector('length');
+    _selBytes = _selector('bytes');
 
-    // `NSPasteboardTypeString` is an exported `NSString *` constant, so the
-    // symbol holds a pointer to the object rather than being the object.
+    // `NSPasteboardTypeString` and `NSPasteboardTypePNG` are exported `NSString *`
+    // constants, so the symbols hold pointers to the objects rather than being
+    // the objects.
     final typeSymbol = _appKit.lookup<Pointer<Void>>('NSPasteboardTypeString');
     _typeString = typeSymbol.value;
+
+    final typePngSymbol = _appKit.lookup<Pointer<Void>>('NSPasteboardTypePNG');
+    _typePng = typePngSymbol.value;
 
     // ── Ownership: this is the part that must not be got wrong ──────────────
     //
@@ -135,8 +191,9 @@ final class MacosClipboardBackend implements ClipboardBackend {
     // immediate EXC_BREAKPOINT rather than silent corruption.
     //
     // These two live for the lifetime of the backend, so they are retained here
-    // and released in `dispose`. `_typeString` is exempt: it is read from an
-    // exported framework symbol and is a constant that outlives the process.
+    // and released in `dispose`. `_typeString` and `_typePng` are exempt: they
+    // are read from exported framework symbols and are constants that outlive
+    // the process.
     _pasteboard = _retain(_send0(_nsPasteboard, _selGeneralPasteboard));
     _concealedType = _retain(_makeString('org.nspasteboard.ConcealedType'));
   }
@@ -151,16 +208,25 @@ final class MacosClipboardBackend implements ClipboardBackend {
   late final _ObjcReleaseDart _release;
   late final _MsgSend0Dart _send0;
   late final _MsgSend0IntDart _send0Int;
+  late final _MsgSend0PtrDart _send0Ptr;
   late final _MsgSend1Dart _send1;
   late final _MsgSend1CStrDart _send1CStr;
   late final _MsgSend1BoolDart _send1Bool;
   late final _MsgSend2BoolDart _send2Bool;
+  late final _MsgSend2IntDart _send2Int;
+  late final _MsgSend2PtrIntDart _send2PtrInt;
+  late final _MsgSend3PtrDart _send3Ptr;
   late final _MsgSend0CStrDart _send0CStr;
 
   late final _Id _nsPasteboard;
   late final _Id _nsString;
+  late final _Id _nsImage;
+  late final _Id _nsBitmapImageRep;
+  late final _Id _nsDictionary;
+  late final _Id _nsData;
   late final _Id _pasteboard;
   late final _Id _typeString;
+  late final _Id _typePng;
   late final _Id _concealedType;
 
   late final _Sel _selGeneralPasteboard;
@@ -172,6 +238,20 @@ final class MacosClipboardBackend implements ClipboardBackend {
   late final _Sel _selStringWithUtf8;
   late final _Sel _selTypes;
   late final _Sel _selContainsObject;
+  late final _Sel _selDataForType;
+  late final _Sel _selSetDataForType;
+  late final _Sel _selCanInitWithPasteboard;
+  late final _Sel _selAlloc;
+  late final _Sel _selInitWithPasteboard;
+  late final _Sel _selTIFFRepresentation;
+  late final _Sel _selImageRepWithData;
+  late final _Sel _selCGImageForProposedRect;
+  late final _Sel _selInitWithCGImage;
+  late final _Sel _selRepresentationUsingTypeProperties;
+  late final _Sel _selDictionary;
+  late final _Sel _selDataWithBytesLength;
+  late final _Sel _selLength;
+  late final _Sel _selBytes;
 
   bool _disposed = false;
 
@@ -253,14 +333,122 @@ final class MacosClipboardBackend implements ClipboardBackend {
 
   @override
   List<int>? readImagePng() {
-    // Requires NSPasteboardTypePNG plus NSImage round-tripping. Deferred to the
-    // clipboard-image milestone rather than shipping a lossy conversion.
-    return null;
+    if (!isAvailable) return null;
+
+    // 1. Direct read when pasteboard carries NSPasteboardTypePNG
+    final data = _send1(_pasteboard, _selDataForType, _typePng);
+    if (data != nullptr) {
+      final length = _send0Int(data, _selLength);
+      if (length > 0) {
+        final bytesPtr = _send0Ptr(data, _selBytes);
+        if (bytesPtr != nullptr) {
+          return Uint8List.fromList(bytesPtr.cast<Uint8>().asTypedList(length));
+        }
+      }
+    }
+
+    // 2. Fallback: NSImage -> NSBitmapImageRep -> representationUsingType:NSBitmapImageFileTypePNG
+    final canInit = _send1Bool(_nsImage, _selCanInitWithPasteboard, _pasteboard);
+    if (!canInit) return null;
+
+    final allocImage = _send0(_nsImage, _selAlloc);
+    if (allocImage == nullptr) return null;
+    final image = _send1(allocImage, _selInitWithPasteboard, _pasteboard);
+    if (image == nullptr) return null;
+
+    try {
+      final tiffData = _send0(image, _selTIFFRepresentation);
+      if (tiffData != nullptr) {
+        final rep = _send1(_nsBitmapImageRep, _selImageRepWithData, tiffData);
+        if (rep != nullptr) {
+          final dict = _send0(_nsDictionary, _selDictionary);
+          // NSBitmapImageFileTypePNG = 4
+          final pngData = _send2Int(
+            rep,
+            _selRepresentationUsingTypeProperties,
+            4,
+            dict,
+          );
+          if (pngData != nullptr) {
+            final length = _send0Int(pngData, _selLength);
+            if (length > 0) {
+              final bytesPtr = _send0Ptr(pngData, _selBytes);
+              if (bytesPtr != nullptr) {
+                return Uint8List.fromList(
+                  bytesPtr.cast<Uint8>().asTypedList(length),
+                );
+              }
+            }
+          }
+        }
+      }
+
+      // If TIFF representation is unavailable, attempt via CGImageForProposedRect
+      final cgImage = _send3Ptr(
+        image,
+        _selCGImageForProposedRect,
+        nullptr,
+        nullptr,
+        nullptr,
+      );
+      if (cgImage != nullptr) {
+        final allocRep = _send0(_nsBitmapImageRep, _selAlloc);
+        if (allocRep != nullptr) {
+          final rep = _send1(allocRep, _selInitWithCGImage, cgImage);
+          if (rep != nullptr) {
+            try {
+              final dict = _send0(_nsDictionary, _selDictionary);
+              final pngData = _send2Int(
+                rep,
+                _selRepresentationUsingTypeProperties,
+                4,
+                dict,
+              );
+              if (pngData != nullptr) {
+                final length = _send0Int(pngData, _selLength);
+                if (length > 0) {
+                  final bytesPtr = _send0Ptr(pngData, _selBytes);
+                  if (bytesPtr != nullptr) {
+                    return Uint8List.fromList(
+                      bytesPtr.cast<Uint8>().asTypedList(length),
+                    );
+                  }
+                }
+              }
+            } finally {
+              _release(rep);
+            }
+          }
+        }
+      }
+
+      return null;
+    } finally {
+      _release(image);
+    }
   }
 
   @override
   void writeImagePng(List<int> pngBytes) {
-    // Symmetrically deferred.
+    if (!isAvailable) return;
+
+    _send0(_pasteboard, _selClearContents);
+
+    final nativeBytes = calloc<Uint8>(pngBytes.length);
+    try {
+      nativeBytes.asTypedList(pngBytes.length).setAll(0, pngBytes);
+      final nsData = _send2PtrInt(
+        _nsData,
+        _selDataWithBytesLength,
+        nativeBytes.cast<Void>(),
+        pngBytes.length,
+      );
+      if (nsData == nullptr) return;
+
+      _send2Bool(_pasteboard, _selSetDataForType, nsData, _typePng);
+    } finally {
+      calloc.free(nativeBytes);
+    }
   }
 
   @override
@@ -275,3 +463,4 @@ final class MacosClipboardBackend implements ClipboardBackend {
     _release(_concealedType);
   }
 }
+
