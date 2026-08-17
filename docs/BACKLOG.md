@@ -992,13 +992,27 @@ gains a normative §11.
 
 **Priority** P3 · **Size** XL · **Blocked by** RL-300
 
-**Spec.** Capture: ScreenCaptureKit on macOS 12.3+, Windows Graphics Capture on
-Windows 10 1903+. Both are the modern APIs; `CGDisplayStream` and Desktop
-Duplication are their deprecated predecessors and are explicitly not worth
-starting on.
+**Spec.** Split into two passes. The original spec here named ScreenCaptureKit
+and VideoToolbox and dismissed the older APIs outright, which was written
+without reconciling it against ADR 0003: this repository reaches the OS through
+`dart:ffi` alone, with no compiled native shim, and **both of those APIs deliver
+their output by invoking an Objective-C block on a dispatch queue.** `dart:ffi`
+cannot construct a block, so neither is reachable from here today. The same is
+true of Windows Graphics Capture, which is WinRT and needs a projection.
 
-Encode: hardware H.264 through VideoToolbox and Media Foundation, with a
-software fallback. VP8 was considered and rejected on hardware support.
+*Pass one — reachable now, synchronous only.* macOS: `CGDisplayCreateImage`
+polled on a timer, encoded to JPEG through ImageIO's `CGImageDestination`. Both
+are plain C, both return their result, and both are bindable with the
+`lookupFunction` style already in `coregraphics_ffi.dart`. `ScreenCodec.jpeg`
+exists on the wire for exactly this. Bandwidth-hungry and not the destination,
+but it puts a real picture of the desk on the phone.
+
+*Pass two — the destination, and it needs a decision first.* ScreenCaptureKit
+plus hardware H.264 through VideoToolbox, and Media Foundation on Windows. All
+of them require a native shim — a small compiled Swift/C++ target that owns the
+callback and hands frames back across a port — which is a change to how this
+project talks to the OS and therefore wants its own ADR, not an afternoon.
+VP8 was considered and rejected on hardware support.
 
 Adaptive bitrate driven by the RTT and loss the session already measures —
 `ConnectionQuality` exists and is currently only displayed. Ladder from 500 kbps
@@ -1011,17 +1025,33 @@ mechanism in `DesktopService._startPermissionWatch` rather than adding a second
 one, and surface a banner with a direct link to the settings pane, matching
 `openAccessibilitySettings`.
 
-Capability gating: advertise `Capabilities.screenShare` only when capture is
-actually available, consistent with how media control is already gated.
+Capability gating: advertise `Capabilities.screenCapture` only when capture is
+actually available, consistent with how media control is already gated. Note
+that a macOS app without the Screen Recording grant does not get an error — it
+gets an image of the wallpaper with every window missing — so "available" here
+means the TCC preflight passed, not that the call returned something.
 
-**Acceptance.** 1080p30 at under 3 Mbps with visually acceptable quality; under
-150 ms glass-to-glass on a quiet 5 GHz network; graceful degradation to 5 fps
-under a constrained link rather than a stall; no capture when no client is
-watching.
+**Acceptance.** *Pass two:* 1080p30 at under 3 Mbps with visually acceptable
+quality; under 150 ms glass-to-glass on a quiet 5 GHz network; graceful
+degradation to 5 fps under a constrained link rather than a stall. *Pass one*
+will not meet the bitrate target and is not expected to — JPEG per frame is
+roughly an order of magnitude off. What pass one must meet: no capture when no
+client is watching, a bounded frame queue under a slow link (skip, never
+enqueue), and no leaked `CGImage` or `CFData` — Core Foundation is manually
+reference counted and a leaked frame buffer is tens of megabytes a minute.
 
 **Risks.** This is where TCP head-of-line blocking stops being theoretical. If
 RL-103's datagram channel proves insufficient, the QUIC decision the roadmap
 anticipates lands here and needs its own ADR before any code is written.
+
+`ScreenFrame` copies its payload twice on decode: `readLengthPrefixedBytes`
+returns a copy, and the constructor copies again. That is the same shape
+`FileChunk` already has, so it is a pre-existing pattern rather than something
+RL-300 introduced — but a file chunk is capped at 1 MiB and a frame at 16, and
+frames arrive at up to 240 a second. Worth measuring here, where it will
+actually show up, and fixing for both types together if it does. Do not fix it
+for one and not the other; two types with different ownership rules is worse
+than one slow rule.
 
 ---
 
@@ -1215,6 +1245,22 @@ worth following rather than reinventing.
 - **Text as well as files.** LocalSend supports sending a bare string, and it is genuinely useful —
   a URL or snippet to the other machine without disturbing the clipboard.
 - Respect the destination-directory setting, and prompt before the first transfer from each device.
+
+**Postmortem.** This shipped once without working. The brief carried a blanket "do not add
+third-party dependencies" constraint, and Flutter has no built-in file picker — so the requirement
+was impossible as written, and what got built was a text field for an absolute path next to a button
+that filled in a hard-coded sample. It passed review. The user found it.
+
+Two lessons worth keeping:
+
+- A blanket dependency ban is right for `rl_protocol` and wrong for an app whose job is to talk to
+  the OS. State the constraint where it applies, not everywhere.
+- Every brief since says: if a requirement cannot be met under the stated constraints, say so
+  instead of building something that looks like it works. That sentence is cheap and this was not.
+
+**Still open from this item:** the OS share-target entry points. Android's `ACTION_SEND` /
+`ACTION_SEND_MULTIPLE` intent filter was never added, and the iOS Share Extension is RL-006. Picking
+a file from inside the app works; sharing *to* RemoteLink from another app does not.
 
 ---
 
