@@ -1036,5 +1036,203 @@ void main() {
 
       await service.dispose();
     });
+
+    test(
+        'a desktop whose local sequence has been advanced by several local copies still accepts an update from a peer whose counter started later',
+        () async {
+      final desktopBackend = FakeClipboardBackend();
+      final desktopService = ClipboardSyncService(
+        clipboard: desktopBackend,
+        localDeviceId: const DeviceId('desktop-device-1'),
+        pollInterval: testPollInterval,
+      );
+      final desktopOutbound = <ClipboardUpdate>[];
+      final desktopSub = desktopService.outbound.listen(desktopOutbound.add);
+
+      final peerBackend = FakeClipboardBackend();
+      final peerService = ClipboardSyncService(
+        clipboard: peerBackend,
+        localDeviceId: const DeviceId('phone-device-1'),
+        pollInterval: testPollInterval,
+      );
+      final peerOutbound = <ClipboardUpdate>[];
+      final peerSub = peerService.outbound.listen(peerOutbound.add);
+
+      desktopService.start();
+      peerService.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      // 1. Desktop performs 3 local copies, advancing desktop sequence to 3.
+      desktopBackend.copyLocally('desktop 1');
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      desktopBackend.copyLocally('desktop 2');
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      desktopBackend.copyLocally('desktop 3');
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(desktopOutbound, hasLength(3));
+      expect(desktopOutbound.last.originSequence, equals(3));
+
+      // 2. Peer connects and accepts desktop's latest update (sequence 3).
+      final snapshotFromDesktop = desktopOutbound.last;
+      expect(await peerService.applyRemote(snapshotFromDesktop), isTrue);
+
+      // 3. Peer user copies text on peer device.
+      peerBackend.copyLocally('peer text');
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(peerOutbound, hasLength(1));
+      final peerUpdate = peerOutbound.first;
+
+      // 4. Peer sends its update to desktop. Desktop must accept it.
+      expect(desktopService.remoteWins(peerUpdate), isTrue);
+      final applied = await desktopService.applyRemote(peerUpdate);
+      expect(applied, isTrue);
+      expect(desktopBackend.readText(), equals('peer text'));
+
+      // 5. Desktop user copies again; desktop sequence must advance past peer sequence.
+      desktopBackend.copyLocally('desktop 4');
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(desktopOutbound, hasLength(4));
+      expect(desktopOutbound.last.plainText, equals('desktop 4'));
+      expect(desktopOutbound.last.originSequence,
+          greaterThan(peerUpdate.originSequence));
+
+      await desktopSub.cancel();
+      await peerSub.cancel();
+      await desktopService.dispose();
+      await peerService.dispose();
+    });
+
+    test(
+        'repeated exchange in both directions converges rather than one side winning permanently',
+        () async {
+      final desktopBackend = FakeClipboardBackend();
+      final desktopService = ClipboardSyncService(
+        clipboard: desktopBackend,
+        localDeviceId: const DeviceId('desktop-device-1'),
+        pollInterval: testPollInterval,
+      );
+      final desktopOutbound = <ClipboardUpdate>[];
+      final desktopSub = desktopService.outbound.listen(desktopOutbound.add);
+
+      final peerBackend = FakeClipboardBackend();
+      final peerService = ClipboardSyncService(
+        clipboard: peerBackend,
+        localDeviceId: const DeviceId('phone-device-1'),
+        pollInterval: testPollInterval,
+      );
+      final peerOutbound = <ClipboardUpdate>[];
+      final peerSub = peerService.outbound.listen(peerOutbound.add);
+
+      desktopService.start();
+      peerService.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      // Round 1: Desktop copies D1
+      desktopBackend.copyLocally('D1');
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      expect(desktopOutbound, hasLength(1));
+      expect(desktopOutbound.last.originSequence, equals(1));
+
+      // Peer receives and applies D1
+      expect(peerService.remoteWins(desktopOutbound.last), isTrue);
+      expect(await peerService.applyRemote(desktopOutbound.last), isTrue);
+      expect(peerBackend.readText(), equals('D1'));
+
+      // Round 2: Peer copies P1
+      peerBackend.copyLocally('P1');
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      expect(peerOutbound, hasLength(1));
+      expect(peerOutbound.last.originSequence, equals(2));
+
+      // Desktop receives and applies P1
+      expect(desktopService.remoteWins(peerOutbound.last), isTrue);
+      expect(await desktopService.applyRemote(peerOutbound.last), isTrue);
+      expect(desktopBackend.readText(), equals('P1'));
+
+      // Round 3: Desktop copies D2
+      desktopBackend.copyLocally('D2');
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      expect(desktopOutbound, hasLength(2));
+      expect(desktopOutbound.last.originSequence, equals(3));
+
+      // Peer receives and applies D2
+      expect(peerService.remoteWins(desktopOutbound.last), isTrue);
+      expect(await peerService.applyRemote(desktopOutbound.last), isTrue);
+      expect(peerBackend.readText(), equals('D2'));
+
+      // Round 4: Peer copies P2
+      peerBackend.copyLocally('P2');
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      expect(peerOutbound, hasLength(2));
+      expect(peerOutbound.last.originSequence, equals(4));
+
+      // Desktop receives and applies P2
+      expect(desktopService.remoteWins(peerOutbound.last), isTrue);
+      expect(await desktopService.applyRemote(peerOutbound.last), isTrue);
+      expect(desktopBackend.readText(), equals('P2'));
+
+      await desktopSub.cancel();
+      await peerSub.cancel();
+      await desktopService.dispose();
+      await peerService.dispose();
+    });
+
+    test(
+        'the device-id tie-break resolves identically whichever side evaluates it',
+        () async {
+      const deviceA = DeviceId('device-a');
+      const deviceB = DeviceId('device-b');
+
+      final backendA = FakeClipboardBackend();
+      final backendB = FakeClipboardBackend();
+
+      final serviceA = ClipboardSyncService(
+        clipboard: backendA,
+        localDeviceId: deviceA,
+        pollInterval: testPollInterval,
+      );
+      final serviceB = ClipboardSyncService(
+        clipboard: backendB,
+        localDeviceId: deviceB,
+        pollInterval: testPollInterval,
+      );
+
+      serviceA.start();
+      serviceB.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      // Advance both services to sequence 5
+      for (var i = 1; i <= 5; i++) {
+        backendA.copyLocally('A$i');
+        backendB.copyLocally('B$i');
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+      }
+
+      final updateFromB = ClipboardUpdate(
+        items: const <ClipboardItem>[],
+        contentHash: Uint8List(16),
+        originDeviceId: deviceB.value,
+        originSequence: 5,
+      );
+      final updateFromA = ClipboardUpdate(
+        items: const <ClipboardItem>[],
+        contentHash: Uint8List(16),
+        originDeviceId: deviceA.value,
+        originSequence: 5,
+      );
+
+      // On sequence tie (5 == 5), device-b > device-a:
+      // From Device A's perspective: remote (B) wins.
+      expect(serviceA.remoteWins(updateFromB), isTrue);
+
+      // From Device B's perspective: remote (A) does not win (local B wins).
+      expect(serviceB.remoteWins(updateFromA), isFalse);
+
+      await serviceA.dispose();
+      await serviceB.dispose();
+    });
   });
 }
