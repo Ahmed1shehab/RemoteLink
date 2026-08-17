@@ -282,6 +282,51 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('says where screen sharing lives once it is available',
+        (tester) async {
+      // With the permission granted the desktop previously said nothing at all
+      // about screen sharing: no button, because the phone starts it, and no
+      // banner, because the banner is for the missing-permission case. Someone
+      // looking here for it found an empty window.
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: desktopHomeOverrides,
+          child: const MaterialApp(home: HomeScreen()),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.textContaining('start it from the phone'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('says nothing about sharing when it cannot share',
+        (tester) async {
+      // The banner is the message in this case, and two messages about the
+      // same thing is one too many.
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            ...desktopHomeOverrides,
+            screenCaptureAvailabilityProvider.overrideWith(
+              (ref) => Stream<({bool available, String? reason})>.value(
+                (available: false, reason: 'Screen Recording is not granted'),
+              ),
+            ),
+          ],
+          child: const MaterialApp(home: HomeScreen()),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.textContaining('start it from the phone'), findsNothing);
+      expect(find.text('Screen Recording is not granted'), findsOneWidget);
+    });
+
     testWidgets(
         'renders active and recent transfers list with progress and controls',
         (tester) async {

@@ -138,7 +138,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           FocusTraversalOrder(
             order: const NumericFocusOrder(2),
-            child: _StatusCard(status: status),
+            child: _StatusCard(
+              status: status,
+              screenCaptureReady: screenCapture?.available ?? false,
+            ),
           ),
           const SizedBox(height: 24),
           Text(
@@ -1008,11 +1011,18 @@ class PermissionRequestDialog extends StatelessWidget {
         PermissionTier.admin => 'Administrator (Full Access)',
       };
 
+  // These are read by someone deciding whether to hand over their machine, so
+  // they have to match `PermissionTier.allows` exactly. "Screen stream" used to
+  // be listed under View Only and was left behind when streaming moved up to
+  // Control — a dialog that overstates what a tier grants is worse than no
+  // dialog, because it is trusted.
   static String _tierExplanation(PermissionTier tier) => switch (tier) {
         PermissionTier.readOnly =>
-          'Allows viewing system status, media state, and screen stream.',
+          'Allows viewing system status, media state, and the display layout — '
+              'but not the contents of the screen.',
         PermissionTier.standard =>
-          'Allows sending keyboard and mouse input, synchronizing clipboard, and controlling media.',
+          'Allows sending keyboard and mouse input, synchronizing clipboard, '
+              'controlling media, and viewing this screen.',
         PermissionTier.extended =>
           'Allows transferring files, launching applications, and running pre-registered commands.',
         PermissionTier.admin =>
@@ -1146,9 +1156,12 @@ class PermissionRequestDialog extends StatelessWidget {
 }
 
 class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.status});
+  const _StatusCard({required this.status, this.screenCaptureReady = false});
 
   final DesktopStatus status;
+
+  /// Whether this machine can currently share its screen.
+  final bool screenCaptureReady;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -1201,6 +1214,35 @@ class _StatusCard extends StatelessWidget {
                             fontFamily: 'monospace',
                           ),
                     ),
+                    // Screen sharing is started from the phone and has no
+                    // control on this window at all, so with the permission
+                    // granted the desktop said nothing about it whatsoever —
+                    // and someone looking here for a "share screen" button
+                    // found no button and no explanation of where it lives.
+                    // The permission banner covers the not-granted case; this
+                    // covers the far more confusing one where it works.
+                    if (screenCaptureReady) ...<Widget>[
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Icon(
+                            Icons.screen_share_outlined,
+                            size: 16,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              'Ready to share this screen — start it from the '
+                              'phone, using the monitor button at the top of '
+                              'its remote screen.',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
