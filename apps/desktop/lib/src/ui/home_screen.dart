@@ -7,10 +7,12 @@ import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
 import '../app/providers.dart';
+import '../app/theme.dart';
 import '../domain/desktop_service.dart';
 import '../domain/transfer_model.dart';
 import 'clipboard_history_panel.dart';
 import 'diagnostics_screen.dart';
+import 'pairing_code.dart';
 
 /// The desktop's only window: status, connected devices, pairing, and file transfers.
 class HomeScreen extends ConsumerStatefulWidget {
@@ -72,56 +74,89 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final transfers =
         ref.watch(transfersProvider).valueOrNull ?? <TransferRecord>[];
 
-    return ListView(
-      padding: const EdgeInsets.all(24),
-      children: <Widget>[
-        if (input != null && !input.available && input.reason != null)
-          _PermissionBanner(
-            reason: input.reason!,
-            onOpenSettings: _openAccessibilitySettings,
+    // Tab order is pinned to the order the sections are read in, rather than
+    // left to the default policy.
+    //
+    // The default is geometric, and this window is a single column only until
+    // it is not: the permission banner appears and disappears, the device list
+    // grows, and each device row ends in a cluster of a button, a dropdown, and
+    // another button. Under the reading-order policy the focus jumped between
+    // the send card and the device rows once a banner pushed the layout down,
+    // which on a page whose controls revoke access and change permission tiers
+    // is worse than merely confusing.
+    return FocusTraversalGroup(
+      policy: OrderedTraversalPolicy(),
+      child: ListView(
+        padding: const EdgeInsets.all(24),
+        children: <Widget>[
+          if (input != null && !input.available && input.reason != null)
+            FocusTraversalOrder(
+              order: const NumericFocusOrder(1),
+              child: _PermissionBanner(
+                reason: input.reason!,
+                onOpenSettings: _openAccessibilitySettings,
+              ),
+            ),
+          FocusTraversalOrder(
+            order: const NumericFocusOrder(2),
+            child: _StatusCard(status: status),
           ),
-        _StatusCard(status: status),
-        const SizedBox(height: 24),
-        Text(
-          'Connected devices',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 8),
-        devices.when(
-          loading: () => const _EmptyState(
-            message: 'Waiting for devices to connect…',
+          const SizedBox(height: 24),
+          Text(
+            'Connected devices',
+            style: Theme.of(context).textTheme.titleMedium,
           ),
-          error: (error, _) => _EmptyState(message: 'Error: $error'),
-          data: (list) => list.isEmpty
-              ? const _EmptyState(
-                  message: 'No devices connected. Open RemoteLink on your '
-                      'phone — it should find this computer automatically.',
-                )
-              : Column(
-                  children: <Widget>[
-                    for (final device in list)
-                      _DeviceTile(
-                        device: device,
-                        onRevoke: () => _revoke(device.id),
-                        onTierChanged: (tier) => _setTier(device.id, tier),
-                        onRename: () => _renameDevice(device.id, device.name),
-                        onClipboardSyncChanged: (enabled) =>
-                            _setClipboardSync(device.id, enabled),
-                      ),
-                  ],
-                ),
-        ),
-        const SizedBox(height: 24),
-        _SendCard(devices: devices.valueOrNull ?? <ConnectedDevice>[]),
-        const SizedBox(height: 24),
-        _TransfersSection(
-          transfers: transfers,
-          onCancel: _cancelTransfer,
-          onRetry: _retryTransfer,
-        ),
-        const SizedBox(height: 24),
-        const ClipboardHistoryPanel(),
-      ],
+          const SizedBox(height: 8),
+          FocusTraversalOrder(
+            order: const NumericFocusOrder(3),
+            child: devices.when(
+              loading: () => const _EmptyState(
+                message: 'Waiting for devices to connect…',
+              ),
+              error: (error, _) => _EmptyState(message: 'Error: $error'),
+              data: (list) => list.isEmpty
+                  ? const _EmptyState(
+                      message: 'No devices connected. Open RemoteLink on your '
+                          'phone — it should find this computer automatically.',
+                    )
+                  : Column(
+                      children: <Widget>[
+                        for (final device in list)
+                          _DeviceTile(
+                            device: device,
+                            onRevoke: () => _revoke(device.id),
+                            onTierChanged: (tier) => _setTier(device.id, tier),
+                            onRename: () =>
+                                _renameDevice(device.id, device.name),
+                            onClipboardSyncChanged: (enabled) =>
+                                _setClipboardSync(device.id, enabled),
+                          ),
+                      ],
+                    ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          FocusTraversalOrder(
+            order: const NumericFocusOrder(4),
+            child:
+                _SendCard(devices: devices.valueOrNull ?? <ConnectedDevice>[]),
+          ),
+          const SizedBox(height: 24),
+          FocusTraversalOrder(
+            order: const NumericFocusOrder(5),
+            child: _TransfersSection(
+              transfers: transfers,
+              onCancel: _cancelTransfer,
+              onRetry: _retryTransfer,
+            ),
+          ),
+          const SizedBox(height: 24),
+          const FocusTraversalOrder(
+            order: NumericFocusOrder(6),
+            child: ClipboardHistoryPanel(),
+          ),
+        ],
+      ),
     );
   }
 
@@ -184,7 +219,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       // Not dismissible: tapping outside must not be interpretable as either
       // answer. A pairing decision is one the user has to make explicitly.
       barrierDismissible: false,
-      builder: (context) => _PairingDialog(request: request),
+      builder: (context) => PairingDialog(
+        peerName: request.peerName,
+        shortAuthenticationString: request.shortAuthenticationString,
+      ),
     );
 
     if (!mounted) return;
@@ -644,26 +682,60 @@ class _TransferStatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final (label, color) = switch (status) {
-      TransferStatus.prompting => ('Awaiting response', scheme.tertiary),
-      TransferStatus.offered => ('Offered', scheme.tertiary),
-      TransferStatus.inProgress => ('Transferring', scheme.primary),
-      TransferStatus.completed => ('Completed', Colors.green),
-      TransferStatus.cancelled => ('Cancelled', scheme.outline),
-      TransferStatus.declined => ('Declined', scheme.error),
-      TransferStatus.failed => ('Failed', scheme.error),
+    final success = successColors(scheme);
+
+    // Container/on-container pairs rather than one colour drawn at 15% alpha
+    // behind itself. The old scheme failed contrast twice over: `Colors.green`
+    // measured about 2.7:1 on the light theme's surface, and every status drew
+    // its text in the same hue as its own background.
+    final (label, background, foreground) = switch (status) {
+      TransferStatus.prompting => (
+          'Awaiting response',
+          scheme.tertiaryContainer,
+          scheme.onTertiaryContainer,
+        ),
+      TransferStatus.offered => (
+          'Offered',
+          scheme.tertiaryContainer,
+          scheme.onTertiaryContainer,
+        ),
+      TransferStatus.inProgress => (
+          'Transferring',
+          scheme.primaryContainer,
+          scheme.onPrimaryContainer,
+        ),
+      TransferStatus.completed => (
+          'Completed',
+          success.container,
+          success.onContainer,
+        ),
+      TransferStatus.cancelled => (
+          'Cancelled',
+          scheme.surfaceContainerHighest,
+          scheme.onSurfaceVariant,
+        ),
+      TransferStatus.declined => (
+          'Declined',
+          scheme.errorContainer,
+          scheme.onErrorContainer,
+        ),
+      TransferStatus.failed => (
+          'Failed',
+          scheme.errorContainer,
+          scheme.onErrorContainer,
+        ),
     };
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
+        color: background,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
         label,
         style: TextStyle(
-          color: color,
+          color: foreground,
           fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
@@ -741,7 +813,11 @@ class _IncomingTransferDialog extends StatelessWidget {
           ),
         ),
         actions: <Widget>[
+          // Decline holds the initial focus, for the same reason Deny does on
+          // the pairing dialog: this appears unprompted, and accepting writes
+          // files someone else chose onto this machine.
           TextButton(
+            autofocus: true,
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Decline'),
           ),
@@ -1005,10 +1081,24 @@ class _RenameDeviceDialogState extends State<_RenameDeviceDialog> {
       );
 }
 
-class _PairingDialog extends StatelessWidget {
-  const _PairingDialog({required this.request});
+/// Asks the user to confirm the six digits match the phone's.
+///
+/// Public, and taking the two strings rather than the [PendingPairing] it is
+/// built from, so a test can drive the real dialog. The alternative — a private
+/// widget behind a `ServerSession` — is a security-critical screen that cannot
+/// be asserted on, and the assertions here are the point: what the digits
+/// announce as, and which button the keyboard starts on.
+class PairingDialog extends StatelessWidget {
+  const PairingDialog({
+    required this.peerName,
+    required this.shortAuthenticationString,
+    super.key,
+  });
 
-  final PendingPairing request;
+  final String peerName;
+
+  /// Six digits the user compares against the phone's screen.
+  final String shortAuthenticationString;
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -1017,19 +1107,15 @@ class _PairingDialog extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text('${request.peerName} wants to control this computer.'),
+            Text('$peerName wants to control this computer.'),
             const SizedBox(height: 20),
+            // Grouped for the eye and announced digit by digit — see
+            // [PairingCodeDisplay]. The entire security of this flow rests on
+            // the user actually comparing both screens, which means the code
+            // has to arrive in a comparable form through whichever sense they
+            // are using.
             Center(
-              child: Text(
-                // Spaced into pairs so the eye can compare it against the
-                // phone's screen without losing its place — the entire security
-                // of this flow rests on the user actually reading both.
-                _spaced(request.shortAuthenticationString),
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                      fontFamily: 'monospace',
-                      letterSpacing: 4,
-                    ),
-              ),
+              child: PairingCodeDisplay(digits: shortAuthenticationString),
             ),
             const SizedBox(height: 20),
             Text(
@@ -1041,7 +1127,17 @@ class _PairingDialog extends StatelessWidget {
           ],
         ),
         actions: <Widget>[
+          // Deny holds the initial focus, so Return approves nothing.
+          //
+          // Focus has to start somewhere in a modal, and on every other dialog
+          // the convention is the affirmative button. Not here: this one is a
+          // security decision, it appears unprompted the moment a stranger's
+          // phone reaches the machine, and a user who hits Return on a dialog
+          // they have not read yet must not thereby hand over control of their
+          // computer. Denying is recoverable in a way approving is not — the
+          // phone can simply ask again.
           TextButton(
+            autofocus: true,
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Deny'),
           ),
@@ -1051,15 +1147,6 @@ class _PairingDialog extends StatelessWidget {
           ),
         ],
       );
-
-  static String _spaced(String digits) {
-    final buffer = StringBuffer();
-    for (var i = 0; i < digits.length; i++) {
-      if (i > 0 && i % 3 == 0) buffer.write(' ');
-      buffer.write(digits[i]);
-    }
-    return buffer.toString();
-  }
 }
 
 class _EmptyState extends StatelessWidget {

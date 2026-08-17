@@ -534,6 +534,15 @@ class _DeviceTile extends StatelessWidget {
           PlatformKind.windows => Icons.laptop_windows,
           _ => Icons.computer,
         },
+        // The platform is carried by the glyph alone. `ListTile` merges its
+        // children into one node, so this is announced ahead of the name:
+        // "Mac, Ahmed's iMac, Paired".
+        semanticLabel: switch (entry.platform) {
+          PlatformKind.macos => 'Mac',
+          PlatformKind.windows => 'Windows PC',
+          PlatformKind.linux => 'Linux computer',
+          _ => 'Computer',
+        },
         size: 32,
         // Dimmed when the computer is paired but not currently announcing: the
         // address may be stale, and the tap may fail. Better to show it looking
@@ -573,10 +582,16 @@ class _DeviceTile extends StatelessWidget {
                         tooltip: 'Rename computer',
                         onPressed: onRename,
                       ),
-                    Icon(Icons.verified_user, color: scheme.primary),
+                    // Both of these repeat what the subtitle already says —
+                    // "Paired · 192.168.1.4", or that the row is tappable.
+                    // Excluded rather than labelled: the fix for an unlabelled
+                    // icon is not always a label.
+                    ExcludeSemantics(
+                      child: Icon(Icons.verified_user, color: scheme.primary),
+                    ),
                   ],
                 )
-              : const Icon(Icons.chevron_right),
+              : const ExcludeSemantics(child: Icon(Icons.chevron_right)),
       onTap: onTap,
     );
   }
@@ -768,10 +783,12 @@ class _Searching extends StatelessWidget {
         if (discoveryWorks)
           const Center(child: CircularProgressIndicator())
         else
-          Icon(
-            Icons.wifi_find_outlined,
-            size: 48,
-            color: scheme.onSurfaceVariant,
+          ExcludeSemantics(
+            child: Icon(
+              Icons.wifi_find_outlined,
+              size: 48,
+              color: scheme.onSurfaceVariant,
+            ),
           ),
         const SizedBox(height: 24),
         Text(

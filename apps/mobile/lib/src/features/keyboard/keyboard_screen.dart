@@ -12,6 +12,7 @@ import 'package:rl_protocol/rl_protocol.dart' as proto;
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
+import '../../app/theme.dart';
 import 'hardware_keyboard_view.dart';
 
 /// Length of the sentinel buffer the capture field is reset to.
@@ -366,8 +367,10 @@ class _TypedEcho extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Icon(Icons.keyboard_alt_outlined,
-                    size: 16, color: scheme.onSurfaceVariant),
+                ExcludeSemantics(
+                  child: Icon(Icons.keyboard_alt_outlined,
+                      size: 16, color: scheme.onSurfaceVariant),
+                ),
                 const SizedBox(width: 6),
                 Text(
                   'Sent to your computer',
@@ -377,19 +380,29 @@ class _TypedEcho extends StatelessWidget {
                 ),
                 const Spacer(),
                 if (text.isNotEmpty)
-                  InkWell(
-                    onTap: onClear,
-                    borderRadius: BorderRadius.circular(4),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      child: Text(
-                        'Clear',
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: scheme.primary,
-                            ),
+                  Semantics(
+                    button: true,
+                    label: 'Clear the transcript',
+                    // A bare `InkWell` is announced as text with a tap action
+                    // rather than as a button, so it does not turn up when
+                    // navigating by control.
+                    child: InkWell(
+                      onTap: onClear,
+                      borderRadius: BorderRadius.circular(4),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        child: ExcludeSemantics(
+                          child: Text(
+                            'Clear',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(color: scheme.primary),
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -404,8 +417,11 @@ class _TypedEcho extends StatelessWidget {
                   style: TextStyle(
                     fontFamily: 'monospace',
                     fontSize: 15,
+                    // The placeholder is drawn at full strength. At 60% alpha
+                    // it was the lowest-contrast text in the app, and it is the
+                    // only instruction on an otherwise empty box.
                     color: text.isEmpty
-                        ? scheme.onSurfaceVariant.withValues(alpha: 0.6)
+                        ? scheme.onSurfaceVariant
                         : scheme.onSurface,
                   ),
                 ),
@@ -492,20 +508,33 @@ class _ModifierRow extends StatelessWidget {
   final bool enabled;
   final void Function(int bit) onToggle;
 
-  static const List<(int, String)> _entries = <(int, String)>[
-    (proto.Modifiers.leftControl, 'Ctrl'),
-    (proto.Modifiers.leftShift, 'Shift'),
-    (proto.Modifiers.leftAlt, 'Alt'),
-    (proto.Modifiers.leftMeta, 'Cmd'),
+  static const List<(int, String, String)> _entries = <(int, String, String)>[
+    (proto.Modifiers.leftControl, 'Ctrl', 'Control'),
+    (proto.Modifiers.leftShift, 'Shift', 'Shift'),
+    (proto.Modifiers.leftAlt, 'Alt', 'Alt'),
+    (proto.Modifiers.leftMeta, 'Cmd', 'Command'),
   ];
 
   @override
   Widget build(BuildContext context) => Wrap(
         spacing: 8,
         children: <Widget>[
-          for (final (bit, label) in _entries)
+          for (final (bit, label, spoken) in _entries)
             FilterChip(
-              label: Text(label),
+              // The lock state goes in the chip's own label rather than in a
+              // wrapping `Semantics`: wrapping and excluding would take the
+              // chip's tap action and selected state with it, leaving a node
+              // that reads correctly and does nothing.
+              //
+              // `FilterChip` announces selected on its own. Locked is the state
+              // it has no vocabulary for — it is drawn as a padlock avatar,
+              // which is announced as nothing — so a user could hold Shift on
+              // and have no way to find out.
+              label: Text(
+                label,
+                semanticsLabel:
+                    locked & bit != 0 ? '$spoken, locked on' : spoken,
+              ),
               selected: modifiers.has(bit),
               // A locked modifier is visually distinct from a one-shot one,
               // because "Shift is stuck on" is otherwise invisible and produces
@@ -524,27 +553,34 @@ class _SpecialKeys extends StatelessWidget {
   final bool enabled;
   final void Function(int usage) onKey;
 
-  static const List<(int, String)> _entries = <(int, String)>[
-    (proto.HidKey.escape, 'Esc'),
-    (proto.HidKey.tab, 'Tab'),
-    (proto.HidKey.enter, 'Enter'),
-    (proto.HidKey.backspace, '⌫'),
-    (proto.HidKey.delete, 'Del'),
-    (proto.HidKey.home, 'Home'),
-    (proto.HidKey.end, 'End'),
-    (proto.HidKey.pageUp, 'PgUp'),
-    (proto.HidKey.pageDown, 'PgDn'),
-    (proto.HidKey.arrowLeft, '←'),
-    (proto.HidKey.arrowUp, '↑'),
-    (proto.HidKey.arrowDown, '↓'),
-    (proto.HidKey.arrowRight, '→'),
-    (proto.HidKey.f1, 'F1'),
-    (proto.HidKey.f2, 'F2'),
-    (proto.HidKey.f3, 'F3'),
-    (proto.HidKey.f4, 'F4'),
-    (proto.HidKey.f5, 'F5'),
-    (proto.HidKey.f11, 'F11'),
-    (proto.HidKey.f12, 'F12'),
+  /// Usage, printed label, spoken label.
+  ///
+  /// The third field is not redundant with the second. Half of these keys are
+  /// printed as a glyph or an abbreviation that no screen reader says usefully:
+  /// '⌫' comes out as "erase to the left", '←' as "leftwards arrow", 'PgDn' as
+  /// a nonsense word. Carrying both means the key can stay narrow — there are
+  /// twenty of them on a phone screen — without being silent.
+  static const List<(int, String, String)> _entries = <(int, String, String)>[
+    (proto.HidKey.escape, 'Esc', 'Escape'),
+    (proto.HidKey.tab, 'Tab', 'Tab'),
+    (proto.HidKey.enter, 'Enter', 'Enter'),
+    (proto.HidKey.backspace, '⌫', 'Backspace'),
+    (proto.HidKey.delete, 'Del', 'Delete'),
+    (proto.HidKey.home, 'Home', 'Home'),
+    (proto.HidKey.end, 'End', 'End'),
+    (proto.HidKey.pageUp, 'PgUp', 'Page up'),
+    (proto.HidKey.pageDown, 'PgDn', 'Page down'),
+    (proto.HidKey.arrowLeft, '←', 'Left arrow'),
+    (proto.HidKey.arrowUp, '↑', 'Up arrow'),
+    (proto.HidKey.arrowDown, '↓', 'Down arrow'),
+    (proto.HidKey.arrowRight, '→', 'Right arrow'),
+    (proto.HidKey.f1, 'F1', 'F1'),
+    (proto.HidKey.f2, 'F2', 'F2'),
+    (proto.HidKey.f3, 'F3', 'F3'),
+    (proto.HidKey.f4, 'F4', 'F4'),
+    (proto.HidKey.f5, 'F5', 'F5'),
+    (proto.HidKey.f11, 'F11', 'F11'),
+    (proto.HidKey.f12, 'F12', 'F12'),
   ];
 
   @override
@@ -552,15 +588,18 @@ class _SpecialKeys extends StatelessWidget {
         spacing: 8,
         runSpacing: 8,
         children: <Widget>[
-          for (final (usage, label) in _entries)
+          for (final (usage, label, spoken) in _entries)
             SizedBox(
-              width: 68,
+              // Widens with the text setting. At a fixed 68 the longer labels
+              // ('PgDn', 'Home') were clipped by the time text reached 130%,
+              // and a clipped key label reads as a different key.
+              width: 68 * textScaleFactorOf(context).clamp(1.0, 2.0),
               child: OutlinedButton(
                 onPressed: enabled ? () => onKey(usage) : null,
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
-                child: Text(label),
+                child: Text(label, semanticsLabel: spoken),
               ),
             ),
         ],

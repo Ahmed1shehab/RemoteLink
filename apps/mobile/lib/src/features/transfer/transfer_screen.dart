@@ -8,6 +8,7 @@ import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
+import '../../app/theme.dart';
 import 'transfer_controller.dart';
 import 'transfer_model.dart';
 
@@ -626,26 +627,61 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final (label, color) = switch (status) {
-      TransferStatus.prompting => ('Awaiting response', scheme.tertiary),
-      TransferStatus.offered => ('Offered', scheme.tertiary),
-      TransferStatus.inProgress => ('Transferring', scheme.primary),
-      TransferStatus.completed => ('Completed', Colors.green),
-      TransferStatus.cancelled => ('Cancelled', scheme.outline),
-      TransferStatus.declined => ('Declined', scheme.error),
-      TransferStatus.failed => ('Failed', scheme.error),
+    final success = successColors(scheme);
+
+    // Container/on-container pairs rather than one colour drawn at 15% alpha
+    // behind itself. The old scheme failed contrast twice over: `Colors.green`
+    // measured about 2.7:1 on the light theme's surface, and every status drew
+    // its text in the same hue as its own background.
+    // Material 3 defines these pairs to meet 4.5:1 in both themes.
+    final (label, background, foreground) = switch (status) {
+      TransferStatus.prompting => (
+          'Awaiting response',
+          scheme.tertiaryContainer,
+          scheme.onTertiaryContainer,
+        ),
+      TransferStatus.offered => (
+          'Offered',
+          scheme.tertiaryContainer,
+          scheme.onTertiaryContainer,
+        ),
+      TransferStatus.inProgress => (
+          'Transferring',
+          scheme.primaryContainer,
+          scheme.onPrimaryContainer,
+        ),
+      TransferStatus.completed => (
+          'Completed',
+          success.container,
+          success.onContainer,
+        ),
+      TransferStatus.cancelled => (
+          'Cancelled',
+          scheme.surfaceContainerHighest,
+          scheme.onSurfaceVariant,
+        ),
+      TransferStatus.declined => (
+          'Declined',
+          scheme.errorContainer,
+          scheme.onErrorContainer,
+        ),
+      TransferStatus.failed => (
+          'Failed',
+          scheme.errorContainer,
+          scheme.onErrorContainer,
+        ),
     };
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
+        color: background,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
         label,
         style: TextStyle(
-          color: color,
+          color: foreground,
           fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
