@@ -288,6 +288,37 @@ typedef _CFDataGetBytePtrNative = Pointer<Uint8> Function(
     Pointer<Void> theData);
 typedef CFDataGetBytePtrDart = Pointer<Uint8> Function(Pointer<Void> theData);
 
+/// `CFNumberType` for a C `double`. Values are stable ABI constants.
+const int kCFNumberFloat64Type = 6;
+
+typedef _CFNumberCreateNative = Pointer<Void> Function(
+  Pointer<Void> allocator,
+  Int32 theType,
+  Pointer<Void> valuePtr,
+);
+typedef CFNumberCreateDart = Pointer<Void> Function(
+  Pointer<Void> allocator,
+  int theType,
+  Pointer<Void> valuePtr,
+);
+
+typedef _CFDictionaryCreateNative = Pointer<Void> Function(
+  Pointer<Void> allocator,
+  Pointer<Pointer<Void>> keys,
+  Pointer<Pointer<Void>> values,
+  IntPtr numValues,
+  Pointer<Void> keyCallBacks,
+  Pointer<Void> valueCallBacks,
+);
+typedef CFDictionaryCreateDart = Pointer<Void> Function(
+  Pointer<Void> allocator,
+  Pointer<Pointer<Void>> keys,
+  Pointer<Pointer<Void>> values,
+  int numValues,
+  Pointer<Void> keyCallBacks,
+  Pointer<Void> valueCallBacks,
+);
+
 typedef _CFStringCreateWithCStringNative = Pointer<Void> Function(
   Pointer<Void> alloc,
   Pointer<Utf8> cStr,
@@ -425,6 +456,22 @@ final class CoreGraphicsBindings {
     cfStringCreateWithCString = _coreFoundation.lookupFunction<
         _CFStringCreateWithCStringNative,
         CFStringCreateWithCStringDart>('CFStringCreateWithCString');
+    cfNumberCreate = _coreFoundation
+        .lookupFunction<_CFNumberCreateNative, CFNumberCreateDart>(
+      'CFNumberCreate',
+    );
+    cfDictionaryCreate = _coreFoundation
+        .lookupFunction<_CFDictionaryCreateNative, CFDictionaryCreateDart>(
+      'CFDictionaryCreate',
+    );
+    // Data symbols, not functions: these are the retain/release/equal callback
+    // tables every CF-typed dictionary uses. Passing null instead would give a
+    // dictionary that neither retains its contents nor compares its keys by
+    // value, and ImageIO looks its options up by string equality.
+    cfTypeDictionaryKeyCallBacks =
+        _coreFoundation.lookup<Void>('kCFTypeDictionaryKeyCallBacks');
+    cfTypeDictionaryValueCallBacks =
+        _coreFoundation.lookup<Void>('kCFTypeDictionaryValueCallBacks');
 
     imageDestinationCreateWithData = _imageIO.lookupFunction<
             _CGImageDestinationCreateWithDataNative,
@@ -482,6 +529,10 @@ final class CoreGraphicsBindings {
   late final CFDataGetLengthDart cfDataGetLength;
   late final CFDataGetBytePtrDart cfDataGetBytePtr;
   late final CFStringCreateWithCStringDart cfStringCreateWithCString;
+  late final CFNumberCreateDart cfNumberCreate;
+  late final CFDictionaryCreateDart cfDictionaryCreate;
+  late final Pointer<Void> cfTypeDictionaryKeyCallBacks;
+  late final Pointer<Void> cfTypeDictionaryValueCallBacks;
   late final CGImageDestinationCreateWithDataDart
       imageDestinationCreateWithData;
   late final CGImageDestinationAddImageDart imageDestinationAddImage;

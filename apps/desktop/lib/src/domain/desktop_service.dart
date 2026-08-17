@@ -2355,11 +2355,35 @@ final class DesktopService {
     );
   }
 
+  /// Schedules the next capture for [stream].
+  ///
+  /// One-shot and self-rescheduling rather than [Timer.periodic], because the
+  /// target frame rate is a ceiling and not a promise. A periodic timer keeps
+  /// firing at 30 Hz whether or not the previous frame has reached the phone,
+  /// and the ticks it fires while a frame is still in flight do nothing except
+  /// count themselves as skipped. Rescheduling from the end of each tick means
+  /// the loop runs at the rate the link and the encoder can actually sustain,
+  /// and speeds back up on its own when they can.
   void _startScreenCaptureTimer(_ActiveScreenStream stream) {
     stream.cancel();
+    _scheduleNextCapture(stream);
+  }
+
+  void _scheduleNextCapture(_ActiveScreenStream stream) {
     final interval = Duration(milliseconds: (1000 / stream.targetFps).round());
-    stream.timer = Timer.periodic(interval, (_) {
-      unawaited(screenCaptureTick(stream.session.peerId));
+    final elapsed = stream.sinceTickStart;
+    // Never zero: a frame that took longer than its budget must still yield to
+    // the event loop before the next one, or the capture loop starves
+    // everything else on this isolate — including the heartbeat that keeps the
+    // session alive.
+    final wait = elapsed >= interval ? Duration.zero : interval - elapsed;
+    stream.timer = Timer(wait, () {
+      unawaited(
+        screenCaptureTick(stream.session.peerId).whenComplete(() {
+          if (_screenStreams[stream.session.peerId.value] != stream) return;
+          _scheduleNextCapture(stream);
+        }),
+      );
     });
   }
 
@@ -2428,11 +2452,13 @@ final class DesktopService {
     }
 
     stream.isFrameInFlight = true;
+    stream.markTickStart();
     try {
       final frame = await _screenCapture.captureFrame(
         monitorId: stream.monitorId,
         maxWidth: stream.maxWidth,
         maxHeight: stream.maxHeight,
+        quality: stream.quality,
       );
       if (frame == null) return;
       if (!_screenStreams.containsKey(peerId.value)) return;
@@ -2447,7 +2473,13 @@ final class DesktopService {
         data: frame.data,
       );
       stream.capturedFrames++;
-      await stream.session.session.send(screenFrame);
+      // `awaitDrain` is what makes `isFrameInFlight` mean anything. A plain
+      // `send` hands the frame to a buffer and returns, so the guard would
+      // clear before a byte had left the machine and the next tick would
+      // capture regardless — frames piling into the socket faster than the
+      // link drains them, each one adding to the delay the viewer sees.
+      // Waiting for the drain paces capture to the link instead of the clock.
+      await stream.session.session.send(screenFrame, awaitDrain: true);
     } on Object catch (e) {
       _log.warn('screen frame send failed', error: e);
     } finally {
@@ -2480,11 +2512,30 @@ final class _ActiveScreenStream {
   int maxWidth;
   int maxHeight;
 
+  /// Encoder quality implied by the requested bitrate.
+  double get quality => screenJpegQualityForBitrate(targetBitrateKbps);
+
   int sequence = 0;
   int skippedFrames = 0;
   int capturedFrames = 0;
   bool isFrameInFlight = false;
   Timer? timer;
+
+  /// Wall time the current tick began, for pacing the next one.
+  ///
+  /// Measured from the *start* of the tick rather than its end so that the
+  /// frame rate is a rate: a tick that takes 12 ms of a 33 ms budget waits 21,
+  /// not 33, and the stream holds 30 fps instead of drifting down to 22.
+  DateTime? _tickStartedAt;
+
+  void markTickStart() => _tickStartedAt = clock.now();
+
+  Duration get sinceTickStart {
+    final started = _tickStartedAt;
+    if (started == null) return Duration.zero;
+    final elapsed = clock.now().difference(started);
+    return elapsed.isNegative ? Duration.zero : elapsed;
+  }
 
   void configure(ScreenConfigure update) {
     if (update.monitorId != null) monitorId = update.monitorId!;

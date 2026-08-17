@@ -8,6 +8,7 @@ import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
 import 'screen_coordinate_mapping.dart';
+import 'screen_stream_request.dart';
 
 /// Screen frames pushed from the desktop.
 final screenFrameProvider =
@@ -83,12 +84,9 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
 
     setState(() => _isStreaming = true);
     await client.send(
-      ScreenStreamStart(
+      screenStreamRequestFor(
         monitorId: widget.monitorId,
-        targetFps: 30,
-        codec: ScreenCodec.jpeg,
-        maxWidth: 1920,
-        maxHeight: 1080,
+        logicalSize: MediaQuery.sizeOf(context),
       ),
     );
   }

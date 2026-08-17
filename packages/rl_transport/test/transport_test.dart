@@ -391,6 +391,141 @@ void main() {
       );
     });
 
+    test('awaiting the drain sends every frame instead of the last', () async {
+      // Screen frames are declared lossy, which is right for the default path:
+      // if frames back up, the newest picture is the only one worth sending
+      // and the coalescer keeps exactly that one.
+      //
+      // It is wrong for the capture loop, which produces the next frame only
+      // once the last one is away. There, `send` returning before the write
+      // means the loop is paced by its own timer rather than by the link, and
+      // frames accumulate in a buffer nobody is measuring — the backlog *is*
+      // the lag the user sees. `awaitDrain` makes the future mean "the link
+      // has taken this", and the observable consequence is that a paced
+      // producer's frames all arrive rather than collapsing into one.
+      await trustStore.upsert(
+        TrustedPeer(
+          id: phoneIdentity.id,
+          publicKey: phoneIdentity.publicKey,
+          name: 'Test Phone',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: 2,
+        ),
+      );
+
+      final acceptedFuture = server.accepted.first;
+      await client.connect(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: server.boundPort,
+          deviceId: desktopIdentity.id,
+          serverPublicKey: desktopIdentity.publicKey,
+        ),
+      );
+      final accepted =
+          await acceptedFuture.timeout(const Duration(seconds: 10));
+      await client.waitUntilConnected();
+
+      const frames = 5;
+      final received = <int>[];
+      final complete = Completer<void>();
+      final subscription = client.messages.listen((message) {
+        if (message is! ScreenFrame) return;
+        received.add(message.sequence);
+        if (received.length == frames && !complete.isCompleted) {
+          complete.complete();
+        }
+      });
+      addTearDown(subscription.cancel);
+
+      ScreenFrame frameNumber(int sequence) => ScreenFrame(
+            sequence: sequence,
+            ptsMicros: sequence * 1000,
+            isKeyframe: true,
+            width: 1280,
+            height: 720,
+            data: Uint8List.fromList(<int>[0xFF, 0xD8, 0xFF, 0xD9]),
+          );
+
+      // Fired without awaiting between them, so no microtask runs in the gap.
+      // That is what the lossy queue is built for and what it does here: every
+      // pending screen frame shares one key, so a second frame arriving before
+      // the queue drains replaces the first and only the newest survives.
+      // Awaiting each one in turn would not show the difference, because the
+      // await itself yields and lets the queue drain between frames.
+      await Future.wait<void>(<Future<void>>[
+        for (var i = 0; i < frames; i++)
+          accepted.session.send(frameNumber(i), awaitDrain: true),
+      ]);
+
+      await complete.future.timeout(const Duration(seconds: 10));
+      expect(
+        received,
+        List<int>.generate(frames, (i) => i),
+        reason: 'every frame should have gone out, in order',
+      );
+    });
+
+    test('without the drain, queued frames coalesce to the newest', () async {
+      // The other half of the pair above, and the reason `awaitDrain` had to be
+      // opt-in rather than the new default. Coalescing is correct for a
+      // producer that does not wait: when frames are backing up, the newest
+      // picture is the only one worth the bandwidth and every older one is
+      // already wrong. Deleting that behaviour to fix the capture loop would
+      // have traded one latency bug for another.
+      await trustStore.upsert(
+        TrustedPeer(
+          id: phoneIdentity.id,
+          publicKey: phoneIdentity.publicKey,
+          name: 'Test Phone',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: 2,
+        ),
+      );
+
+      final acceptedFuture = server.accepted.first;
+      await client.connect(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: server.boundPort,
+          deviceId: desktopIdentity.id,
+          serverPublicKey: desktopIdentity.publicKey,
+        ),
+      );
+      final accepted =
+          await acceptedFuture.timeout(const Duration(seconds: 10));
+      await client.waitUntilConnected();
+
+      final received = <int>[];
+      final subscription = client.messages.listen((message) {
+        if (message is ScreenFrame) received.add(message.sequence);
+      });
+      addTearDown(subscription.cancel);
+
+      for (var i = 0; i < 5; i++) {
+        unawaited(
+          accepted.session.send(
+            ScreenFrame(
+              sequence: i,
+              ptsMicros: i * 1000,
+              isKeyframe: true,
+              width: 1280,
+              height: 720,
+              data: Uint8List.fromList(<int>[0xFF, 0xD8, 0xFF, 0xD9]),
+            ),
+          ),
+        );
+      }
+
+      // Long enough for five frames to have arrived had they been sent.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+
+      expect(received, <int>[4],
+          reason: 'only the newest frame is worth sending');
+    });
+
     test('a client with the wrong server key refuses to connect', () async {
       final impostorKey = (await DeviceIdentity.generate()).publicKey;
 

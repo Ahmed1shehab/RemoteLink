@@ -25,6 +25,17 @@ final class ControllableScreenCaptureBackend implements ScreenCaptureBackend {
   Completer<CapturedFrame?>? pendingFrame;
   int captureCallCount = 0;
 
+  /// What the service actually asked for on the most recent capture.
+  ///
+  /// Recorded rather than ignored because the stream's parameters reaching the
+  /// backend is the only thing that makes them mean anything: a request for a
+  /// 1280-wide frame that the service quietly captures at native resolution
+  /// looks identical from every other angle.
+  int? lastMaxWidth;
+  int? lastMaxHeight;
+  int? lastMonitorId;
+  double? lastQuality;
+
   @override
   bool checkPermission() => isAvailable;
 
@@ -36,8 +47,13 @@ final class ControllableScreenCaptureBackend implements ScreenCaptureBackend {
     int monitorId = kWholeVirtualDesktopMonitorId,
     int maxWidth = 0,
     int maxHeight = 0,
+    double quality = kDefaultScreenJpegQuality,
   }) async {
     captureCallCount++;
+    lastMaxWidth = maxWidth;
+    lastMaxHeight = maxHeight;
+    lastMonitorId = monitorId;
+    lastQuality = quality;
     if (pendingFrame != null) {
       return pendingFrame!.future;
     }
@@ -399,6 +415,9 @@ void main() {
           codec: ScreenCodec.jpeg,
           maxWidth: 1280,
           maxHeight: 720,
+          // Deliberately below the protocol default, so the quality the
+          // backend receives cannot be the default arriving by coincidence.
+          targetBitrateKbps: 1250,
         ),
       );
 
@@ -410,6 +429,27 @@ void main() {
 
       final tick1 = service.screenCaptureTick(pair.session.peerId);
       expect(captureBackend.captureCallCount, 1);
+
+      // The phone asked for 1280x720. A service that captures at native
+      // resolution regardless sends frames several times the size the phone
+      // requested, which is invisible from the phone — the picture looks
+      // correct, it just arrives late and keeps falling further behind.
+      expect(captureBackend.lastMaxWidth, 1280);
+      expect(captureBackend.lastMaxHeight, 720);
+      expect(captureBackend.lastMonitorId, kWholeVirtualDesktopMonitorId);
+      // Encoding at ImageIO's near-lossless default is what made a frame
+      // 400 KB. Nothing else in the pipeline notices the difference, so the
+      // only place it can be caught is here, at the call.
+      //
+      // 1250 kbps is two halvings below the 5000 kbps anchor, so the quality
+      // must come out *below* the default. Asserting the exact value would
+      // pass just as well against a service that ignored the bitrate and
+      // handed over a constant.
+      expect(captureBackend.lastQuality, lessThan(kDefaultScreenJpegQuality));
+      expect(
+        captureBackend.lastQuality,
+        screenJpegQualityForBitrate(1250),
+      );
 
       // While tick 1 is in flight, tick 2 fires
       await service.screenCaptureTick(pair.session.peerId);

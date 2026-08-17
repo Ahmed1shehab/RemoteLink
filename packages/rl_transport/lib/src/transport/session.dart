@@ -259,16 +259,31 @@ final class Session {
   /// is backing up; everything else goes out immediately. The distinction is
   /// declared once on [MessageType.isLossy] rather than decided here, so adding
   /// a message type forces the author to state which it is.
-  Future<void> send(Message message, {bool requireAck = false}) async {
+  ///
+  /// [awaitDrain] makes the returned future mean "the link has taken this"
+  /// rather than "this has been queued". It exists for one caller shape: a
+  /// producer that will immediately generate the next message and needs to be
+  /// paced by the link rather than by its own clock. Screen frames are that
+  /// shape and nothing else in this protocol is — a caller that awaits the
+  /// drain of a keystroke has just made typing wait for the network. It also
+  /// bypasses the lossy queue, because coalescing and pacing are alternative
+  /// answers to the same problem and doing both means the frame you waited for
+  /// is not the frame that went out.
+  Future<void> send(
+    Message message, {
+    bool requireAck = false,
+    bool awaitDrain = false,
+  }) async {
     if (_state == SessionState.closed) {
       throw const TransportError('session_closed', 'session is closed');
     }
 
-    if (message.type.isLossy && !requireAck) {
+    if (message.type.isLossy && !requireAck && !awaitDrain) {
       _enqueueLossy(message);
       return;
     }
     await _writeNow(message, requireAck: requireAck);
+    if (awaitDrain) await _connection.flush();
   }
 
   /// Sends a reliable application message and waits for the peer's frame ack.

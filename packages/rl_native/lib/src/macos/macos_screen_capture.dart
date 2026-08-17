@@ -84,6 +84,7 @@ final class MacosScreenCaptureBackend implements ScreenCaptureBackend {
     int monitorId = kWholeVirtualDesktopMonitorId,
     int maxWidth = 0,
     int maxHeight = 0,
+    double quality = kDefaultScreenJpegQuality,
   }) async {
     if (!isAvailable) return null;
 
@@ -162,7 +163,7 @@ final class MacosScreenCaptureBackend implements ScreenCaptureBackend {
       }
 
       try {
-        final jpegBytes = _encodeJpeg(imageToEncode);
+        final jpegBytes = _encodeJpeg(imageToEncode, quality);
         if (jpegBytes == null) return null;
         return CapturedFrame(
           width: targetWidth,
@@ -179,13 +180,14 @@ final class MacosScreenCaptureBackend implements ScreenCaptureBackend {
     }
   }
 
-  Uint8List? _encodeJpeg(Pointer<Void> image) {
+  Uint8List? _encodeJpeg(Pointer<Void> image, double quality) {
     final cfData = _bindings.cfDataCreateMutable(nullptr, 0);
     if (cfData == nullptr) return null;
 
     Pointer<Utf8> utiUtf8 = nullptr;
     Pointer<Void> utiString = nullptr;
     Pointer<Void> destination = nullptr;
+    Pointer<Void> options = nullptr;
 
     try {
       utiUtf8 = 'public.jpeg'.toNativeUtf8();
@@ -196,6 +198,8 @@ final class MacosScreenCaptureBackend implements ScreenCaptureBackend {
       );
       if (utiString == nullptr) return null;
 
+      options = _createQualityOptions(quality);
+
       destination = _bindings.imageDestinationCreateWithData(
         cfData,
         utiString,
@@ -204,7 +208,12 @@ final class MacosScreenCaptureBackend implements ScreenCaptureBackend {
       );
       if (destination == nullptr) return null;
 
-      _bindings.imageDestinationAddImage(destination, image, nullptr);
+      // The quality belongs on the *image*, not on the destination: ImageIO
+      // reads `kCGImageDestinationLossyCompressionQuality` from the per-image
+      // properties passed to AddImage. Passing it to the destination's own
+      // options instead is silently ignored, which looks exactly like a
+      // quality setting that does nothing.
+      _bindings.imageDestinationAddImage(destination, image, options);
       final success = _bindings.imageDestinationFinalize(destination);
       if (!success) return null;
 
@@ -217,9 +226,79 @@ final class MacosScreenCaptureBackend implements ScreenCaptureBackend {
       return Uint8List.fromList(bytePtr.asTypedList(length));
     } finally {
       if (destination != nullptr) _bindings.release(destination);
+      if (options != nullptr) _bindings.release(options);
       if (utiString != nullptr) _bindings.release(utiString);
       if (utiUtf8 != nullptr) calloc.free(utiUtf8);
       _bindings.release(cfData);
+    }
+  }
+
+  /// Builds `{kCGImageDestinationLossyCompressionQuality: quality}`.
+  ///
+  /// Returns [nullptr] if any step fails, which the caller passes straight to
+  /// ImageIO — a null properties dictionary is legal and simply means "your
+  /// defaults". A frame at the wrong quality beats no frame at all.
+  ///
+  /// The key is built as a plain string rather than read from ImageIO's
+  /// exported `kCGImageDestinationLossyCompressionQuality` symbol. The
+  /// dictionary uses `kCFTypeDictionaryKeyCallBacks`, so lookup is by `CFEqual`
+  /// on the string's contents and an identical string matches. Doing it this
+  /// way keeps the binding to a function table rather than to a data symbol
+  /// whose address is not part of the documented ABI.
+  Pointer<Void> _createQualityOptions(double quality) {
+    final clamped = quality.isFinite ? quality.clamp(0.0, 1.0) : 1.0;
+
+    Pointer<Utf8> keyUtf8 = nullptr;
+    Pointer<Void> keyString = nullptr;
+    Pointer<Void> number = nullptr;
+    Pointer<Double> value = nullptr;
+    Pointer<Pointer<Void>> keys = nullptr;
+    Pointer<Pointer<Void>> values = nullptr;
+
+    try {
+      keyUtf8 = 'kCGImageDestinationLossyCompressionQuality'.toNativeUtf8();
+      keyString = _bindings.cfStringCreateWithCString(
+        nullptr,
+        keyUtf8,
+        0x08000100, // kCFStringEncodingUTF8
+      );
+      if (keyString == nullptr) return nullptr;
+
+      value = calloc<Double>();
+      value.value = clamped.toDouble();
+      number = _bindings.cfNumberCreate(
+        nullptr,
+        kCFNumberFloat64Type,
+        value.cast(),
+      );
+      if (number == nullptr) return nullptr;
+
+      keys = calloc<Pointer<Void>>();
+      values = calloc<Pointer<Void>>();
+      keys.value = keyString;
+      values.value = number;
+
+      // The dictionary retains both entries, so releasing them below is
+      // correct and the dictionary the caller gets owns its contents.
+      return _bindings.cfDictionaryCreate(
+        nullptr,
+        keys,
+        values,
+        1,
+        _bindings.cfTypeDictionaryKeyCallBacks,
+        _bindings.cfTypeDictionaryValueCallBacks,
+      );
+    } on Object catch (e) {
+      _log.warn('could not build JPEG quality options', error: e);
+      return nullptr;
+    } finally {
+      if (number != nullptr) _bindings.release(number);
+      if (keyString != nullptr) _bindings.release(keyString);
+      calloc
+        ..free(value)
+        ..free(keys)
+        ..free(values);
+      if (keyUtf8 != nullptr) calloc.free(keyUtf8);
     }
   }
 

@@ -130,6 +130,37 @@ final class FramedConnection {
     _socket.add(framed);
   }
 
+  /// Completes once the OS has accepted everything [send] has handed over.
+  ///
+  /// [send] is deliberately synchronous and never blocks: a 22-byte mouse event
+  /// must not wait on anything. The cost of that is that `send` returning says
+  /// nothing about the network — the bytes are sitting in a Dart-side buffer
+  /// that grows without limit.
+  ///
+  /// For a 22-byte event that does not matter. For a stream of half-megabyte
+  /// screen frames it is the whole problem: a producer that keeps calling
+  /// `send` because `send` keeps returning will queue frames faster than the
+  /// link drains them, and every queued frame is delay the viewer sees. The
+  /// backlog is invisible from here — it looks like a slow network rather than
+  /// a producer that was never told to slow down.
+  ///
+  /// Awaiting this bounds the backlog at the kernel's send buffer, because
+  /// `flush` cannot complete until the kernel has taken the data and the kernel
+  /// stops taking it once its buffer is full. That turns "how fast can I
+  /// capture" into "how fast can this link carry", which is the rate we
+  /// actually want.
+  Future<void> flush() async {
+    if (_closed) return;
+    try {
+      await _socket.flush();
+    } on Object catch (e) {
+      // A flush failing means the socket is going away, which `_onError` and
+      // `_onDone` already handle. Reporting it twice would tear the session
+      // down along a second path.
+      _log.debug(() => 'flush failed on a closing socket: $e');
+    }
+  }
+
   void _onData(Uint8List chunk) {
     _buffer.add(chunk);
 
