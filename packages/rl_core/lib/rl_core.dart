@@ -4,6 +4,7 @@
 /// it can be consumed from isolates, tests, and (eventually) web tooling.
 library;
 
+export 'src/clipboard_history.dart';
 export 'src/clock.dart';
 export 'src/device.dart';
 export 'src/device_name.dart';

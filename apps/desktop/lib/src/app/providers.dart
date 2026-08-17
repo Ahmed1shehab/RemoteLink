@@ -9,6 +9,7 @@ import 'package:rl_native/rl_native.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../domain/clipboard_history_store.dart';
 import '../domain/desktop_service.dart';
 import '../domain/file_transfer_store.dart';
 import '../domain/transfer_model.dart';
@@ -93,6 +94,81 @@ final incomingTransferStoreProvider =
   return FileTransferStore(destination);
 });
 
+/// The last few things copied on this computer.
+///
+/// Owned here rather than inside [DesktopService] because it outlives the
+/// service: stopping and restarting the listener must not empty the list the
+/// user is looking at. The service writes to it, the window reads from it, and
+/// both hold the same instance.
+///
+/// Startup restores from disk only if the encrypted file is there — which is
+/// what "the user opted in" looks like. A first run, or a run after the user
+/// turned persistence off, finds nothing and stays memory-only.
+final clipboardHistoryProvider = FutureProvider<ClipboardHistory>((ref) async {
+  final history = ClipboardHistory(clock: ref.watch(clockProvider));
+  ref.onDispose(() => unawaited(history.dispose()));
+
+  final directory = await ref.watch(appDirectoryProvider.future);
+  final restored = await history.restore(
+    EncryptedFileClipboardHistoryStore.inDirectory(directory),
+  );
+  if (restored) {
+    Log.scoped('desktop.clipboard.history').info(
+      'restored the clipboard history from encrypted storage',
+      fields: <String, Object?>{'entries': history.entries.length},
+    );
+  }
+  return history;
+});
+
+/// The history as the window renders it.
+///
+/// Separate from [clipboardHistoryProvider] for the same reason
+/// [desktopStatusProvider] is separate from [desktopServiceProvider]: passive
+/// rendering should not require the object that touches the filesystem.
+final clipboardHistoryViewProvider =
+    StreamProvider<ClipboardHistorySnapshot>((ref) async* {
+  final history = await ref.watch(clipboardHistoryProvider.future);
+  yield history.snapshot;
+  yield* history.changes;
+});
+
+/// Puts a history entry back on this computer's clipboard.
+///
+/// A function behind a provider rather than a direct reach into
+/// [desktopServiceProvider], so the history panel can be exercised in a widget
+/// test without constructing the native-backed service.
+typedef ClipboardRecopy = Future<bool> Function(ClipboardHistoryEntry entry);
+
+final clipboardRecopyProvider = Provider<ClipboardRecopy>(
+  (ref) => (entry) async {
+    final service = await ref.read(desktopServiceProvider.future);
+    return service.clipboard.recopy(entry);
+  },
+);
+
+/// Turns opt-in persistence on or off.
+///
+/// Takes its collaborators rather than a `Ref` so it reads the same from a
+/// widget and from a test, and so the one security-relevant decision here —
+/// which directory the ciphertext lands in — is visible at the call site.
+///
+/// Off deletes the ciphertext *and* its key, so "off" means there is nothing
+/// left on disk rather than a file nobody is reading.
+Future<void> setClipboardHistoryPersistence({
+  required ClipboardHistory history,
+  required Directory directory,
+  required bool enabled,
+}) async {
+  if (!enabled) {
+    await history.disablePersistence();
+    return;
+  }
+  await history.enablePersistence(
+    EncryptedFileClipboardHistoryStore.inDirectory(directory),
+  );
+}
+
 /// The running service.
 final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
   final identity = await ref.watch(identityProvider.future);
@@ -100,6 +176,7 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
   final name = ref.watch(deviceNameProvider);
   final transferStore = await ref.watch(incomingTransferStoreProvider.future);
   final directory = await ref.watch(appDirectoryProvider.future);
+  final history = await ref.watch(clipboardHistoryProvider.future);
 
   final service = DesktopService(
     identity: identity,
@@ -109,6 +186,7 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
     clock: ref.watch(clockProvider),
     incomingTransferStore: transferStore,
     peerClipboardSettingsFile: File('${directory.path}/clipboard_peers.json'),
+    clipboardHistory: history,
   );
 
   await service.start();

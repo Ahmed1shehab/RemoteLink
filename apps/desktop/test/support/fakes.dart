@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:remotelink_desktop/src/app/providers.dart';
 import 'package:remotelink_desktop/src/domain/command_dispatcher.dart';
@@ -92,11 +94,29 @@ MemoryLogSink createFakeMemoryLogSink() {
 
 final fakeMemoryLogSink = createFakeMemoryLogSink();
 
+/// [desktopHomeOverrides] plus a live clipboard history.
+///
+/// The history is injected rather than faked so a test drives the real ring
+/// buffer: the panel's behaviour *is* the ring's behaviour, and a stub list
+/// would check the widget against a model that cannot evict.
+List<Override> desktopHomeOverridesWith({
+  ClipboardHistory? clipboardHistory,
+  ClipboardRecopy? recopy,
+}) =>
+    <Override>[
+      ...desktopHomeOverrides,
+      if (clipboardHistory != null)
+        clipboardHistoryProvider.overrideWith((ref) async => clipboardHistory),
+      if (recopy != null) clipboardRecopyProvider.overrideWithValue(recopy),
+    ];
+
 /// Safe provider state for rendering the desktop home screen in widget tests.
 ///
 /// These overrides deliberately stop at the UI-facing providers. In
 /// particular, they never construct [DesktopService], whose constructor loads
-/// native backends and whose startup opens real network services.
+/// native backends and whose startup opens real network services — and they
+/// hold the clipboard history in memory, so no test touches the encrypted
+/// history file.
 final List<Override> desktopHomeOverrides = <Override>[
   desktopStatusProvider.overrideWith(
     (ref) async => const DesktopStatus(
@@ -128,6 +148,12 @@ final List<Override> desktopHomeOverrides = <Override>[
     (ref) => Stream<DiagnosticsInfo>.value(fakeDiagnostics),
   ),
   memoryLogSinkProvider.overrideWithValue(fakeMemoryLogSink),
+  clipboardHistoryProvider.overrideWith((ref) async {
+    final history = ClipboardHistory();
+    ref.onDispose(() => unawaited(history.dispose()));
+    return history;
+  }),
+  clipboardRecopyProvider.overrideWithValue((entry) async => true),
 ];
 
 /// Helper to create a [CommandDispatcher] for testing.

@@ -581,6 +581,202 @@ void main() {
       await service.dispose();
     });
 
+    test('concealed content is never recorded in the history', () async {
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        pollInterval: testPollInterval,
+      );
+
+      service.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      // A password manager's entry. It must not reach the history at all —
+      // not as a row, not as a preview, not as bytes waiting to be persisted.
+      backend.copyLocally('correct-horse-battery-staple', concealed: true);
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(service.history.entries, isEmpty);
+
+      // The feature still works for everything else, which is the point: this
+      // is a targeted exemption, not a switch that turns history off.
+      backend.copyLocally('an ordinary note', concealed: false);
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(service.history.entries, hasLength(1));
+      expect(service.history.entries.single.text, equals('an ordinary note'));
+
+      // And a concealed copy *after* a normal one leaves the list untouched
+      // rather than pushing the secret in at the top.
+      backend.copyLocally('another-secret', concealed: true);
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(service.history.entries, hasLength(1));
+      expect(service.history.entries.single.text, equals('an ordinary note'));
+
+      await service.dispose();
+    });
+
+    test('a concealed image is never recorded in the history', () async {
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        pollInterval: testPollInterval,
+      );
+
+      service.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      final samplePng =
+          Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 12, 13]);
+      backend.copyImageLocally(samplePng, concealed: true);
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(service.history.entries, isEmpty);
+
+      await service.dispose();
+    });
+
+    test(
+        'an update marked sensitive is applied to nothing and recorded nowhere',
+        () async {
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+      );
+
+      final update = await _makeUpdate('phone password');
+      final sensitive = ClipboardUpdate(
+        items: update.items,
+        contentHash: update.contentHash,
+        originDeviceId: update.originDeviceId,
+        originSequence: update.originSequence,
+        isSensitive: true,
+      );
+
+      expect(await service.applyRemote(sensitive), isFalse);
+      expect(service.history.entries, isEmpty);
+      expect(backend.readText(), isNull);
+
+      await service.dispose();
+    });
+
+    test('content applied from the phone joins this computer\'s history',
+        () async {
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        pollInterval: testPollInterval,
+      );
+
+      service.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      await service.applyRemote(await _makeUpdate('from the phone'));
+
+      // The poller then sees our own write and must not record it a second
+      // time — one copy, one row.
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(service.history.entries, hasLength(1));
+      expect(service.history.entries.single.text, equals('from the phone'));
+
+      await service.dispose();
+    });
+
+    test('the history ring evicts at 25 and pinned entries survive', () async {
+      final clock = FakeClock();
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        clock: clock,
+      );
+
+      final first = await _makeUpdate('keep me', originSequence: 1);
+      await service.applyRemote(first);
+      final keeper = service.history.entries.single;
+      expect(service.history.setPinned(keeper.id, pinned: true), isTrue);
+
+      for (var i = 0; i < 40; i++) {
+        clock.advance(const Duration(seconds: 1));
+        await service.applyRemote(
+          await _makeUpdate('churn $i', originSequence: i + 2),
+        );
+      }
+
+      expect(service.history.entries, hasLength(25));
+      final survivors =
+          service.history.entries.where((entry) => entry.id == keeper.id);
+      expect(survivors, hasLength(1));
+      expect(survivors.single.text, equals('keep me'));
+
+      await service.dispose();
+    });
+
+    test('re-copying a history entry puts it back on the clipboard and syncs',
+        () async {
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        pollInterval: testPollInterval,
+      );
+
+      final outboundUpdates = <ClipboardUpdate>[];
+      final sub = service.outbound.listen(outboundUpdates.add);
+
+      service.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      backend.copyLocally('the first thing');
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      backend.copyLocally('the second thing');
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      expect(outboundUpdates, hasLength(2));
+
+      final older = service.history.entries.last;
+      expect(older.text, equals('the first thing'));
+      expect(service.recopy(older), isTrue);
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(backend.readText(), equals('the first thing'));
+
+      // A deliberate re-copy is a copy: the phone hears about it, and the entry
+      // floats back to the top instead of being duplicated.
+      expect(outboundUpdates, hasLength(3));
+      expect(outboundUpdates.last.plainText, equals('the first thing'));
+      expect(service.history.entries, hasLength(2));
+      expect(service.history.entries.first.text, equals('the first thing'));
+
+      await sub.cancel();
+      await service.dispose();
+    });
+
+    test('the history is memory-only unless something hands it a store',
+        () async {
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        pollInterval: testPollInterval,
+      );
+
+      service.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      backend.copyLocally('nothing to see');
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(service.history.entries, hasLength(1));
+      expect(service.history.isPersistent, isFalse);
+
+      await service.dispose();
+    });
+
     test('snapshot returns current image or null if concealed or > 1 MiB',
         () async {
       final samplePng =

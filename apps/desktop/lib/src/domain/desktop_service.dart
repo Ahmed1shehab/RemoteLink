@@ -126,9 +126,11 @@ final class DesktopService {
     BrightnessBackend? brightness,
     SystemInfoBackend? systemInfo,
     NetworkAdapterBackend? networkAdapters,
+    ClipboardHistory? clipboardHistory,
     this.incomingTransferStore,
     this.peerClipboardSettingsFile,
-  })  : _clock = clock,
+  })  : _clipboardHistory = clipboardHistory,
+        _clock = clock,
         _input = input ?? NativeBackends.createInput(),
         _clipboardBackend =
             clipboardBackend ?? NativeBackends.createClipboard(),
@@ -145,6 +147,10 @@ final class DesktopService {
   final int servicePort;
   final IncomingTransferStore? incomingTransferStore;
   final File? peerClipboardSettingsFile;
+
+  /// Supplied by the app so the history survives a service restart; `null` in
+  /// a headless run, where [ClipboardSyncService] makes its own.
+  final ClipboardHistory? _clipboardHistory;
 
   final Clock _clock;
   final InputBackend _input;
@@ -164,6 +170,7 @@ final class DesktopService {
     clipboard: _clipboardBackend,
     localDeviceId: identity.id,
     clock: _clock,
+    history: _clipboardHistory,
   );
 
   late final CommandDispatcher _dispatcher = CommandDispatcher(

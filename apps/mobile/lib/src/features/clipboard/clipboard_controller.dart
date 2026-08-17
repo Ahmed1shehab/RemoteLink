@@ -12,6 +12,7 @@ import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
 import '../../app/providers.dart';
+import 'clipboard_history_controller.dart';
 
 /// What the phone currently holds, for display.
 final class ClipboardState {
@@ -166,6 +167,17 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
       fromDesktop: true,
       updatedAt: DateTime.now(),
     );
+
+    // It is on this phone's clipboard now, so it belongs in this phone's
+    // history. `isSensitive` was already refused above; passing it again is the
+    // guard that survives someone rearranging the checks later.
+    _recordHistory(
+      kind: _kindFor(update),
+      data: Uint8List.fromList(utf8.encode(text)),
+      hash: update.contentHash,
+      markedSensitive: update.isSensitive,
+    );
+
     _log.debug(() => 'applied ${text.length} clipboard characters');
   }
 
@@ -214,6 +226,11 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
           text: text,
           updatedAt: DateTime.now(),
         );
+        _recordHistory(
+          kind: ClipboardHistoryKind.text,
+          data: Uint8List.fromList(bytes),
+          hash: hash,
+        );
         _log.debug(() => 'sent ${bytes.length} clipboard bytes');
       }
       return sent;
@@ -225,6 +242,51 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     } finally {
       state = state.copyWith(sending: false);
     }
+  }
+
+  /// The only path from this phone's clipboard into its history.
+  ///
+  /// Funnelled through one method, with the "must this be forgotten?" question
+  /// as a parameter that cannot be omitted, so the rule holds by construction
+  /// rather than by every call site remembering to check first. The phone has
+  /// no equivalent of `ConcealedType` to read locally — iOS and Android give an
+  /// app no way to see that flag — so the desktop's `isSensitive` is the only
+  /// signal available, and it is honoured here as well as in [_applyRemote].
+  void _recordHistory({
+    required ClipboardHistoryKind kind,
+    required Uint8List data,
+    required Uint8List hash,
+    bool markedSensitive = false,
+  }) {
+    _ref.read(clipboardHistoryProvider).record(
+          kind: kind,
+          data: data,
+          contentHash: hash,
+          isConcealed: markedSensitive,
+        );
+  }
+
+  /// Maps the update's first text-ish flavour to a history kind.
+  ///
+  /// A local mapping rather than a shared enum: history is not a message type,
+  /// and giving it one would drag a UI list into the append-only wire contract
+  /// for nothing.
+  static ClipboardHistoryKind _kindFor(ClipboardUpdate update) {
+    for (final item in update.items) {
+      switch (item.contentType) {
+        case ClipboardContentType.url:
+          return ClipboardHistoryKind.url;
+        case ClipboardContentType.html:
+          return ClipboardHistoryKind.html;
+        case ClipboardContentType.text:
+          return ClipboardHistoryKind.text;
+        default:
+          // Every other flavour reaching us with usable plain text is recorded
+          // as text, which is what `update.plainText` gave us.
+          break;
+      }
+    }
+    return ClipboardHistoryKind.text;
   }
 
   /// Asks the computer to send its current clipboard.
