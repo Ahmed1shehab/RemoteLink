@@ -444,6 +444,18 @@ final desktopMessagesProvider = StreamProvider<Message>((ref) async* {
   yield* client.messages;
 });
 
+/// Live permission tier of the current session, updated on [PermissionGrant] messages.
+final currentPermissionTierProvider =
+    StreamProvider<PermissionTier?>((ref) async* {
+  final client = await ref.watch(clientProvider.future);
+  yield null;
+  await for (final message in client.messages) {
+    if (message is PermissionGrant) {
+      yield message.tier;
+    }
+  }
+});
+
 /// Host telemetry (battery, load, memory, uptime), pushed from the desktop.
 final systemStatusProvider = StreamProvider<SystemStatus?>((ref) async* {
   final client = await ref.watch(clientProvider.future);

@@ -310,9 +310,17 @@ class _PairedComputerTile extends ConsumerWidget {
       _ => Icons.computer,
     };
 
+    final tier = PermissionTier.fromWire(peer.permissionTier);
+    final tierLabel = switch (tier) {
+      PermissionTier.readOnly => 'View Only',
+      PermissionTier.standard => 'Standard',
+      PermissionTier.extended => 'Extended',
+      PermissionTier.admin => 'Admin',
+    };
+
     final addressText = peer.lastAddress != null
-        ? 'Last seen: ${peer.lastAddress}'
-        : 'No address recorded';
+        ? 'Last seen: ${peer.lastAddress} · Tier: $tierLabel'
+        : 'No address recorded · Tier: $tierLabel';
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
@@ -331,6 +339,11 @@ class _PairedComputerTile extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           IconButton(
+            icon: const Icon(Icons.shield_outlined),
+            tooltip: 'Permissions for ${peer.name}',
+            onPressed: () => _requestPermission(context, ref, peer),
+          ),
+          IconButton(
             icon: const Icon(Icons.edit_outlined),
             tooltip: 'Rename ${peer.name}',
             onPressed: () => _renameComputer(context, ref, peer),
@@ -341,6 +354,24 @@ class _PairedComputerTile extends ConsumerWidget {
             onPressed: () => _confirmForgetComputer(context, ref, peer),
           ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _requestPermission(
+    BuildContext context,
+    WidgetRef ref,
+    TrustedPeer peer,
+  ) async {
+    final liveTier = ref.read(currentPermissionTierProvider).valueOrNull;
+    final currentTier =
+        liveTier ?? PermissionTier.fromWire(peer.permissionTier);
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => _RequestPermissionDialog(
+        peer: peer,
+        currentTier: currentTier,
       ),
     );
   }
@@ -496,6 +527,238 @@ class _RenameComputerDialogState extends State<_RenameComputerDialog> {
           ),
         ],
       );
+}
+
+class _RequestPermissionDialog extends ConsumerStatefulWidget {
+  const _RequestPermissionDialog({
+    required this.peer,
+    required this.currentTier,
+  });
+
+  final TrustedPeer peer;
+  final PermissionTier currentTier;
+
+  @override
+  ConsumerState<_RequestPermissionDialog> createState() =>
+      _RequestPermissionDialogState();
+}
+
+class _RequestPermissionDialogState
+    extends ConsumerState<_RequestPermissionDialog> {
+  late PermissionTier _selectedTier;
+  final TextEditingController _justificationController =
+      TextEditingController();
+  bool _isSending = false;
+
+  static String _tierTitle(PermissionTier tier) => switch (tier) {
+        PermissionTier.readOnly => 'View Only',
+        PermissionTier.standard => 'Standard',
+        PermissionTier.extended => 'Extended',
+        PermissionTier.admin => 'Admin',
+      };
+
+  static String _tierDescription(PermissionTier tier) => switch (tier) {
+        PermissionTier.readOnly =>
+          'Allows viewing system status, media state, and screen stream.',
+        PermissionTier.standard =>
+          'Allows sending keyboard and mouse input, synchronizing clipboard, and controlling media.',
+        PermissionTier.extended =>
+          'Allows transferring files, launching applications, and running pre-registered commands.',
+        PermissionTier.admin =>
+          'Allows controlling power (shutdown, restart, sleep, lock) and managing paired devices.',
+      };
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedTier = switch (widget.currentTier) {
+      PermissionTier.readOnly => PermissionTier.standard,
+      PermissionTier.standard => PermissionTier.extended,
+      PermissionTier.extended => PermissionTier.admin,
+      PermissionTier.admin => PermissionTier.admin,
+    };
+  }
+
+  @override
+  void dispose() {
+    _justificationController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final client = ref.read(clientProvider).valueOrNull;
+    if (client == null || !client.isConnected) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Connect to ${widget.peer.name} to request permission elevation.',
+          ),
+        ),
+      );
+      Navigator.of(context).pop();
+      return;
+    }
+
+    setState(() => _isSending = true);
+    final rawJustification = _justificationController.text.trim();
+    final justification = rawJustification.isEmpty ? null : rawJustification;
+
+    try {
+      await client.session?.send(
+        PermissionRequest(
+          tier: _selectedTier,
+          justification: justification,
+        ),
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Permission request sent to ${widget.peer.name}.'),
+        ),
+      );
+    } on TransportError {
+      if (!mounted) return;
+      setState(() => _isSending = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to send permission request.'),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return AlertDialog(
+      title: Text('Permissions · ${widget.peer.name}'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Current Permission Tier',
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    _tierTitle(widget.currentTier),
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _tierDescription(widget.currentTier),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Request Higher Tier',
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<PermissionTier>(
+              initialValue: _selectedTier,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+              items: PermissionTier.values
+                  .map(
+                    (tier) => DropdownMenuItem<PermissionTier>(
+                      value: tier,
+                      child: Text(_tierTitle(tier)),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (tier) {
+                if (tier != null) {
+                  setState(() => _selectedTier = tier);
+                }
+              },
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: colorScheme.primaryContainer.withAlpha(50),
+                border: Border.all(color: colorScheme.primary.withAlpha(80)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'What ${_tierTitle(_selectedTier)} allows:',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _tierDescription(_selectedTier),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _justificationController,
+              decoration: const InputDecoration(
+                labelText: 'Reason / Justification (optional)',
+                hintText: 'e.g. Need to transfer files',
+                border: OutlineInputBorder(),
+              ),
+              maxLength: 256,
+            ),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _isSending ? null : _submit,
+          child: _isSending
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Request Elevation'),
+        ),
+      ],
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

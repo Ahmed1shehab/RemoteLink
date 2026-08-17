@@ -248,6 +248,14 @@ final pairingRequestProvider = StreamProvider<PendingPairing>((ref) {
   return service.pairingRequests;
 });
 
+/// Permission elevation requests waiting on the user.
+final permissionRequestProvider =
+    StreamProvider<PendingPermissionRequest>((ref) {
+  final service = ref.watch(desktopServiceProvider).valueOrNull;
+  if (service == null) return const Stream<PendingPermissionRequest>.empty();
+  return service.permissionRequests;
+});
+
 /// Incoming file transfer requests awaiting explicit user approval.
 final incomingTransferRequestProvider =
     StreamProvider<PendingIncomingTransfer>((ref) {

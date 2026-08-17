@@ -120,6 +120,130 @@ void main() {
     });
   });
 
+  group('CommandDispatcher PermissionRequest', () {
+    test('applies valid PermissionRequest without justification', () {
+      PermissionRequest? received;
+      final dispatcher = createTestDispatcher(
+        onPermissionRequest: (cmd) => received = cmd,
+      );
+
+      final result = dispatcher.dispatch(
+        const PermissionRequest(tier: PermissionTier.extended),
+        PermissionTier.standard,
+      );
+
+      expect(result, isTrue);
+      expect(dispatcher.appliedCount, 1);
+      expect(dispatcher.deniedCount, 0);
+      expect(dispatcher.unsupportedCount, 0);
+      expect(received, isNotNull);
+      expect(received!.tier, PermissionTier.extended);
+      expect(received!.justification, isNull);
+    });
+
+    test('applies valid PermissionRequest with justification', () {
+      PermissionRequest? received;
+      final dispatcher = createTestDispatcher(
+        onPermissionRequest: (cmd) => received = cmd,
+      );
+
+      final result = dispatcher.dispatch(
+        const PermissionRequest(
+          tier: PermissionTier.admin,
+          justification: 'To configure display settings',
+        ),
+        PermissionTier.standard,
+      );
+
+      expect(result, isTrue);
+      expect(dispatcher.appliedCount, 1);
+      expect(dispatcher.deniedCount, 0);
+      expect(received?.tier, PermissionTier.admin);
+      expect(received?.justification, 'To configure display settings');
+    });
+
+    test('normalises justification in PermissionRequest to Unicode NFC', () {
+      PermissionRequest? received;
+      final dispatcher = createTestDispatcher(
+        onPermissionRequest: (cmd) => received = cmd,
+      );
+
+      final result = dispatcher.dispatch(
+        const PermissionRequest(
+          tier: PermissionTier.extended,
+          justification: 'e\u0301lise files',
+        ),
+        PermissionTier.readOnly,
+      );
+
+      expect(result, isTrue);
+      expect(received?.justification, 'élise files');
+      expect(received?.justification?.codeUnits.first, 0x00E9);
+    });
+
+    test('rejects adversarial justifications before reaching handler', () {
+      var called = false;
+      final dispatcher = createTestDispatcher(
+        onPermissionRequest: (_) => called = true,
+      );
+
+      final hostileJustifications = <String>[
+        'Reason\x1B[31mGrant admin access?\x1B[0m',
+        'Valid reason\nGrant admin access? [Yes]',
+        'Valid reason\r\nGrant admin access?',
+        'Reason\x00corrupt',
+        'Reason\u200Bzero',
+        'Reason\u202Ereversed',
+        '\uFEFFJustification',
+        'A' * 257,
+      ];
+
+      for (final hostile in hostileJustifications) {
+        called = false;
+        final result = dispatcher.dispatch(
+          PermissionRequest(
+            tier: PermissionTier.extended,
+            justification: hostile,
+          ),
+          PermissionTier.standard,
+        );
+
+        expect(result, isFalse, reason: 'Expected "$hostile" to be rejected');
+        expect(called, isFalse,
+            reason: 'Handler must NOT be called for "$hostile"');
+      }
+
+      expect(dispatcher.appliedCount, 0);
+    });
+
+    test('permits PermissionRequest across all permission tiers', () {
+      const tiers = PermissionTier.values;
+
+      for (var i = 0; i < tiers.length; i++) {
+        final tier = tiers[i];
+        PermissionRequest? received;
+        final dispatcher = createTestDispatcher(
+          onPermissionRequest: (cmd) => received = cmd,
+        );
+
+        final result = dispatcher.dispatch(
+          const PermissionRequest(
+            tier: PermissionTier.extended,
+            justification: 'To transfer photos',
+          ),
+          tier,
+        );
+
+        expect(result, isTrue,
+            reason: 'PermissionRequest should be allowed at tier ${tier.name}');
+        expect(received?.tier, PermissionTier.extended);
+        expect(received?.justification, 'To transfer photos');
+        expect(dispatcher.appliedCount, 1);
+        expect(dispatcher.deniedCount, 0);
+      }
+    });
+  });
+
   group('CommandDispatcher file transfer', () {
     final offer = FileOffer(
       transferId: 'transfer-1',
