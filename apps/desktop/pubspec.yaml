@@ -18,6 +18,11 @@ dependencies:
   # DNS-SD advertising. Required because an iPhone cannot use the UDP beacon
   # without Apple's multicast entitlement, and Bonjour is explicitly exempt.
   bonsoir: ^5.1.0
+  # Files dropped from Finder or Explorer. Flutter's own `DragTarget` only sees
+  # drags that started inside the same Flutter app, so the drop zone this
+  # window used to draw could never have received a file from the OS — it
+  # accepted nothing, silently, which is worse than not offering it.
+  desktop_drop: ^0.7.1
   # The native open-file dialog. Same reasoning as the mobile app: Flutter
   # ships no picker, and a text field asking the user to type a path is not a
   # substitute — it was what this app had, and nobody could send a file with it.

@@ -4,6 +4,11 @@
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
+	<!-- Reading a file the user chose in the open dialog, or dropped on the
+	     window. The app is sandboxed, so without this the dialog still opens and
+	     the selection still comes back — and every read of it fails. -->
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
 	<key>com.apple.security.network.server</key>

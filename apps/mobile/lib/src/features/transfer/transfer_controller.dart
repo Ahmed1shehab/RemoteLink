@@ -736,15 +736,15 @@ class MobileTransferController extends StateNotifier<TransferState> {
       final fileId = 'file-${i + 1}';
       // The caller's name wins when it has one. A picked file's path is a
       // cache copy — `image_picker_A1B2C3.jpg` — and the name the user
-      // recognises only exists in the picker's own metadata. Sanitisation
-      // still applies to both: a display name arrives from a content provider,
-      // which is no more trustworthy than a path.
-      final rawName = fileNames?[i] ??
-          file.uri.pathSegments.lastWhere(
-            (s) => s.isNotEmpty,
-            orElse: () => 'file_${i + 1}.dat',
-          );
-      final fileName = sanitiseFileName(rawName);
+      // recognises only exists in the picker's own metadata.
+      final pathName = file.uri.pathSegments.lastWhere(
+        (s) => s.isNotEmpty,
+        orElse: () => 'file_${i + 1}.dat',
+      );
+      final fileName = safeOutgoingFileName(
+        <String?>[fileNames?[i], pathName],
+        fallback: 'file_${i + 1}.dat',
+      );
       final length = file.lengthSync();
       final stat = file.statSync();
 
@@ -896,6 +896,33 @@ class MobileTransferController extends StateNotifier<TransferState> {
     _receivers.clear();
     super.dispose();
   }
+}
+
+/// First of [candidates] that survives `sanitiseFileName`, else [fallback].
+///
+/// `sanitiseFileName` throws rather than repairing, which is right for a name
+/// arriving from a peer: there is nothing safe to do with a hostile filename
+/// but refuse it. On the sending side the calculus is different. The user
+/// picked a file and wants it sent, and aborting the whole transfer because the
+/// photo library handed back a name with a trailing space would be the app
+/// inventing a problem the user cannot fix. So each candidate is tried in turn
+/// and a generated name that cannot fail sits at the end.
+///
+/// The check itself is never skipped — every name that goes on the wire has
+/// been through it, this only decides what to do when one is rejected.
+String safeOutgoingFileName(
+  List<String?> candidates, {
+  required String fallback,
+}) {
+  for (final candidate in candidates) {
+    if (candidate == null) continue;
+    try {
+      return sanitiseFileName(candidate);
+    } on ProtocolError {
+      continue;
+    }
+  }
+  return sanitiseFileName(fallback);
 }
 
 /// Provider for mobile transfer state.
