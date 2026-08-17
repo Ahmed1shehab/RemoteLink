@@ -416,7 +416,12 @@ button rather than a per-platform branch.
 
 ---
 
-## 11. Monitor topology
+## 11. Screen streaming and monitor topology
+
+Subsystem `0x06xx`. Covers monitor layout discovery, stream session lifecycle,
+frame transmission, and mid-stream quality configuration.
+
+### 11.1 Monitor topology
 
 `screenTopology` (`0x0605`) is the desktop's description of the desk: for each
 monitor an id, an origin, a size, a DPI scale, a primary flag, and a name. It is
@@ -434,16 +439,9 @@ per monitor:
   name       length-prefixed UTF-8, through `sanitiseDeviceName` on the way in
 ```
 
-It is the only implemented code in the `0x06xx` range. `screenStreamStart`,
-`screenStreamStop`, `screenFrame`, and `screenConfigure` are still declared and
-decode as opaque bytes; they land with screen streaming itself.
+### 11.2 Addressing a monitor
 
-### Addressing a monitor
-
-`mouseMoveAbsolute` carries `monitorId` as an **appended** field, after the
-`displayIndex` that shipped before it. The rules in §5 are what make that safe,
-and both directions are tested against a frozen copy of the older decoder in
-`mouse_move_absolute_compatibility_test.dart`.
+`mouseMoveAbsolute` and `screenStreamStart` carry `monitorId`.
 
 `monitorId == 0` means the whole virtual desktop. That is not an arbitrary
 sentinel — it is what a peer that predates the field sends, because the field is
@@ -460,3 +458,77 @@ desktop, which is recoverable; addressing the wrong screen is not.
 
 Normalisation is against `extent - 1`, so `1.0` is the last addressable pixel of
 that monitor rather than the first pixel of its neighbour.
+
+### 11.3 Stream lifecycle and payloads
+
+#### Codecs
+
+Codecs are identified by a uint8 on the wire. Unknown codec values decode to
+an `unknown` variant rather than throwing:
+
+| Wire Value | Codec | Notes |
+|---|---|---|
+| `0` | `unknown` | Refused cleanly by negotiation layer |
+| `1` | `h264` | Baseline hardware-accelerated video |
+| `2` | `jpeg` | Fallback still-frame compression |
+| `3` | `rawRgba` | Uncompressed fallback |
+| `4` | `h265` | HEVC / H.265 |
+| `5` | `av1` | AV1 video |
+| `6` | `vp8` | VP8 video |
+| `7` | `vp9` | VP9 video |
+
+#### `screenStreamStart` (`0x0601`)
+
+Client → server. Requests to start screen streaming.
+
+```text
+monitorId          varuint (0 = virtual desktop, or MonitorDescriptor.id)
+codec              uint8 (ScreenCodec wire value)
+targetFps          varuint (clamped to 1..240 fps)
+targetBitrateKbps  varuint (clamped to 64..100000 kbps)
+maxWidth           varuint (0 = native, clamped to 100000)
+maxHeight          varuint (0 = native, clamped to 100000)
+```
+
+#### `screenStreamStop` (`0x0602`)
+
+Client → server. Stops an active stream with a reason code.
+
+```text
+reason             uint8 (1=userClosed, 2=decoderError, 3=networkError, 4=unsupportedCodec, 5=switchingDisplay)
+```
+
+#### `screenFrame` (`0x0603`)
+
+Server → client. Transmits one encoded video frame.
+
+```text
+sequence           varuint (monotonic frame sequence)
+ptsMicros          uint64 (presentation timestamp in monotonic microseconds)
+isKeyframe         uint8 (bool: 1 = keyframe / IDR, 0 = delta)
+width              varuint (decoded frame pixel width, clamped to 100000)
+height             varuint (decoded frame pixel height, clamped to 100000)
+payloadLength      varuint (refused above 16 MiB before allocation)
+payload            bytes
+```
+
+Frame dimensions travel with each frame to prevent decoder crashes or tearing
+when a host display is resized, rearranged, or scaled mid-stream.
+
+#### `screenConfigure` (`0x0604`)
+
+Client → server. Dynamic stream reconfiguration mid-stream using optional fields
+(presence boolean followed by value):
+
+```text
+hasTargetFps       uint8 (bool)
+  [targetFps]      varuint (clamped to 1..240 fps, if present)
+hasTargetBitrate   uint8 (bool)
+  [targetBitrate]  varuint (clamped to 64..100000 kbps, if present)
+hasMaxWidth        uint8 (bool)
+  [maxWidth]       varuint (clamped to 100000, if present)
+hasMaxHeight       uint8 (bool)
+  [maxHeight]      varuint (clamped to 100000, if present)
+hasMonitorId       uint8 (bool)
+  [monitorId]      varuint (if present)
+```
