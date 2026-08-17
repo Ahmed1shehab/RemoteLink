@@ -280,6 +280,13 @@ final class SystemStatus extends Message {
 }
 
 /// Full peer description, exchanged once the channel is encrypted.
+///
+/// The field order here is the wire order and is append-only. `macAddress` was
+/// added after v1 shipped and is written *last* for that reason: a build that
+/// predates it decodes the fields it knows and stops, leaving the trailing
+/// bytes unread, which `PROTOCOL.md` §5 rule 2 guarantees is not an error.
+/// Inserting it anywhere earlier would have shifted every following field and
+/// silently corrupted the app version and model on every deployed device.
 @immutable
 final class DeviceInfoMessage extends Message {
   const DeviceInfoMessage(this.info);
@@ -297,7 +304,12 @@ final class DeviceInfoMessage extends Message {
       ..writeUint8(info.platform.wireValue)
       ..writeUint8(info.role == PeerRole.server ? 1 : 2)
       ..writeString(info.appVersion)
-      ..writeOptionalString(info.model);
+      ..writeOptionalString(info.model)
+      // Appended field — see the class comment. Sent as text rather than six
+      // raw bytes so a capture stays readable and so a peer that reports a
+      // malformed address is rejected by one parser, here, instead of every
+      // consumer having to decide what a nonsense address means.
+      ..writeOptionalString(info.macAddress?.canonical);
   }
 
   static DeviceInfoMessage readFrom(ByteReader reader) {
@@ -306,14 +318,34 @@ final class DeviceInfoMessage extends Message {
     if (id == null) {
       throw const ProtocolError('bad_device_id', 'malformed device id');
     }
+    final name = reader.readString(maxLength: 128);
+    final platform = PlatformKind.fromWire(reader.readUint8());
+    final role = reader.readUint8() == 1 ? PeerRole.server : PeerRole.client;
+    final appVersion = reader.readString(maxLength: 32);
+    final model = reader.readOptionalString(maxLength: 128);
+
+    // The other half of the append-only guarantee: an *older* peer stops
+    // writing here, so the field is read only if there is anything left. A bare
+    // `readOptionalString` would turn every v1 device into a `short_read` and
+    // drop the session.
+    //
+    // A malformed address degrades to null rather than throwing. It is a
+    // convenience field — the worst outcome of ignoring it is that the Wake
+    // button does not appear — and killing an otherwise healthy session over a
+    // cosmetic field would be a much worse trade.
+    final macAddress = reader.isAtEnd
+        ? null
+        : MacAddress.tryParse(reader.readOptionalString(maxLength: 32) ?? '');
+
     return DeviceInfoMessage(
       DeviceInfo(
         id: id,
-        name: reader.readString(maxLength: 128),
-        platform: PlatformKind.fromWire(reader.readUint8()),
-        role: reader.readUint8() == 1 ? PeerRole.server : PeerRole.client,
-        appVersion: reader.readString(maxLength: 32),
-        model: reader.readOptionalString(maxLength: 128),
+        name: name,
+        platform: platform,
+        role: role,
+        appVersion: appVersion,
+        model: model,
+        macAddress: macAddress,
       ),
     );
   }

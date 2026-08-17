@@ -18,11 +18,14 @@ import 'src/input_backend.dart';
 import 'src/macos/macos_clipboard.dart';
 import 'src/macos/macos_input.dart';
 import 'src/macos/macos_media.dart';
+import 'src/macos/macos_network_adapters.dart';
 import 'src/macos/macos_system_info.dart';
 import 'src/media_backend.dart';
+import 'src/network_adapter_backend.dart';
 import 'src/system_info_backend.dart';
 import 'src/windows/win32_clipboard.dart';
 import 'src/windows/win32_input.dart';
+import 'src/windows/win32_network_adapters.dart';
 import 'src/windows/win32_system_info.dart';
 
 export 'src/input_backend.dart';
@@ -31,11 +34,14 @@ export 'src/macos/coreaudio_ffi.dart';
 export 'src/macos/macos_clipboard.dart';
 export 'src/macos/macos_input.dart';
 export 'src/macos/macos_media.dart';
+export 'src/macos/macos_network_adapters.dart';
 export 'src/macos/macos_system_info.dart';
 export 'src/media_backend.dart';
+export 'src/network_adapter_backend.dart';
 export 'src/system_info_backend.dart';
 export 'src/windows/win32_clipboard.dart';
 export 'src/windows/win32_input.dart';
+export 'src/windows/win32_network_adapters.dart';
 export 'src/windows/win32_system_info.dart';
 
 /// Chooses the backend for the running platform.
@@ -110,6 +116,28 @@ abstract final class NativeBackends {
       log.error('could not load native system info libraries', error: e);
       return const UnsupportedSystemInfoBackend(
         'native system info libraries could not be loaded',
+      );
+    }
+  }
+
+  /// Builds the network adapter backend, or an unsupported stub.
+  ///
+  /// Unlike the other factories this one has nothing to do with permissions —
+  /// reading the interface table needs no grant on either platform. It exists
+  /// because `dart:io` stops at IP addresses and has no concept of a hardware
+  /// address, which is the one thing Wake-on-LAN needs.
+  static NetworkAdapterBackend createNetworkAdapters() {
+    final log = Log.scoped('native.factory');
+    try {
+      if (Platform.isWindows) return Win32NetworkAdapterBackend();
+      if (Platform.isMacOS) return MacosNetworkAdapterBackend();
+      return const UnsupportedNetworkAdapterBackend(
+        'hardware addresses cannot be read on this platform',
+      );
+    } on ArgumentError catch (e) {
+      log.error('could not load native networking libraries', error: e);
+      return const UnsupportedNetworkAdapterBackend(
+        'native networking libraries could not be loaded',
       );
     }
   }

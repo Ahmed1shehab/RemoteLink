@@ -117,13 +117,16 @@ final class DesktopService {
     ClipboardBackend? clipboardBackend,
     MediaBackend? media,
     SystemInfoBackend? systemInfo,
+    NetworkAdapterBackend? networkAdapters,
     this.incomingTransferStore,
   })  : _clock = clock,
         _input = input ?? NativeBackends.createInput(),
         _clipboardBackend =
             clipboardBackend ?? NativeBackends.createClipboard(),
         _media = media ?? NativeBackends.createMedia(),
-        _systemInfo = systemInfo ?? NativeBackends.createSystemInfo();
+        _systemInfo = systemInfo ?? NativeBackends.createSystemInfo(),
+        _networkAdapters =
+            networkAdapters ?? NativeBackends.createNetworkAdapters();
 
   final DeviceIdentity identity;
   final TrustStore trustStore;
@@ -137,6 +140,7 @@ final class DesktopService {
   final ClipboardBackend _clipboardBackend;
   final MediaBackend _media;
   final SystemInfoBackend _systemInfo;
+  final NetworkAdapterBackend _networkAdapters;
   final Log _log = Log.scoped('desktop.service');
 
   late final PairingCoordinator _pairing = PairingCoordinator(
@@ -283,6 +287,15 @@ final class DesktopService {
 
   List<String> _localAddresses = const <String>[];
 
+  /// Hardware address of the adapter this computer is reachable on, if known.
+  ///
+  /// Advertised to paired phones so they can wake this machine once it sleeps.
+  /// Null until [start] has enumerated interfaces, and on any host where the
+  /// reachable address belongs to no adapter with a hardware address.
+  MacAddress? get localMacAddress => _localMacAddress;
+
+  MacAddress? _localMacAddress;
+
   Future<void> _refreshLocalAddresses() async {
     try {
       final interfaces = await NetworkInterface.list(
@@ -301,8 +314,61 @@ final class DesktopService {
           return a.compareTo(b);
         });
       _localAddresses = addresses;
+      await selectLocalMacAddress(addresses);
     } on OSError catch (e) {
       _log.warn('could not enumerate network interfaces', error: e);
+    }
+  }
+
+  /// Chooses which of this machine's hardware addresses to advertise.
+  ///
+  /// A computer has several. A MacBook on Ethernet has a Wi-Fi MAC that is
+  /// switched off, a Thunderbolt bridge, and an `awdl0`; a Windows desktop adds
+  /// a Hyper-V switch and whatever the VPN client installed. Picking the wrong
+  /// one is invisible from here and permanent on the phone: the stored address
+  /// is well-formed, the packet is sent, and nothing ever wakes.
+  ///
+  /// So the choice is made by matching, not by guessing at names — the adapter
+  /// selected is the one carrying the address the service is actually answering
+  /// on, which is the same address the phone connected to.
+  /// [reachableAddresses] arrives already sorted with the most plausible LAN
+  /// address first, so the first match is the right one.
+  ///
+  /// Takes the addresses as an argument, and is public, for the same reason
+  /// [telemetryTick] is: reaching this through [start] would mean binding a TCP
+  /// listener, a UDP beacon, and a Bonjour advertiser to observe one field, and
+  /// letting it read whatever interfaces the test machine happens to have would
+  /// make the assertion depend on the network the tests run on.
+  Future<void> selectLocalMacAddress(List<String> reachableAddresses) async {
+    if (!_networkAdapters.isAvailable) return;
+
+    try {
+      final adapters = await _networkAdapters.adapters();
+      for (final address in reachableAddresses) {
+        final adapter = adapterCarrying(adapters, address);
+        final mac = adapter?.macAddress;
+        // A multicast or all-zero address identifies no machine, so it is
+        // dropped here rather than advertised and broadcast to for nothing.
+        if (mac == null || !mac.isWakeable) continue;
+        _localMacAddress = mac;
+        _log.info(
+          'advertising a hardware address for wake-on-lan',
+          fields: <String, Object?>{
+            'interface': adapter?.name,
+            'address': address,
+          },
+        );
+        return;
+      }
+      _log.debug(
+        () => 'no adapter matched a reachable address; '
+            'wake-on-lan will not be offered',
+      );
+    } on Object catch (e) {
+      // Enumeration reaches the platform through FFI, and a failure there must
+      // not take down a service whose actual job — listening for phones — does
+      // not depend on it at all.
+      _log.warn('could not read hardware addresses', error: e);
     }
   }
 
@@ -369,12 +435,16 @@ final class DesktopService {
   /// Command or Windows keys, and resolves nothing itself — so without being
   /// told which OS it is driving, it would have to guess, and a keyboard with
   /// the wrong modifier key is worse than no keyboard.
+  /// The hardware address is included for a narrower reason: it is the only
+  /// thing that still works once this computer is asleep. Everything else here
+  /// is useless to a phone facing a machine that has stopped answering.
   DeviceInfo describeSelf() => DeviceInfo(
         id: identity.id,
         name: deviceName,
         platform: NativeBackends.currentPlatform,
         role: PeerRole.server,
         appVersion: appVersion,
+        macAddress: _localMacAddress,
       );
 
   /// This computer as it appears to a phone, built fresh on every call.
@@ -1685,6 +1755,7 @@ final class DesktopService {
     _clipboardBackend.dispose();
     _media.dispose();
     _systemInfo.dispose();
+    _networkAdapters.dispose();
 
     _devices.clear();
     await _deviceChanges.close();

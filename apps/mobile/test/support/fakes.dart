@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:remotelink_mobile/src/app/providers.dart';
 import 'package:remotelink_mobile/src/features/devices/auto_connect.dart';
+import 'package:remotelink_mobile/src/features/devices/wake_on_lan.dart';
 import 'package:remotelink_mobile/src/features/input/pointer_controller.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
@@ -28,6 +29,31 @@ final class InMemoryIdentityStore implements IdentityStore {
   }
 }
 
+/// Records magic packets instead of opening a socket.
+///
+/// A widget test must never bind a real UDP socket — see `CONTRIBUTING.md` on
+/// suites that pass alone and fail beside anything else — and the point of the
+/// assertion is what the button sends, not that the network carried it.
+final class RecordingWakeOnLanSender implements WakeOnLanSender {
+  final List<({MacAddress mac, String? lastKnownAddress})> sent =
+      <({MacAddress mac, String? lastKnownAddress})>[];
+
+  /// Set false to rehearse a network that refuses broadcasts.
+  bool delivers = true;
+
+  @override
+  Future<WakeAttempt> wake(MacAddress mac, {String? lastKnownAddress}) async {
+    sent.add((mac: mac, lastKnownAddress: lastKnownAddress));
+    return WakeAttempt(
+      deliveredTo:
+          delivers ? const <String>['255.255.255.255'] : const <String>[],
+      failures: delivers
+          ? const <String, String>{}
+          : const <String, String>{'255.255.255.255': 'refused'},
+    );
+  }
+}
+
 /// Provider state shared by device-list widget tests.
 List<Override> mobileDeviceListOverrides({
   required bool discoveryOperational,
@@ -35,6 +61,7 @@ List<Override> mobileDeviceListOverrides({
   RemoteLinkClient? client,
   List<DiscoveredDevice> discovered = const <DiscoveredDevice>[],
   IdentityStore? identityStore,
+  WakeOnLanSender? wakeSender,
 }) {
   final discovery = FakeDiscoveryBackend(
     isOperational: discoveryOperational,
@@ -45,6 +72,8 @@ List<Override> mobileDeviceListOverrides({
 
   return <Override>[
     identityStoreProvider.overrideWith((ref) async => storage),
+    if (wakeSender != null)
+      wakeOnLanSenderProvider.overrideWithValue(wakeSender),
     discoveryProvider.overrideWith((ref) async => discovery),
     trustStoreProvider.overrideWith((ref) async => peers),
     if (client != null) clientProvider.overrideWith((ref) async => client),
