@@ -1,31 +1,6 @@
-import 'package:meta/meta.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
-/// Screen geometry in physical pixels.
-@immutable
-final class ScreenBounds {
-  const ScreenBounds({
-    required this.x,
-    required this.y,
-    required this.width,
-    required this.height,
-    this.scaleFactor = 1.0,
-  });
-
-  final int x;
-  final int y;
-  final int width;
-  final int height;
-
-  /// DPI scale, e.g. `2.0` on a Retina or 150%-scaled display.
-  final double scaleFactor;
-
-  int get right => x + width;
-  int get bottom => y + height;
-
-  @override
-  String toString() => 'ScreenBounds(${width}x$height @ $x,$y)';
-}
+import 'monitor_topology.dart';
 
 /// Synthesises input events on the host.
 ///
@@ -96,8 +71,23 @@ abstract interface class InputBackend {
   /// Multi-finger swipe mapped to OS navigation (Mission Control, Task View, Spaces).
   void swipe({required int fingerCount, required SwipeDirection direction});
 
-  /// Geometry of every display, primary first.
-  List<ScreenBounds> get displays;
+  /// Every attached display, primary first.
+  ///
+  /// Replaces the earlier `displays` getter, which returned bare rectangles.
+  /// Rectangles alone cannot be addressed: without a stable id there is no way
+  /// for the phone to say "the middle of *that* screen", and without a name or
+  /// a primary flag there is no way for it to draw a picker the user
+  /// recognises.
+  ///
+  /// Returns an empty list where the platform cannot be asked. Callers must
+  /// handle that rather than assuming at least one entry — see [virtualBounds],
+  /// which stays valid regardless and is the fallback for absolute positioning.
+  ///
+  /// Enumeration is a live OS query on every call, not a cached snapshot, so a
+  /// monitor plugged in mid-session appears without a reconnect. It is off the
+  /// hot path by construction: relative [moveCursorBy] never consults it, and
+  /// absolute positioning only does so when the peer names a specific monitor.
+  List<MonitorInfo> get monitors;
 
   /// Bounding box of all displays combined.
   ScreenBounds get virtualBounds;
@@ -199,8 +189,14 @@ final class UnsupportedInputBackend implements InputBackend {
   @override
   void swipe({required int fingerCount, required SwipeDirection direction}) {}
 
+  /// No displays, matching how every other member here degrades.
+  ///
+  /// Empty rather than one synthetic 1920x1080 entry. A fabricated monitor
+  /// would make the phone draw a screen picker for a machine that cannot move a
+  /// cursor at all, and a tap on it would be silently discarded — the exact
+  /// "connected but does nothing" experience this backend exists to prevent.
   @override
-  List<ScreenBounds> get displays => const <ScreenBounds>[];
+  List<MonitorInfo> get monitors => const <MonitorInfo>[];
 
   @override
   ScreenBounds get virtualBounds =>

@@ -24,4 +24,5 @@ export 'src/messages/keyboard.dart';
 export 'src/messages/media.dart';
 export 'src/messages/message.dart';
 export 'src/messages/pairing.dart';
+export 'src/messages/screen.dart';
 export 'src/messages/system.dart';

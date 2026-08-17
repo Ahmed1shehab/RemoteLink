@@ -75,23 +75,49 @@ final class MouseMove extends Message {
 
 /// Absolute cursor position in normalised screen coordinates.
 ///
-/// Coordinates are `[0.0, 1.0]` across the virtual desktop rather than pixels,
-/// so a phone driving a 4K monitor and a 1080p one sends identical bytes and
-/// the desktop resolves against its own current topology. This also survives
-/// the user changing resolution mid-session.
+/// Coordinates are `[0.0, 1.0]` rather than pixels, so a phone driving a 4K
+/// monitor and a 1080p one sends identical bytes and the desktop resolves
+/// against its own current topology. This also survives the user changing
+/// resolution mid-session.
+///
+/// [monitorId] says *what* they are normalised against. Without it, `(0.5,
+/// 0.5)` means the centre of the whole virtual desktop — which on a
+/// two-monitor desk is the seam between the screens, so a tap aimed at the
+/// middle of the left monitor lands nowhere near it. Naming a monitor makes the
+/// pair unambiguous again.
 @immutable
 final class MouseMoveAbsolute extends Message {
   const MouseMoveAbsolute({
     required this.x,
     required this.y,
     this.displayIndex = 0,
+    this.monitorId = 0,
   });
 
   final double x;
   final double y;
 
-  /// Which display to position against; `0` is the primary.
+  /// Superseded by [monitorId]; still written because it has shipped.
+  ///
+  /// Nothing has ever read it. Giving it a meaning now would be the silent kind
+  /// of breaking change the append-only rule exists to prevent — every deployed
+  /// phone sends `0` here and expects virtual-desktop coordinates, so
+  /// re-interpreting `0` as "the primary monitor" would move where their taps
+  /// land without a single byte changing. It stays on the wire, unread, and the
+  /// stable id below carries the real meaning.
   final int displayIndex;
+
+  /// Id of the monitor these coordinates address, from the most recent
+  /// `screenTopology`; `0` for the whole virtual desktop.
+  ///
+  /// Appended after [displayIndex], per PROTOCOL.md §5 — a peer that predates
+  /// this field simply omits it, and its absence decodes as `0`, which is
+  /// exactly the behaviour it already had.
+  ///
+  /// An id rather than an index because indices renumber: unplug the first of
+  /// three monitors and a phone still holding "display 1" starts driving a
+  /// different screen with no error anywhere.
+  final int monitorId;
 
   @override
   MessageType get type => MessageType.mouseMoveAbsolute;
@@ -101,14 +127,25 @@ final class MouseMoveAbsolute extends Message {
     writer
       ..writeFloat32(x)
       ..writeFloat32(y)
-      ..writeVarUint(displayIndex);
+      ..writeVarUint(displayIndex)
+      ..writeVarUint(monitorId);
   }
 
-  static MouseMoveAbsolute readFrom(ByteReader reader) => MouseMoveAbsolute(
-        x: reader.readFloat32(),
-        y: reader.readFloat32(),
-        displayIndex: reader.readVarUint(),
-      );
+  static MouseMoveAbsolute readFrom(ByteReader reader) {
+    final x = reader.readFloat32();
+    final y = reader.readFloat32();
+    final displayIndex = reader.readVarUint();
+    // Conditional, and that is the whole point of appending: reading it
+    // unconditionally would turn every payload from an older phone into a
+    // short_read, and a short_read on a known type closes the session.
+    final monitorId = reader.remaining > 0 ? reader.readVarUint() : 0;
+    return MouseMoveAbsolute(
+      x: x,
+      y: y,
+      displayIndex: displayIndex,
+      monitorId: monitorId,
+    );
+  }
 }
 
 /// Button press or release.

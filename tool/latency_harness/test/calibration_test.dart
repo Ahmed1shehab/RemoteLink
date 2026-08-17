@@ -45,8 +45,13 @@ final class _FakeInputBackend implements InputBackend {
   }
 
   @override
-  List<ScreenBounds> get displays => const <ScreenBounds>[
-        ScreenBounds(x: 0, y: 0, width: 1920, height: 1080),
+  List<MonitorInfo> get monitors => const <MonitorInfo>[
+        MonitorInfo(
+          id: 1,
+          bounds: ScreenBounds(x: 0, y: 0, width: 1920, height: 1080),
+          name: 'Display 1',
+          isPrimary: true,
+        ),
       ];
 
   @override

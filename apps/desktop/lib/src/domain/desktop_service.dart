@@ -273,6 +273,30 @@ final class DesktopService {
         brightnessAvailable: _brightness.isAvailable,
       );
 
+  /// The desk's monitor layout, or `null` when the host cannot report one.
+  ///
+  /// Null rather than an empty topology on a backend that enumerates nothing:
+  /// an empty list is a positive claim that there are no screens, and a phone
+  /// that believed it would hide the touchpad on a machine whose only problem
+  /// is a missing Accessibility grant.
+  ScreenTopology? get currentTopology {
+    final monitors = _input.monitors;
+    if (monitors.isEmpty) return null;
+    return ScreenTopology(<MonitorDescriptor>[
+      for (final monitor in monitors)
+        MonitorDescriptor(
+          id: monitor.id,
+          x: monitor.bounds.x,
+          y: monitor.bounds.y,
+          width: monitor.bounds.width,
+          height: monitor.bounds.height,
+          scaleFactor: monitor.scaleFactor,
+          isPrimary: monitor.isPrimary,
+          name: monitor.name,
+        ),
+    ]);
+  }
+
   /// Emits whenever input availability flips.
   ///
   /// Drives the desktop's permission banner. `AXIsProcessTrusted` offers no
@@ -586,6 +610,13 @@ final class DesktopService {
     // than waiting for the next copy.
     await session.session.send(PermissionGrant(tier: tier));
     await session.session.send(DeviceInfoMessage(describeSelf()));
+
+    // Before the first tap, not on request. A phone that has to ask for the
+    // layout would spend its first absolute move addressing the whole virtual
+    // desktop, which is exactly the mis-aimed tap this feature removes.
+    final topology = currentTopology;
+    if (topology != null) await session.session.send(topology);
+
     final snapshot = await clipboard.snapshot();
     if (snapshot != null) await session.session.send(snapshot);
   }
@@ -679,6 +710,9 @@ final class DesktopService {
     // connected to — it would render a Windows keyboard against a Mac until the
     // next reconnect.
     await request.session.session.send(DeviceInfoMessage(describeSelf()));
+
+    final topology = currentTopology;
+    if (topology != null) await request.session.session.send(topology);
 
     _devices[request.peerId.value] = ConnectedDevice(
       serverSession: request.session,

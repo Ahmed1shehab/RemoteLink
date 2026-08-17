@@ -14,6 +14,7 @@ import 'messages/keyboard.dart';
 import 'messages/media.dart';
 import 'messages/message.dart';
 import 'messages/pairing.dart';
+import 'messages/screen.dart';
 import 'messages/system.dart';
 
 /// Payloads at or above this size are worth compressing.
@@ -177,6 +178,9 @@ final class MessageCodec {
         MessageType.runCommand => RunCommand.readFrom(reader),
         MessageType.systemStatus => SystemStatus.readFrom(reader),
 
+        // Screen.
+        MessageType.screenTopology => ScreenTopology.readFrom(reader),
+
         // Device management.
         MessageType.deviceInfo => DeviceInfoMessage.readFrom(reader),
         MessageType.deviceRename => DeviceRename.readFrom(reader),
@@ -190,7 +194,6 @@ final class MessageCodec {
         MessageType.screenStreamStop ||
         MessageType.screenFrame ||
         MessageType.screenConfigure ||
-        MessageType.screenTopology ||
         MessageType.slideCommand ||
         MessageType.laserPointer ||
         MessageType.presentationBlank ||

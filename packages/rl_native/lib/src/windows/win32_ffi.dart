@@ -65,6 +65,20 @@ const int SM_CYVIRTUALSCREEN = 79;
 const int SM_CXSCREEN = 0;
 const int SM_CYSCREEN = 1;
 
+/// `MONITORINFOF_PRIMARY`, the only flag `MONITORINFO.dwFlags` defines.
+const int MONITORINFOF_PRIMARY = 0x00000001;
+
+/// `MONITOR_DPI_TYPE.MDT_EFFECTIVE_DPI` — the scaling the user chose, which is
+/// what a window actually renders at. Raw and angular DPI describe the panel
+/// rather than the desktop and would report 1x on a 200%-scaled 4K screen.
+const int MDT_EFFECTIVE_DPI = 0;
+
+/// DPI that Windows treats as 100% scaling. Everything else is a ratio to it.
+const int USER_DEFAULT_SCREEN_DPI = 96;
+
+/// `CCHDEVICENAME`, the fixed length of `MONITORINFOEXW.szDevice`.
+const int CCHDEVICENAME = 32;
+
 const int CF_UNICODETEXT = 13;
 const int CF_DIB = 8;
 const int CF_DIBV5 = 17;
@@ -174,6 +188,45 @@ final class POINT extends Struct {
   external int y;
 }
 
+/// `RECT`. Right and bottom are exclusive, Win32's usual convention.
+final class RECT extends Struct {
+  @Int32()
+  external int left;
+
+  @Int32()
+  external int top;
+
+  @Int32()
+  external int right;
+
+  @Int32()
+  external int bottom;
+}
+
+/// `MONITORINFOEXW`.
+///
+/// The `EX` variant rather than plain `MONITORINFO` for one field: `szDevice`,
+/// the `\\.\DISPLAY1` adapter name. That string is the only per-monitor
+/// identity Win32 offers that survives a display reconfiguration — `HMONITOR`
+/// handles do not, and are explicitly documented as not persistent.
+///
+/// `cbSize` selects which of the two layouts the OS fills in, so it must be set
+/// to this struct's size before every call.
+final class MONITORINFOEXW extends Struct {
+  @Uint32()
+  external int cbSize;
+
+  external RECT rcMonitor;
+
+  external RECT rcWork;
+
+  @Uint32()
+  external int dwFlags;
+
+  @Array(CCHDEVICENAME)
+  external Array<Uint16> szDevice;
+}
+
 // ── Function typedefs ────────────────────────────────────────────────────────
 
 typedef _SendInputNative = Uint32 Function(
@@ -192,6 +245,49 @@ typedef GetSystemMetricsDart = int Function(int index);
 
 typedef _GetLastErrorNative = Uint32 Function();
 typedef GetLastErrorDart = int Function();
+
+/// `MONITORENUMPROC`. Returning zero stops enumeration early.
+typedef MonitorEnumProcNative = Int32 Function(
+  IntPtr hMonitor,
+  IntPtr hdc,
+  Pointer<RECT> lprcClip,
+  IntPtr dwData,
+);
+
+typedef _EnumDisplayMonitorsNative = Int32 Function(
+  IntPtr hdc,
+  Pointer<RECT> lprcClip,
+  Pointer<NativeFunction<MonitorEnumProcNative>> lpfnEnum,
+  IntPtr dwData,
+);
+typedef EnumDisplayMonitorsDart = int Function(
+  int hdc,
+  Pointer<RECT> lprcClip,
+  Pointer<NativeFunction<MonitorEnumProcNative>> lpfnEnum,
+  int dwData,
+);
+
+typedef _GetMonitorInfoNative = Int32 Function(
+  IntPtr hMonitor,
+  Pointer<MONITORINFOEXW> lpmi,
+);
+typedef GetMonitorInfoDart = int Function(
+  int hMonitor,
+  Pointer<MONITORINFOEXW> lpmi,
+);
+
+typedef _GetDpiForMonitorNative = Int32 Function(
+  IntPtr hMonitor,
+  Int32 dpiType,
+  Pointer<Uint32> dpiX,
+  Pointer<Uint32> dpiY,
+);
+typedef GetDpiForMonitorDart = int Function(
+  int hMonitor,
+  int dpiType,
+  Pointer<Uint32> dpiX,
+  Pointer<Uint32> dpiY,
+);
 
 typedef _OpenClipboardNative = Int32 Function(IntPtr hWndNewOwner);
 typedef OpenClipboardDart = int Function(int hWndNewOwner);
@@ -282,6 +378,26 @@ final class Win32Bindings {
     getLastError = _kernel32
         .lookupFunction<_GetLastErrorNative, GetLastErrorDart>('GetLastError');
 
+    enumDisplayMonitors = _user32.lookupFunction<_EnumDisplayMonitorsNative,
+        EnumDisplayMonitorsDart>('EnumDisplayMonitors');
+    getMonitorInfo =
+        _user32.lookupFunction<_GetMonitorInfoNative, GetMonitorInfoDart>(
+            'GetMonitorInfoW');
+
+    // Resolved defensively rather than in the initialiser list. `GetDpiForMonitor`
+    // arrived in Windows 8.1 and lives in shcore.dll, not user32; on anything
+    // older the load fails and the whole bindings object would fail with it,
+    // taking mouse and keyboard injection down over a scale factor. A null here
+    // costs the caller a per-monitor DPI it can default to 1.0.
+    try {
+      final shcore = DynamicLibrary.open('shcore.dll');
+      getDpiForMonitor =
+          shcore.lookupFunction<_GetDpiForMonitorNative, GetDpiForMonitorDart>(
+              'GetDpiForMonitor');
+    } on ArgumentError {
+      getDpiForMonitor = null;
+    }
+
     openClipboard =
         _user32.lookupFunction<_OpenClipboardNative, OpenClipboardDart>(
             'OpenClipboard');
@@ -339,6 +455,12 @@ final class Win32Bindings {
   late final GetCursorPosDart getCursorPos;
   late final GetSystemMetricsDart getSystemMetrics;
   late final GetLastErrorDart getLastError;
+
+  late final EnumDisplayMonitorsDart enumDisplayMonitors;
+  late final GetMonitorInfoDart getMonitorInfo;
+
+  /// Null on Windows 8 and earlier, where shcore.dll does not exist.
+  late final GetDpiForMonitorDart? getDpiForMonitor;
 
   late final OpenClipboardDart openClipboard;
   late final CloseClipboardDart closeClipboard;

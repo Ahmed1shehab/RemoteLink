@@ -147,6 +147,11 @@ enum MessageType {
   screenConfigure(0x0604),
 
   /// Server → client. Monitor topology and DPI.
+  ///
+  /// The only implemented code in this range; the four above still decode as
+  /// opaque bytes until screen streaming lands. It is here rather than with
+  /// pointer input because the layout it describes is the same layout a stream
+  /// would send, and splitting it would have meant two sources of truth.
   screenTopology(0x0605),
 
   // ── 0x07xx file transfer ──────────────────────────────────────────────────
