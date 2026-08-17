@@ -150,12 +150,29 @@ class ClipboardView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final clipboard = ref.watch(clipboardControllerProvider);
     final controller = ref.read(clipboardControllerProvider.notifier);
+    final clipboardSettings = ref.watch(clipboardSettingsProvider);
     final connected =
         ref.watch(clientStateProvider).valueOrNull == ClientState.connected;
+    final syncEnabled =
+        clipboardSettings.syncFromDesktop || clipboardSettings.syncToDesktop;
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: <Widget>[
+        Card(
+          child: SwitchListTile(
+            title: const Text('Clipboard sync'),
+            subtitle: Text(
+              syncEnabled
+                  ? 'Syncing with connected computer'
+                  : 'Clipboard sync is paused',
+            ),
+            value: syncEnabled,
+            onChanged: (val) => controller.toggleSync(val),
+            secondary: const Icon(Icons.sync_alt),
+          ),
+        ),
+        const SizedBox(height: 16),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -196,7 +213,7 @@ class ClipboardView extends ConsumerWidget {
         ),
         const SizedBox(height: 16),
         FilledButton.icon(
-          onPressed: connected && !clipboard.sending
+          onPressed: connected && syncEnabled && !clipboard.sending
               ? () => controller.sendCurrent()
               : null,
           icon: const Icon(Icons.upload),
@@ -204,7 +221,8 @@ class ClipboardView extends ConsumerWidget {
         ),
         const SizedBox(height: 8),
         OutlinedButton.icon(
-          onPressed: connected ? controller.requestFromDesktop : null,
+          onPressed:
+              connected && syncEnabled ? controller.requestFromDesktop : null,
           icon: const Icon(Icons.download),
           label: const Text('Get the computer’s clipboard'),
         ),
