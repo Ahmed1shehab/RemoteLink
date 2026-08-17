@@ -83,9 +83,18 @@ void main() {
       // Cross-checked against dart:io rather than against a hard-coded name:
       // interface naming differs per host, but any adapter this backend reports
       // an IPv4 address for must be one `NetworkInterface` also sees.
+      //
+      // `includeLinkLocal` is not a detail: it defaults to false, while the
+      // backend goes through `getifaddrs` and enumerates 169.254 addresses like
+      // any other. So the reference set was narrower than the thing it was
+      // checking, and the test failed on any host that happened to hold a
+      // link-local address at that moment — which a Mac does while debugging
+      // over wireless to an iPhone, and does not a minute later. It passed
+      // here for months because this machine usually has none.
       final known = <String>{
         for (final interface in await NetworkInterface.list(
           includeLoopback: true,
+          includeLinkLocal: true,
           type: InternetAddressType.IPv4,
         ))
           for (final address in interface.addresses) address.address,
