@@ -78,16 +78,29 @@ final class ClipboardSyncService {
     required ClipboardBackend clipboard,
     required this.localDeviceId,
     Clock? clock,
+    ClipboardHistory? history,
     this.pollInterval = kClipboardPollInterval,
     bool allowImages = true,
   })  : _clipboard = clipboard,
         _clock = clock ?? SystemClock(),
-        _allowImages = allowImages;
+        _allowImages = allowImages,
+        _providedHistory = history;
 
   final ClipboardBackend _clipboard;
   final DeviceId localDeviceId;
   final Clock _clock;
   final Duration pollInterval;
+
+  final ClipboardHistory? _providedHistory;
+
+  /// The last few things copied on this computer.
+  ///
+  /// Injected when the app owns it — the UI needs the same instance the sync
+  /// path writes to, and it outlives any single service restart — and created
+  /// here otherwise so a test or a headless run gets a working history without
+  /// having to assemble one.
+  late final ClipboardHistory history =
+      _providedHistory ?? ClipboardHistory(clock: _clock);
 
   final Log _log = Log.scoped('desktop.clipboard');
   final StreamController<ClipboardUpdate> _outbound =
@@ -170,6 +183,41 @@ final class ClipboardSyncService {
     return false;
   }
 
+  /// The only path from the clipboard into the history.
+  ///
+  /// It re-reads [ClipboardBackend.isConcealed] rather than relying on the
+  /// early return in [_poll] having already covered it. That looks redundant
+  /// today and is the point: the caller's check is an ordering property of one
+  /// method, and ordering properties do not survive refactoring, while a check
+  /// welded to the recording call does. A password manager's entry becoming a
+  /// persisted history row is the one failure this feature cannot have.
+  void _recordHistory({
+    required ClipboardHistoryKind kind,
+    required Uint8List data,
+    required Uint8List hash,
+    bool markedSensitive = false,
+  }) {
+    history.record(
+      kind: kind,
+      data: data,
+      contentHash: hash,
+      isConcealed: markedSensitive || _clipboard.isConcealed,
+    );
+  }
+
+  /// Maps a wire flavour to a history kind.
+  ///
+  /// A local mapping rather than a shared enum: the history is not a message
+  /// type, and giving it one would put a UI list inside the append-only wire
+  /// contract for no gain.
+  static ClipboardHistoryKind _kindFor(ClipboardContentType type) =>
+      switch (type) {
+        ClipboardContentType.url => ClipboardHistoryKind.url,
+        ClipboardContentType.html => ClipboardHistoryKind.html,
+        ClipboardContentType.imagePng => ClipboardHistoryKind.image,
+        _ => ClipboardHistoryKind.text,
+      };
+
   Future<void> _poll() async {
     if (!_enabled) return;
 
@@ -205,14 +253,20 @@ final class ClipboardSyncService {
 
       _currentHash = hash;
 
+      final isUrl = _looksLikeUrl(text);
+      _recordHistory(
+        kind: isUrl ? ClipboardHistoryKind.url : ClipboardHistoryKind.text,
+        data: Uint8List.fromList(bytes),
+        hash: hash,
+      );
+
       final update = ClipboardUpdate(
         items: <ClipboardItem>[
           // A URL is sent as its own flavour so the phone can offer to open it
           // and macOS can populate the URL pasteboard type.
           ClipboardItem(
-            contentType: _looksLikeUrl(text)
-                ? ClipboardContentType.url
-                : ClipboardContentType.text,
+            contentType:
+                isUrl ? ClipboardContentType.url : ClipboardContentType.text,
             data: Uint8List.fromList(bytes),
           ),
         ],
@@ -258,6 +312,12 @@ final class ClipboardSyncService {
 
         _currentHash = hash;
 
+        _recordHistory(
+          kind: ClipboardHistoryKind.image,
+          data: data,
+          hash: hash,
+        );
+
         final update = ClipboardUpdate(
           items: <ClipboardItem>[
             ClipboardItem(
@@ -302,6 +362,23 @@ final class ClipboardSyncService {
       _clipboard.writeText(text);
       _currentHash = update.contentHash;
 
+      // Content that arrived from the phone is now on this computer's
+      // clipboard, so it belongs in this computer's history. The poller will
+      // recognise it as our own write and not record it twice.
+      var flavour = ClipboardHistoryKind.text;
+      for (final item in update.items) {
+        if (item.contentType == ClipboardContentType.imagePng) continue;
+        flavour = _kindFor(item.contentType);
+        break;
+      }
+
+      _recordHistory(
+        kind: flavour,
+        data: Uint8List.fromList(utf8.encode(text)),
+        hash: update.contentHash,
+        markedSensitive: update.isSensitive,
+      );
+
       _log.debug(
         () => 'applied a clipboard update from ${update.originDeviceId}',
         fields: <String, Object?>{'bytes': text.length},
@@ -332,6 +409,13 @@ final class ClipboardSyncService {
     _recordSelfWrite(update.contentHash);
     _clipboard.writeImagePng(imageItem.data);
     _currentHash = update.contentHash;
+
+    _recordHistory(
+      kind: ClipboardHistoryKind.image,
+      data: imageItem.data,
+      hash: update.contentHash,
+      markedSensitive: update.isSensitive,
+    );
 
     _log.debug(
       () => 'applied a clipboard image update from ${update.originDeviceId}',
@@ -396,6 +480,29 @@ final class ClipboardSyncService {
     return null;
   }
 
+  /// Puts a history entry back on this computer's clipboard.
+  ///
+  /// Deliberately does *not* record a self-write hash. Re-copying is a user
+  /// action, indistinguishable in intent from copying the thing again by hand,
+  /// so the poller should see it, broadcast it to the phone, and float it back
+  /// to the top of the history — which is exactly what happens if we stay out
+  /// of the way.
+  bool recopy(ClipboardHistoryEntry entry) {
+    if (!_clipboard.isAvailable) return false;
+
+    if (entry.isImage) {
+      if (!_allowImages) return false;
+      _clipboard.writeImagePng(entry.data);
+    } else {
+      final text = entry.text;
+      if (text == null || text.isEmpty) return false;
+      _clipboard.writeText(text);
+    }
+
+    _log.debug(() => 'copied a history entry back to the clipboard');
+    return true;
+  }
+
   /// Decides a simultaneous-change conflict.
   ///
   /// Deterministic on both sides from the same inputs, so the two devices
@@ -433,6 +540,10 @@ final class ClipboardSyncService {
   Future<void> dispose() async {
     _poller?.cancel();
     _poller = null;
+    // Only the history this service made is this service's to close. An
+    // injected one outlives the service — the window still renders it after a
+    // restart of the listener.
+    if (_providedHistory == null) await history.dispose();
     await _outbound.close();
   }
 }

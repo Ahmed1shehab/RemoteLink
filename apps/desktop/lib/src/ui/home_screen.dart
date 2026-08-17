@@ -9,6 +9,7 @@ import 'package:rl_protocol/rl_protocol.dart';
 import '../app/providers.dart';
 import '../domain/desktop_service.dart';
 import '../domain/transfer_model.dart';
+import 'clipboard_history_panel.dart';
 import 'diagnostics_screen.dart';
 
 /// The desktop's only window: status, connected devices, pairing, and file transfers.
@@ -116,6 +117,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           onCancel: _cancelTransfer,
           onRetry: _retryTransfer,
         ),
+        const SizedBox(height: 24),
+        const ClipboardHistoryPanel(),
       ],
     );
   }

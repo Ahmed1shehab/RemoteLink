@@ -117,8 +117,10 @@ final class DesktopService {
     ClipboardBackend? clipboardBackend,
     MediaBackend? media,
     SystemInfoBackend? systemInfo,
+    ClipboardHistory? clipboardHistory,
     this.incomingTransferStore,
-  })  : _clock = clock,
+  })  : _clipboardHistory = clipboardHistory,
+        _clock = clock,
         _input = input ?? NativeBackends.createInput(),
         _clipboardBackend =
             clipboardBackend ?? NativeBackends.createClipboard(),
@@ -131,6 +133,10 @@ final class DesktopService {
   final String appVersion;
   final int servicePort;
   final IncomingTransferStore? incomingTransferStore;
+
+  /// Supplied by the app so the history survives a service restart; `null` in
+  /// a headless run, where [ClipboardSyncService] makes its own.
+  final ClipboardHistory? _clipboardHistory;
 
   final Clock _clock;
   final InputBackend _input;
@@ -148,6 +154,7 @@ final class DesktopService {
     clipboard: _clipboardBackend,
     localDeviceId: identity.id,
     clock: _clock,
+    history: _clipboardHistory,
   );
 
   late final CommandDispatcher _dispatcher = CommandDispatcher(
