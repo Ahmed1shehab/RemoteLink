@@ -611,5 +611,234 @@ void main() {
 
       await service.dispose();
     });
+
+    test(
+        'toggling off for one device stops sync for that device ONLY, with a second connected device still receiving updates',
+        () async {
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        pollInterval: testPollInterval,
+      );
+
+      const device1 = DeviceId('phone-device-1');
+      const device2 = DeviceId('phone-device-2');
+
+      // Both devices are enabled by default
+      expect(service.isPeerEnabled(device1), isTrue);
+      expect(service.isPeerEnabled(device2), isTrue);
+
+      // 1. Toggle off sync for device 1 via ClipboardSyncToggle
+      service.handleToggle(
+        device1,
+        const ClipboardSyncToggle(
+          enabled: false,
+          allowImages: false,
+          allowFiles: false,
+        ),
+      );
+
+      expect(service.isPeerEnabled(device1), isFalse);
+      expect(service.isPeerEnabled(device2), isTrue);
+
+      // 2. Local copy on the host
+      final outboundUpdates = <ClipboardUpdate>[];
+      final sub = service.outbound.listen(outboundUpdates.add);
+
+      service.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      backend.copyLocally('broadcast message');
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      expect(outboundUpdates, hasLength(1));
+      final update = outboundUpdates.first;
+      expect(update.plainText, equals('broadcast message'));
+
+      // Outbound recipient filtering simulation matching DesktopService._broadcastClipboard
+      final targets =
+          <DeviceId>[device1, device2].where(service.isPeerEnabled).toList();
+      expect(targets, contains(device2));
+      expect(targets, isNot(contains(device1)));
+
+      // 3. Inbound update from device 1 (disabled) is rejected and NOT written to host
+      final updateFromDevice1 = await _makeUpdate(
+        'from phone 1',
+        originDeviceId: device1.value,
+      );
+      final applied1 = await service.applyRemote(updateFromDevice1);
+      expect(applied1, isFalse);
+      expect(backend.readText(), equals('broadcast message')); // unchanged
+
+      // 4. Inbound update from device 2 (enabled) is applied and written to host
+      final updateFromDevice2 = await _makeUpdate(
+        'from phone 2',
+        originDeviceId: device2.value,
+      );
+      final applied2 = await service.applyRemote(updateFromDevice2);
+      expect(applied2, isTrue);
+      expect(backend.readText(), equals('from phone 2'));
+
+      await sub.cancel();
+      await service.dispose();
+    });
+
+    test('the setting survives a simulated reconnect', () async {
+      final backend = FakeClipboardBackend(initialText: 'current clipboard');
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        pollInterval: testPollInterval,
+      );
+
+      const device1 = DeviceId('phone-device-1');
+      const device2 = DeviceId('phone-device-2');
+
+      // Toggle off device 1
+      service.handleToggle(
+        device1,
+        const ClipboardSyncToggle(
+          enabled: false,
+          allowImages: false,
+          allowFiles: false,
+        ),
+      );
+
+      expect(service.isPeerEnabled(device1), isFalse);
+
+      // Simulate device 1 reconnecting and requesting snapshot
+      final snap1 = await service.snapshot(peerId: device1);
+      expect(snap1, isNull);
+
+      // Device 2 requesting snapshot gets the content
+      final snap2 = await service.snapshot(peerId: device2);
+      expect(snap2, isNotNull);
+      expect(snap2!.plainText, equals('current clipboard'));
+
+      // Inbound from device 1 is still rejected after reconnect
+      final update1 = await _makeUpdate(
+        'reconnected phone 1',
+        originDeviceId: device1.value,
+      );
+      expect(await service.applyRemote(update1), isFalse);
+
+      // Re-enabling device 1 restores sync and snapshot
+      service.handleToggle(
+        device1,
+        const ClipboardSyncToggle(
+          enabled: true,
+          allowImages: true,
+          allowFiles: false,
+        ),
+      );
+      expect(service.isPeerEnabled(device1), isTrue);
+      final restoredSnap = await service.snapshot(peerId: device1);
+      expect(restoredSnap, isNotNull);
+      expect(restoredSnap!.plainText, equals('current clipboard'));
+
+      final applied = await service.applyRemote(update1);
+      expect(applied, isTrue);
+      expect(backend.readText(), equals('reconnected phone 1'));
+
+      await service.dispose();
+    });
+
+    test(
+        'toggling off does not disturb concealed-content handling or the echo suppression already there',
+        () async {
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        pollInterval: testPollInterval,
+      );
+
+      const device1 = DeviceId('phone-device-1');
+      const device2 = DeviceId('phone-device-2');
+
+      // Disable device 1
+      service.handleToggle(
+        device1,
+        const ClipboardSyncToggle(
+          enabled: false,
+          allowImages: false,
+          allowFiles: false,
+        ),
+      );
+
+      final outboundUpdates = <ClipboardUpdate>[];
+      final sub = service.outbound.listen(outboundUpdates.add);
+
+      service.start();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+
+      // 1. Concealed text is not broadcast
+      backend.copyLocally('secret-password', concealed: true);
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      expect(outboundUpdates, isEmpty);
+
+      // 2. Echo suppression on device 2 (enabled device)
+      final updateFromDevice2 = await _makeUpdate(
+        'device 2 text',
+        originDeviceId: device2.value,
+      );
+      final applied = await service.applyRemote(updateFromDevice2);
+      expect(applied, isTrue);
+      expect(backend.readText(), equals('device 2 text'));
+
+      // Wait for poll - should NOT echo back
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      expect(outboundUpdates, isEmpty);
+
+      // 3. Normal local copy is broadcast
+      backend.copyLocally('normal text', concealed: false);
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      expect(outboundUpdates, hasLength(1));
+      expect(outboundUpdates.first.plainText, equals('normal text'));
+
+      await sub.cancel();
+      await service.dispose();
+    });
+
+    test(
+        'respects allowImages directionally per device without disabling text sync',
+        () async {
+      final backend = FakeClipboardBackend();
+      final service = ClipboardSyncService(
+        clipboard: backend,
+        localDeviceId: localDeviceId,
+        pollInterval: testPollInterval,
+      );
+
+      const device1 = DeviceId('phone-device-1');
+
+      // Device 1 allows text but disallows images
+      service.handleToggle(
+        device1,
+        const ClipboardSyncToggle(
+          enabled: true,
+          allowImages: false,
+          allowFiles: false,
+        ),
+      );
+
+      expect(service.isPeerEnabled(device1), isTrue);
+      expect(service.allowsImagesForPeer(device1), isFalse);
+
+      // Text from device 1 is applied
+      final textUpdate =
+          await _makeUpdate('text ok', originDeviceId: device1.value);
+      expect(await service.applyRemote(textUpdate), isTrue);
+      expect(backend.readText(), equals('text ok'));
+
+      // Image from device 1 is rejected
+      final samplePng = Uint8List.fromList(<int>[0x89, 0x50, 0x4E, 0x47, 1, 2]);
+      final imageUpdate =
+          await _makeImageUpdate(samplePng, originDeviceId: device1.value);
+      expect(await service.applyRemote(imageUpdate), isFalse);
+
+      await service.dispose();
+    });
   });
 }

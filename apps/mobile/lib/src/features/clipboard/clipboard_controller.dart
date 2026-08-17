@@ -101,9 +101,40 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     _messages = client.messages.listen(
       (message) {
         if (message is ClipboardUpdate) unawaited(_applyRemote(message));
+        if (message is ClipboardSyncToggle) unawaited(_onSyncToggle(message));
       },
       cancelOnError: false,
     );
+  }
+
+  Future<void> _onSyncToggle(ClipboardSyncToggle toggle) async {
+    await _ref
+        .read(clipboardSettingsProvider.notifier)
+        .setSyncFromDesktop(toggle.enabled);
+    await _ref
+        .read(clipboardSettingsProvider.notifier)
+        .setSyncToDesktop(toggle.enabled);
+  }
+
+  /// Toggles clipboard sync on or off, and notifies the connected desktop.
+  Future<void> toggleSync(bool enabled) async {
+    await _ref
+        .read(clipboardSettingsProvider.notifier)
+        .setSyncFromDesktop(enabled);
+    await _ref
+        .read(clipboardSettingsProvider.notifier)
+        .setSyncToDesktop(enabled);
+
+    final client = _ref.read(clientProvider).valueOrNull;
+    if (client != null && client.isConnected) {
+      await client.send(
+        ClipboardSyncToggle(
+          enabled: enabled,
+          allowImages: enabled,
+          allowFiles: false,
+        ),
+      );
+    }
   }
 
   /// Writes an update from the computer into the phone's clipboard.

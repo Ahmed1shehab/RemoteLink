@@ -46,6 +46,43 @@ final class _SelfWrite {
   final int recordedAtMicros;
 }
 
+/// Per-peer clipboard sync configuration.
+final class PeerClipboardConfig {
+  const PeerClipboardConfig({
+    this.enabled = true,
+    this.allowImages = true,
+    this.allowFiles = false,
+  });
+
+  final bool enabled;
+  final bool allowImages;
+  final bool allowFiles;
+
+  PeerClipboardConfig copyWith({
+    bool? enabled,
+    bool? allowImages,
+    bool? allowFiles,
+  }) =>
+      PeerClipboardConfig(
+        enabled: enabled ?? this.enabled,
+        allowImages: allowImages ?? this.allowImages,
+        allowFiles: allowFiles ?? this.allowFiles,
+      );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'enabled': enabled,
+        'allowImages': allowImages,
+        'allowFiles': allowFiles,
+      };
+
+  factory PeerClipboardConfig.fromJson(Map<String, dynamic> json) =>
+      PeerClipboardConfig(
+        enabled: json['enabled'] as bool? ?? true,
+        allowImages: json['allowImages'] as bool? ?? true,
+        allowFiles: json['allowFiles'] as bool? ?? false,
+      );
+}
+
 /// Mirrors the clipboard between this computer and connected phones.
 ///
 /// The product requirement is that copying on one device and pasting on the
@@ -106,18 +143,94 @@ final class ClipboardSyncService {
   bool _enabled = true;
   bool _allowImages = true;
 
+  /// Per-peer clipboard configurations, keeping per-session settings separate
+  /// from the global enable flag.
+  final Map<String, PeerClipboardConfig> _peerConfigs =
+      <String, PeerClipboardConfig>{};
+
   /// Updates to broadcast to connected phones.
   Stream<ClipboardUpdate> get outbound => _outbound.stream;
 
   bool get isEnabled => _enabled;
 
-  /// Turns mirroring on or off for this computer.
+  /// Turns mirroring on or off for this computer globally.
   void setEnabled({required bool enabled, bool allowImages = true}) {
     _enabled = enabled;
     _allowImages = allowImages;
     if (!enabled) {
       _log.info('clipboard mirroring disabled');
     }
+  }
+
+  /// Sets configuration for a specific peer.
+  void setPeerConfig(DeviceId peerId, PeerClipboardConfig config) {
+    _peerConfigs[peerId.value] = config;
+  }
+
+  /// Sets whether clipboard sync is enabled for a specific peer.
+  void setPeerEnabled(
+    DeviceId peerId, {
+    required bool enabled,
+    bool allowImages = true,
+    bool allowFiles = false,
+  }) {
+    _peerConfigs[peerId.value] = PeerClipboardConfig(
+      enabled: enabled,
+      allowImages: allowImages,
+      allowFiles: allowFiles,
+    );
+  }
+
+  /// Returns the current configuration for [peerId], defaulting to enabled.
+  PeerClipboardConfig getPeerConfig(DeviceId peerId) =>
+      _peerConfigs[peerId.value] ?? const PeerClipboardConfig();
+
+  /// Whether sync is enabled for [peerId] (requires global enable AND peer enable).
+  bool isPeerEnabled(DeviceId peerId) => isPeerEnabledById(peerId.value);
+
+  /// Whether sync is enabled for [peerId] string.
+  bool isPeerEnabledById(String peerId) =>
+      _enabled && (_peerConfigs[peerId]?.enabled ?? true);
+
+  /// Whether images are permitted for [peerId] (requires global allowImages AND peer allowImages).
+  bool allowsImagesForPeer(DeviceId peerId) =>
+      allowsImagesForPeerId(peerId.value);
+
+  /// Whether images are permitted for [peerId] string.
+  bool allowsImagesForPeerId(String peerId) =>
+      _allowImages &&
+      isPeerEnabledById(peerId) &&
+      (_peerConfigs[peerId]?.allowImages ?? true);
+
+  /// Whether files are permitted for [peerId].
+  bool allowsFilesForPeer(DeviceId peerId) =>
+      isPeerEnabled(peerId) &&
+      (_peerConfigs[peerId.value]?.allowFiles ?? false);
+
+  /// Handles an inbound [ClipboardSyncToggle] message from [peerId].
+  void handleToggle(DeviceId peerId, ClipboardSyncToggle toggle) {
+    setPeerConfig(
+      peerId,
+      PeerClipboardConfig(
+        enabled: toggle.enabled,
+        allowImages: toggle.allowImages,
+        allowFiles: toggle.allowFiles,
+      ),
+    );
+    _log.info(
+      'clipboard sync toggled for peer',
+      fields: <String, Object?>{
+        'peer': peerId.value,
+        'enabled': toggle.enabled,
+        'allowImages': toggle.allowImages,
+        'allowFiles': toggle.allowFiles,
+      },
+    );
+  }
+
+  /// Cleans up configuration for a forgotten or revoked peer.
+  void removePeer(DeviceId peerId) {
+    _peerConfigs.remove(peerId.value);
   }
 
   /// Begins watching.
@@ -283,8 +396,19 @@ final class ClipboardSyncService {
   /// Returns `false` when the update was ignored, which the caller reports in
   /// the connection status so a user watching the diagnostics panel can see
   /// that sync is working even when nothing appears to happen.
-  Future<bool> applyRemote(ClipboardUpdate update) async {
+  Future<bool> applyRemote(
+    ClipboardUpdate update, {
+    DeviceId? peerId,
+  }) async {
     if (!_enabled || !_clipboard.isAvailable) return false;
+    final peerIdString = peerId?.value ?? update.originDeviceId;
+    if (peerIdString.isNotEmpty && !isPeerEnabledById(peerIdString)) {
+      _log.debug(
+        () =>
+            'ignoring clipboard update from $peerIdString; sync disabled for peer',
+      );
+      return false;
+    }
     if (update.isSensitive) {
       _log.debug(() => 'ignoring an update marked sensitive');
       return false;
@@ -310,6 +434,13 @@ final class ClipboardSyncService {
     }
 
     if (!_allowImages) return false;
+    if (peerIdString.isNotEmpty && !allowsImagesForPeerId(peerIdString)) {
+      _log.debug(
+        () =>
+            'ignoring clipboard image update from $peerIdString; image sync disabled for peer',
+      );
+      return false;
+    }
 
     ClipboardItem? imageItem;
     for (final item in update.items) {
@@ -345,8 +476,9 @@ final class ClipboardSyncService {
   /// A phone that was asleep while the user copied still gets the content the
   /// moment it wakes, which is what makes "copy here, walk over there, paste"
   /// work rather than only syncing while both devices happen to be awake.
-  Future<ClipboardUpdate?> snapshot() async {
+  Future<ClipboardUpdate?> snapshot({DeviceId? peerId}) async {
     if (!_enabled || !_clipboard.isAvailable) return null;
+    if (peerId != null && !isPeerEnabled(peerId)) return null;
     if (_clipboard.isConcealed) return null;
 
     final text = _clipboard.readText();
@@ -370,7 +502,9 @@ final class ClipboardSyncService {
       );
     }
 
-    if (_allowImages) {
+    final allowsImages =
+        _allowImages && (peerId == null || allowsImagesForPeer(peerId));
+    if (allowsImages) {
       final imageBytes = _clipboard.readImagePng();
       if (imageBytes != null &&
           imageBytes.isNotEmpty &&

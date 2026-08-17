@@ -104,6 +104,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         onRevoke: () => _revoke(device.id),
                         onTierChanged: (tier) => _setTier(device.id, tier),
                         onRename: () => _renameDevice(device.id, device.name),
+                        onClipboardSyncChanged: (enabled) =>
+                            _setClipboardSync(device.id, enabled),
                       ),
                   ],
                 ),
@@ -133,6 +135,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Future<void> _setTier(DeviceId deviceId, PermissionTier tier) async {
     final service = await ref.read(desktopServiceProvider.future);
     await service.setTier(deviceId, tier);
+  }
+
+  Future<void> _setClipboardSync(DeviceId deviceId, bool enabled) async {
+    final service = await ref.read(desktopServiceProvider.future);
+    await service.setPeerClipboardSync(deviceId, enabled);
   }
 
   Future<void> _cancelTransfer(String transferId) async {
@@ -852,16 +859,20 @@ class _DeviceTile extends StatelessWidget {
     required this.onRevoke,
     required this.onTierChanged,
     required this.onRename,
+    required this.onClipboardSyncChanged,
   });
 
   final ConnectedDevice device;
   final VoidCallback onRevoke;
   final ValueChanged<PermissionTier> onTierChanged;
   final VoidCallback onRename;
+  final ValueChanged<bool> onClipboardSyncChanged;
 
   @override
   Widget build(BuildContext context) {
     final quality = device.quality;
+    final canSyncClipboard = device.tier.canSyncClipboard;
+
     return Card(
       child: ListTile(
         leading: Icon(
@@ -877,6 +888,19 @@ class _DeviceTile extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
+            Tooltip(
+              message: canSyncClipboard
+                  ? (device.clipboardSyncEnabled
+                      ? 'Clipboard sync enabled'
+                      : 'Clipboard sync disabled')
+                  : 'Clipboard sync not permitted at current tier',
+              child: Switch(
+                value: canSyncClipboard && device.clipboardSyncEnabled,
+                onChanged: canSyncClipboard
+                    ? (val) => onClipboardSyncChanged(val)
+                    : null,
+              ),
+            ),
             IconButton(
               icon: const Icon(Icons.edit_outlined),
               tooltip: 'Rename this device',

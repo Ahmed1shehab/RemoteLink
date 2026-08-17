@@ -24,6 +24,7 @@ final class CommandDispatcher {
     required this.onOpenUrl,
     required this.onRunCommand,
     required this.onClipboardUpdate,
+    required this.onClipboardSyncToggle,
     required this.onMediaCommand,
     required this.onVolumeCommand,
     required this.onBrightnessCommand,
@@ -42,6 +43,7 @@ final class CommandDispatcher {
   final void Function(OpenUrl command) onOpenUrl;
   final void Function(RunCommand command) onRunCommand;
   final void Function(ClipboardUpdate update) onClipboardUpdate;
+  final void Function(ClipboardSyncToggle toggle) onClipboardSyncToggle;
   final void Function(MediaCommand command) onMediaCommand;
   final void Function(VolumeCommand command) onVolumeCommand;
   final void Function(BrightnessCommand command) onBrightnessCommand;
@@ -130,6 +132,9 @@ final class CommandDispatcher {
 
       case ClipboardUpdate():
         onClipboardUpdate(message);
+
+      case ClipboardSyncToggle():
+        onClipboardSyncToggle(message);
 
       case MediaCommand():
         onMediaCommand(message);

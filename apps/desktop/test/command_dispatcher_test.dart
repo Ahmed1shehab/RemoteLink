@@ -243,6 +243,51 @@ void main() {
       });
     }
   });
+
+  group('CommandDispatcher ClipboardSyncToggle across PermissionTier', () {
+    const toggleCommand = ClipboardSyncToggle(
+      enabled: false,
+      allowImages: false,
+      allowFiles: false,
+    );
+
+    test('denies ClipboardSyncToggle at readOnly tier', () {
+      var called = false;
+      final dispatcher = createTestDispatcher(
+        onClipboardSyncToggle: (_) => called = true,
+      );
+
+      final result =
+          dispatcher.dispatch(toggleCommand, PermissionTier.readOnly);
+
+      expect(result, isFalse);
+      expect(called, isFalse);
+      expect(dispatcher.deniedCount, 1);
+      expect(dispatcher.appliedCount, 0);
+    });
+
+    for (final tier in <PermissionTier>[
+      PermissionTier.standard,
+      PermissionTier.extended,
+      PermissionTier.admin,
+    ]) {
+      test('routes ClipboardSyncToggle at ${tier.name} tier', () {
+        ClipboardSyncToggle? received;
+        final dispatcher = createTestDispatcher(
+          onClipboardSyncToggle: (toggle) => received = toggle,
+        );
+
+        final result = dispatcher.dispatch(toggleCommand, tier);
+
+        expect(result, isTrue);
+        expect(dispatcher.appliedCount, 1);
+        expect(dispatcher.deniedCount, 0);
+        expect(received, isNotNull);
+        expect(received!.enabled, isFalse);
+        expect(received!.allowImages, isFalse);
+      });
+    }
+  });
 }
 
 class _RecordingInputBackend implements InputBackend {

@@ -70,11 +70,13 @@ final class ConnectedDevice {
     required this.serverSession,
     required this.tier,
     required this.name,
+    this.clipboardSyncEnabled = true,
   });
 
   final ServerSession serverSession;
   final PermissionTier tier;
   final String name;
+  final bool clipboardSyncEnabled;
 
   DeviceId get id => serverSession.peerId;
   String get address => serverSession.address;
@@ -125,6 +127,7 @@ final class DesktopService {
     SystemInfoBackend? systemInfo,
     NetworkAdapterBackend? networkAdapters,
     this.incomingTransferStore,
+    this.peerClipboardSettingsFile,
   })  : _clock = clock,
         _input = input ?? NativeBackends.createInput(),
         _clipboardBackend =
@@ -141,6 +144,7 @@ final class DesktopService {
   final String appVersion;
   final int servicePort;
   final IncomingTransferStore? incomingTransferStore;
+  final File? peerClipboardSettingsFile;
 
   final Clock _clock;
   final InputBackend _input;
@@ -166,6 +170,7 @@ final class DesktopService {
     input: _input,
     platform: NativeBackends.currentPlatform,
     onClipboardUpdate: _onRemoteClipboard,
+    onClipboardSyncToggle: _onClipboardSyncToggle,
     onPowerCommand: _onPowerCommand,
     onLaunchApplication: _onLaunchApplication,
     onOpenUrl: _onOpenUrl,
@@ -182,6 +187,8 @@ final class DesktopService {
   BonjourAdvertiser? _bonjour;
 
   final Map<String, ConnectedDevice> _devices = <String, ConnectedDevice>{};
+  final Map<String, PeerClipboardConfig> _peerClipboardSettings =
+      <String, PeerClipboardConfig>{};
   final Map<String, StreamSubscription<Message>> _messageSubscriptions =
       <String, StreamSubscription<Message>>{};
   final Map<String, FileTransferReceiver> _transferReceivers =
@@ -400,6 +407,7 @@ final class DesktopService {
       clock: _clock,
       port: servicePort,
     );
+    await _loadPeerClipboardSettings();
     await server.start();
     _server = server;
 
@@ -506,7 +514,6 @@ final class DesktopService {
       // The UDP beacon picks this up on its next tick for free, but a DNS-SD
       // TXT record is only read at resolve time, so it has to be republished.
       unawaited(_bonjour?.refresh() ?? Future<void>.value());
-
       _log.info(
         'input availability changed',
         fields: <String, Object?>{'available': available},
@@ -524,10 +531,17 @@ final class DesktopService {
         ? PermissionTier.readOnly
         : PermissionTier.fromWire(peer.permissionTier);
 
+    final savedConfig = _peerClipboardSettings[session.peerId.value];
+    if (savedConfig != null) {
+      clipboard.setPeerConfig(session.peerId, savedConfig);
+    }
+    final isClipboardEnabled = clipboard.isPeerEnabled(session.peerId);
+
     _devices[session.peerId.value] = ConnectedDevice(
       serverSession: session,
       tier: tier,
       name: peer?.name ?? session.peerId.short,
+      clipboardSyncEnabled: isClipboardEnabled,
     );
     _publishDevices();
 
@@ -586,7 +600,7 @@ final class DesktopService {
     // than waiting for the next copy.
     await session.session.send(PermissionGrant(tier: tier));
     await session.session.send(DeviceInfoMessage(describeSelf()));
-    final snapshot = await clipboard.snapshot();
+    final snapshot = await clipboard.snapshot(peerId: session.peerId);
     if (snapshot != null) await session.session.send(snapshot);
   }
 
@@ -602,11 +616,12 @@ final class DesktopService {
           serverSession: session,
           tier: device.tier,
           name: effectiveName,
+          clipboardSyncEnabled: device.clipboardSyncEnabled,
         );
         _publishDevices();
 
       case ClipboardRequest():
-        final snapshot = await clipboard.snapshot();
+        final snapshot = await clipboard.snapshot(peerId: session.peerId);
         if (snapshot != null) await session.session.send(snapshot);
 
       case DeviceRename():
@@ -684,10 +699,11 @@ final class DesktopService {
       serverSession: request.session,
       tier: tier,
       name: peer.name,
+      clipboardSyncEnabled: clipboard.isPeerEnabled(request.peerId),
     );
     _publishDevices();
 
-    final snapshot = await clipboard.snapshot();
+    final snapshot = await clipboard.snapshot(peerId: request.peerId);
     if (snapshot != null) await request.session.session.send(snapshot);
 
     _log.info(
@@ -710,6 +726,9 @@ final class DesktopService {
 
   /// Revokes a device and drops it immediately.
   Future<void> revoke(DeviceId peerId) async {
+    clipboard.removePeer(peerId);
+    _peerClipboardSettings.remove(peerId.value);
+    unawaited(_persistPeerClipboardSettings());
     await _server?.revokePeer(peerId);
     _devices.remove(peerId.value);
     _publishDevices();
@@ -729,6 +748,7 @@ final class DesktopService {
       serverSession: device.serverSession,
       tier: tier,
       name: device.name,
+      clipboardSyncEnabled: device.clipboardSyncEnabled,
     );
     _publishDevices();
 
@@ -1400,6 +1420,7 @@ final class DesktopService {
         serverSession: device.serverSession,
         tier: device.tier,
         name: newName,
+        clipboardSyncEnabled: device.clipboardSyncEnabled,
       );
       _publishDevices();
     }
@@ -1429,8 +1450,14 @@ final class DesktopService {
       );
 
   Future<void> _broadcastClipboard(ClipboardUpdate update) async {
+    final isImage = update.items.any(
+      (item) => item.contentType == ClipboardContentType.imagePng,
+    );
+
     for (final device in _devices.values) {
       if (!device.tier.canSyncClipboard) continue;
+      if (!clipboard.isPeerEnabled(device.id)) continue;
+      if (isImage && !clipboard.allowsImagesForPeer(device.id)) continue;
       if (!device.serverSession.session.isEstablished) continue;
       try {
         await device.serverSession.session.send(update);
@@ -1440,13 +1467,114 @@ final class DesktopService {
     }
   }
 
-  Future<void> _onRemoteClipboardAsync(ClipboardUpdate update) async {
+  Future<void> _onRemoteClipboardAsync(
+    ClipboardUpdate update, {
+    DeviceId? peerId,
+  }) async {
     if (!clipboard.remoteWins(update)) return;
-    await clipboard.applyRemote(update);
+    await clipboard.applyRemote(update, peerId: peerId);
   }
 
   void _onRemoteClipboard(ClipboardUpdate update) =>
-      unawaited(_onRemoteClipboardAsync(update));
+      unawaited(_onRemoteClipboardAsync(update, peerId: _activeSessionPeerId));
+
+  void _onClipboardSyncToggle(ClipboardSyncToggle toggle) {
+    final peerId = _activeSessionPeerId;
+    if (peerId == null) return;
+    clipboard.handleToggle(peerId, toggle);
+    final config = clipboard.getPeerConfig(peerId);
+    _peerClipboardSettings[peerId.value] = config;
+    unawaited(_persistPeerClipboardSettings());
+
+    final device = _devices[peerId.value];
+    if (device != null) {
+      _devices[peerId.value] = ConnectedDevice(
+        serverSession: device.serverSession,
+        tier: device.tier,
+        name: device.name,
+        clipboardSyncEnabled: toggle.enabled,
+      );
+      _publishDevices();
+    }
+  }
+
+  /// Updates clipboard sync enabled status for [peerId] from the desktop UI.
+  Future<void> setPeerClipboardSync(DeviceId peerId, bool enabled) async {
+    final currentConfig = clipboard.getPeerConfig(peerId);
+    final newConfig = currentConfig.copyWith(enabled: enabled);
+    clipboard.setPeerConfig(peerId, newConfig);
+    _peerClipboardSettings[peerId.value] = newConfig;
+    await _persistPeerClipboardSettings();
+
+    final device = _devices[peerId.value];
+    if (device != null) {
+      _devices[peerId.value] = ConnectedDevice(
+        serverSession: device.serverSession,
+        tier: device.tier,
+        name: device.name,
+        clipboardSyncEnabled: enabled,
+      );
+      _publishDevices();
+
+      if (device.serverSession.session.isEstablished) {
+        try {
+          await device.serverSession.session.send(
+            ClipboardSyncToggle(
+              enabled: enabled,
+              allowImages: newConfig.allowImages,
+              allowFiles: newConfig.allowFiles,
+            ),
+          );
+        } on TransportError {
+          // Session is tearing down; its watcher handles cleanup.
+        }
+      }
+    }
+  }
+
+  Future<void> _loadPeerClipboardSettings() async {
+    final file = peerClipboardSettingsFile;
+    if (file == null || !file.existsSync()) return;
+    try {
+      final decoded = jsonDecode(await file.readAsString());
+      if (decoded is Map<String, dynamic>) {
+        for (final entry in decoded.entries) {
+          if (entry.value is Map<String, dynamic>) {
+            final config = PeerClipboardConfig.fromJson(
+              entry.value as Map<String, dynamic>,
+            );
+            _peerClipboardSettings[entry.key] = config;
+            clipboard.setPeerConfig(DeviceId(entry.key), config);
+          }
+        }
+      }
+    } on FormatException catch (e) {
+      _log.warn('could not load peer clipboard settings', error: e);
+    }
+  }
+
+  Future<void> _persistPeerClipboardSettings() async {
+    final file = peerClipboardSettingsFile;
+    if (file == null) return;
+    try {
+      final directory = file.parent;
+      if (!directory.existsSync()) {
+        await directory.create(recursive: true);
+      }
+      final payload = <String, Object?>{
+        for (final entry in _peerClipboardSettings.entries)
+          entry.key: entry.value.toJson(),
+      };
+      final temporary = File('${file.path}.tmp');
+      await temporary.writeAsString(
+        const JsonEncoder.withIndent('  ').convert(payload),
+        flush: true,
+      );
+      await temporary.rename(file.path);
+    } catch (e) {
+      _log.warn('could not persist peer clipboard settings', error: e);
+    }
+  }
 
   void _onPowerCommand(PowerCommand command) =>
       unawaited(_runPowerCommand(command));

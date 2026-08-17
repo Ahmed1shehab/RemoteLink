@@ -99,6 +99,7 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
   final trustStore = await ref.watch(trustStoreProvider.future);
   final name = ref.watch(deviceNameProvider);
   final transferStore = await ref.watch(incomingTransferStoreProvider.future);
+  final directory = await ref.watch(appDirectoryProvider.future);
 
   final service = DesktopService(
     identity: identity,
@@ -107,6 +108,7 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
     appVersion: '0.1.0',
     clock: ref.watch(clockProvider),
     incomingTransferStore: transferStore,
+    peerClipboardSettingsFile: File('${directory.path}/clipboard_peers.json'),
   );
 
   await service.start();
@@ -287,6 +289,7 @@ final desktopDiagnosticsProvider =
               roundTripMillis: device.quality.roundTripMillis,
               qualityBars: device.quality.bars,
               awaitingPairing: device.awaitingPairing,
+              clipboardSyncEnabled: device.clipboardSyncEnabled,
             ),
         ],
       );
@@ -376,6 +379,7 @@ final class DeviceDiagnostic {
     required this.roundTripMillis,
     required this.qualityBars,
     this.awaitingPairing = false,
+    this.clipboardSyncEnabled = true,
   });
 
   final String id;
@@ -385,4 +389,5 @@ final class DeviceDiagnostic {
   final double roundTripMillis;
   final int qualityBars;
   final bool awaitingPairing;
+  final bool clipboardSyncEnabled;
 }
