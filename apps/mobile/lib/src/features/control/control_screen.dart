@@ -54,6 +54,17 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
     final capabilities =
         ref.watch(clientProvider).valueOrNull?.session?.capabilities;
 
+    // Two conditions, not one. The capability bit says the desk *can* share its
+    // screen; it is advertised per server, not per device, so it says nothing
+    // about whether this phone is allowed to ask. The tier is what decides
+    // that, and a desktop refuses out-of-tier messages in silence by design —
+    // so a button gated on the bit alone would be tappable, would send a
+    // request, and would sit there receiving nothing.
+    final tier = ref.watch(currentPermissionTierProvider).valueOrNull;
+    final canViewScreen =
+        capabilities?.has(Capabilities.screenCapture) == true &&
+            (tier?.canViewScreen ?? false);
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -76,7 +87,7 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                 ),
               ),
             ),
-          if (capabilities?.has(Capabilities.screenCapture) == true)
+          if (canViewScreen)
             IconButton(
               icon: const Icon(Icons.screenshot_monitor_outlined),
               tooltip: 'Screen Stream',

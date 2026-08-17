@@ -294,6 +294,8 @@ final class DesktopService {
       StreamController<PendingIncomingTransfer>.broadcast();
   final StreamController<List<TransferRecord>> _transferChanges =
       StreamController<List<TransferRecord>>.broadcast();
+  final StreamController<List<String>> _screenViewerChanges =
+      StreamController<List<String>>.broadcast();
 
   StreamSubscription<ServerSession>? _acceptedSubscription;
   StreamSubscription<ServerSession>? _endedSubscription;
@@ -315,6 +317,27 @@ final class DesktopService {
 
   /// Transfer changes for real-time progress and status updates.
   Stream<List<TransferRecord>> get transferChanges => _transferChanges.stream;
+
+  /// Names of the devices currently receiving this screen, as it changes.
+  ///
+  /// Exists so the window can say so. A machine that is streaming its screen
+  /// and shows no sign of it is indistinguishable from one that is not, and
+  /// the difference is the whole of the user's ability to notice. Every other
+  /// sensitive action here interrupts the user for consent; screen streaming
+  /// is granted once at the tier and then runs silently, so an always-visible
+  /// indicator is the thing standing in for that prompt.
+  Stream<List<String>> get screenViewerChanges => _screenViewerChanges.stream;
+
+  /// Names of the devices currently receiving this screen.
+  List<String> get screenViewers => <String>[
+        for (final peerKey in _screenStreams.keys)
+          _devices[peerKey]?.name ?? peerKey,
+      ];
+
+  void _publishScreenViewers() {
+    if (_screenViewerChanges.isClosed) return;
+    _screenViewerChanges.add(screenViewers);
+  }
 
   List<TransferRecord> get transfers => _transfers.values.toList();
 
@@ -2208,6 +2231,7 @@ final class DesktopService {
     await _permissionRequests.close();
     await _incomingTransferRequests.close();
     await _transferChanges.close();
+    await _screenViewerChanges.close();
 
     _log.info('desktop service stopped');
   }
@@ -2244,6 +2268,7 @@ final class DesktopService {
     _screenStreams[peerId.value] = stream;
 
     _startScreenCaptureTimer(stream);
+    _publishScreenViewers();
     _log.info(
       'screen streaming started',
       fields: <String, Object?>{
@@ -2299,7 +2324,31 @@ final class DesktopService {
 
   void _stopScreenStream(String peerKey) {
     final stream = _screenStreams.remove(peerKey);
-    stream?.cancel();
+    if (stream == null) return;
+    stream.cancel();
+    _publishScreenViewers();
+  }
+
+  /// Cuts off [peerId]'s view of this screen from the desktop side.
+  ///
+  /// The phone asked to start and can ask to stop, but the person whose screen
+  /// it is must not have to reach for the phone to end it. Sends a stop so the
+  /// viewer closes cleanly rather than freezing on the last frame it received.
+  Future<void> stopScreenStreamFor(DeviceId peerId) async {
+    if (!_screenStreams.containsKey(peerId.value)) return;
+    _stopScreenStream(peerId.value);
+
+    final device = _devices[peerId.value];
+    if (device == null || !device.serverSession.session.isEstablished) return;
+    try {
+      await device.serverSession.session.send(
+        const ScreenStreamStop(reason: ScreenStopReason.userClosed),
+      );
+    } on Object catch (e) {
+      // The stream is already stopped locally; a peer that never hears about
+      // it just stops receiving frames. Worth a line, not worth a throw.
+      _log.warn('could not tell peer the stream ended', error: e);
+    }
   }
 
   /// Whether a screen capture stream is actively running for [peerId].

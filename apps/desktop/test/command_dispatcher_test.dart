@@ -511,72 +511,91 @@ void main() {
   });
 
   group('CommandDispatcher screen streaming', () {
-    test('routes ScreenStreamStart across permission tiers', () {
-      for (final tier in PermissionTier.values) {
-        ScreenStreamStart? received;
+    // Every streaming code is checked against every tier rather than against
+    // the one that is supposed to work. `allows` denies by default, so a
+    // message that is refused everywhere and a message that is permitted
+    // everywhere both look like "the check exists" from a single-tier test.
+    const streamingMessages = <Message>[
+      ScreenStreamStart(
+        targetFps: 30,
+        codec: ScreenCodec.jpeg,
+        maxWidth: 1280,
+        maxHeight: 720,
+      ),
+      ScreenStreamStop(reason: ScreenStopReason.userClosed),
+      ScreenConfigure(targetFps: 60, maxWidth: 1920),
+    ];
+
+    for (final message in streamingMessages) {
+      test('refuses ${message.runtimeType} at readOnly', () {
         final dispatcher = createTestDispatcher(
-          onScreenStreamStart: (start) => received = start,
+          onScreenStreamStart: (_) => fail('start reached the host'),
+          onScreenStreamStop: (_) => fail('stop reached the host'),
+          onScreenConfigure: (_) => fail('configure reached the host'),
         );
 
-        const startMsg = ScreenStreamStart(
+        expect(
+          dispatcher.dispatch(message, PermissionTier.readOnly),
+          isFalse,
+        );
+        expect(dispatcher.deniedCount, 1);
+        expect(dispatcher.appliedCount, 0);
+      });
+
+      test('accepts ${message.runtimeType} at standard and above', () {
+        for (final tier in <PermissionTier>[
+          PermissionTier.standard,
+          PermissionTier.extended,
+          PermissionTier.admin,
+        ]) {
+          var reached = false;
+          final dispatcher = createTestDispatcher(
+            onScreenStreamStart: (_) => reached = true,
+            onScreenStreamStop: (_) => reached = true,
+            onScreenConfigure: (_) => reached = true,
+          );
+
+          expect(
+            dispatcher.dispatch(message, tier),
+            isTrue,
+            reason: '${message.runtimeType} should be allowed at ${tier.name}',
+          );
+          expect(reached, isTrue);
+          expect(dispatcher.deniedCount, 0);
+        }
+      });
+    }
+
+    test('the fields survive the trip to the host', () {
+      ScreenStreamStart? received;
+      final dispatcher = createTestDispatcher(
+        onScreenStreamStart: (start) => received = start,
+      );
+
+      dispatcher.dispatch(
+        const ScreenStreamStart(
           targetFps: 30,
           codec: ScreenCodec.jpeg,
           maxWidth: 1280,
           maxHeight: 720,
-        );
+        ),
+        PermissionTier.standard,
+      );
 
-        final result = dispatcher.dispatch(startMsg, tier);
-        expect(result, isTrue);
-        expect(dispatcher.appliedCount, 1);
-        expect(dispatcher.deniedCount, 0);
-        expect(received, isNotNull);
-        expect(received!.targetFps, 30);
-        expect(received!.codec, ScreenCodec.jpeg);
-        expect(received!.maxWidth, 1280);
-        expect(received!.maxHeight, 720);
-      }
+      expect(received, isNotNull);
+      expect(received!.targetFps, 30);
+      expect(received!.codec, ScreenCodec.jpeg);
+      expect(received!.maxWidth, 1280);
+      expect(received!.maxHeight, 720);
     });
 
-    test('routes ScreenStreamStop across permission tiers', () {
-      for (final tier in PermissionTier.values) {
-        ScreenStreamStop? received;
-        final dispatcher = createTestDispatcher(
-          onScreenStreamStop: (stop) => received = stop,
-        );
-
-        const stopMsg = ScreenStreamStop(
-          reason: ScreenStopReason.userClosed,
-        );
-
-        final result = dispatcher.dispatch(stopMsg, tier);
-        expect(result, isTrue);
-        expect(dispatcher.appliedCount, 1);
-        expect(dispatcher.deniedCount, 0);
-        expect(received, isNotNull);
-        expect(received!.reason, ScreenStopReason.userClosed);
-      }
-    });
-
-    test('routes ScreenConfigure across permission tiers', () {
-      for (final tier in PermissionTier.values) {
-        ScreenConfigure? received;
-        final dispatcher = createTestDispatcher(
-          onScreenConfigure: (cfg) => received = cfg,
-        );
-
-        const cfgMsg = ScreenConfigure(
-          targetFps: 60,
-          maxWidth: 1920,
-        );
-
-        final result = dispatcher.dispatch(cfgMsg, tier);
-        expect(result, isTrue);
-        expect(dispatcher.appliedCount, 1);
-        expect(dispatcher.deniedCount, 0);
-        expect(received, isNotNull);
-        expect(received!.targetFps, 60);
-        expect(received!.maxWidth, 1920);
-      }
+    test('monitor topology stays readable at readOnly', () {
+      // The counterpart to the split in `PermissionTier.allows`: geometry is
+      // not content, and a phone needs it to aim at the right display.
+      expect(
+        PermissionTier.readOnly.allows(MessageType.screenTopology),
+        isTrue,
+      );
     });
   });
 }

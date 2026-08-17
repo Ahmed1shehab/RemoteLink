@@ -451,6 +451,118 @@ void main() {
       await service.stop();
     });
   });
+
+  group('the desktop knows, and can say, that it is being watched', () {
+    test('a stream names its viewer, and stopping it clears the name',
+        () async {
+      final captureBackend =
+          ControllableScreenCaptureBackend(isAvailable: true);
+      final pair = await _createTestServerClientPair();
+      final phoneIdentity = pair.clientIdentity;
+
+      final trustStore = InMemoryTrustStore();
+      await trustStore.upsert(
+        TrustedPeer(
+          id: phoneIdentity.id,
+          publicKey: phoneIdentity.publicKey,
+          name: 'Pixel 8 Pro',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: PermissionTier.standard.wireValue,
+        ),
+      );
+
+      final service = DesktopService(
+        identity: await DeviceIdentity.generate(),
+        trustStore: trustStore,
+        deviceName: 'Test Computer',
+        appVersion: '0.1.0',
+        clock: SystemClock(),
+        input: const UnsupportedInputBackend('test'),
+        clipboardBackend: const UnsupportedClipboardBackend(),
+        media: const UnsupportedMediaBackend(),
+        brightness: const UnsupportedBrightnessBackend('test'),
+        systemInfo: const UnsupportedSystemInfoBackend('test'),
+        networkAdapters: const UnsupportedNetworkAdapterBackend('test'),
+        screenCapture: captureBackend,
+      );
+
+      await service.registerSessionForTesting(pair.session);
+
+      // Collected from the change stream rather than only read back from the
+      // getter: the banner is driven by the stream, so a getter that updates
+      // while the stream stays silent would leave the window showing nothing.
+      final published = <List<String>>[];
+      final subscription = service.screenViewerChanges.listen(published.add);
+
+      expect(service.screenViewers, isEmpty);
+
+      await service.handleMessageForTesting(
+        pair.session,
+        const ScreenStreamStart(targetFps: 30, codec: ScreenCodec.jpeg),
+      );
+
+      expect(service.screenViewers, <String>['Pixel 8 Pro']);
+      await pumpEventQueue();
+      expect(published.last, <String>['Pixel 8 Pro']);
+
+      await service.stopScreenStreamFor(pair.session.peerId);
+
+      expect(service.isStreamingScreen(pair.session.peerId), isFalse);
+      expect(service.screenViewers, isEmpty);
+      await pumpEventQueue();
+      expect(published.last, isEmpty);
+
+      await subscription.cancel();
+      await pair.client.disconnect();
+      await pair.server.stop();
+      await service.stop();
+    });
+
+    test('stopping a stream that is not running is not an error', () async {
+      // The banner's button acts on every connected device, so most of the
+      // calls it makes are for peers that were never streaming.
+      final pair = await _createTestServerClientPair();
+      final trustStore = InMemoryTrustStore();
+      await trustStore.upsert(
+        TrustedPeer(
+          id: pair.clientIdentity.id,
+          publicKey: pair.clientIdentity.publicKey,
+          name: 'Pixel 8 Pro',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: PermissionTier.standard.wireValue,
+        ),
+      );
+
+      final service = DesktopService(
+        identity: await DeviceIdentity.generate(),
+        trustStore: trustStore,
+        deviceName: 'Test Computer',
+        appVersion: '0.1.0',
+        clock: SystemClock(),
+        input: const UnsupportedInputBackend('test'),
+        clipboardBackend: const UnsupportedClipboardBackend(),
+        media: const UnsupportedMediaBackend(),
+        brightness: const UnsupportedBrightnessBackend('test'),
+        systemInfo: const UnsupportedSystemInfoBackend('test'),
+        networkAdapters: const UnsupportedNetworkAdapterBackend('test'),
+        screenCapture: ControllableScreenCaptureBackend(isAvailable: true),
+      );
+
+      await service.registerSessionForTesting(pair.session);
+
+      await expectLater(
+        service.stopScreenStreamFor(pair.session.peerId),
+        completes,
+      );
+      expect(service.screenViewers, isEmpty);
+
+      await pair.client.disconnect();
+      await pair.server.stop();
+      await service.stop();
+    });
+  });
 }
 
 Future<

@@ -374,10 +374,18 @@ final class DeviceRename extends Message {
 /// Enforcing on the receiving side rather than hiding buttons on the phone is
 /// the whole point: the phone is untrusted input, not a security boundary.
 enum PermissionTier {
-  /// May observe only: media state, system status, screen stream.
+  /// May observe only: media state and system status.
+  ///
+  /// Deliberately *not* the screen. This tier used to include the screen
+  /// stream, back when nothing could produce a frame and the entry cost
+  /// nothing. Once capture worked it meant a device the user had explicitly
+  /// downgraded could watch everything on the desk while still being refused
+  /// the clipboard — and someone setting a device to "read only" is asking for
+  /// less access, not for a window onto their screen.
   readOnly(1),
 
-  /// Input, clipboard, and media. The default for a newly paired device.
+  /// Input, clipboard, media, and screen viewing. The default for a newly
+  /// paired device.
   standard(2),
 
   /// Adds file transfer, application launching, and registered commands.
@@ -397,6 +405,14 @@ enum PermissionTier {
 
   bool get canSendInput => wireValue >= standard.wireValue;
   bool get canSyncClipboard => wireValue >= standard.wireValue;
+
+  /// Whether this tier may receive the desk's screen.
+  ///
+  /// Set at `standard` rather than `readOnly` because watching a screen is at
+  /// least as revealing as reading a clipboard, and the clipboard has always
+  /// been gated here. Monitor *topology* stays below this line — a layout is
+  /// geometry, and the phone needs it to aim the touchpad.
+  bool get canViewScreen => wireValue >= standard.wireValue;
   bool get canTransferFiles => wireValue >= extended.wireValue;
   bool get canLaunchApplications => wireValue >= extended.wireValue;
   bool get canRunCommands => wireValue >= extended.wireValue;
@@ -411,7 +427,19 @@ enum PermissionTier {
         0x00 || 0x01 || 0x09 => true,
         0x02 || 0x03 || 0x0B => canSendInput,
         0x04 => canSyncClipboard,
-        0x05 || 0x06 || 0x0A => wireValue >= readOnly.wireValue,
+        0x05 || 0x0A => wireValue >= readOnly.wireValue,
+        // Split rather than gated as a whole subsystem: `screenTopology` is the
+        // desk's monitor geometry, which is what lets a phone aim its touchpad
+        // at the right display, and it reveals nothing of what is on those
+        // screens. The four streaming codes reveal all of it.
+        0x06 => switch (type) {
+            MessageType.screenStreamStart ||
+            MessageType.screenStreamStop ||
+            MessageType.screenFrame ||
+            MessageType.screenConfigure =>
+              canViewScreen,
+            _ => wireValue >= readOnly.wireValue,
+          },
         0x07 => canTransferFiles,
         0x08 => switch (type) {
             MessageType.powerCommand => canControlPower,

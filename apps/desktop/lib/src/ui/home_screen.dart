@@ -92,11 +92,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // the send card and the device rows once a banner pushed the layout down,
     // which on a page whose controls revoke access and change permission tiers
     // is worse than merely confusing.
+    final screenViewers =
+        ref.watch(screenViewersProvider).valueOrNull ?? const <String>[];
+
     return FocusTraversalGroup(
       policy: OrderedTraversalPolicy(),
       child: ListView(
         padding: const EdgeInsets.all(24),
         children: <Widget>[
+          // Above the permission banner and everything else. This is the one
+          // thing on this window that says the screen is leaving the machine,
+          // and it is worth nothing if it is below the fold.
+          if (screenViewers.isNotEmpty)
+            FocusTraversalOrder(
+              order: const NumericFocusOrder(0),
+              child: _ScreenSharingBanner(
+                viewers: screenViewers,
+                onStop: _stopAllScreenStreams,
+              ),
+            ),
           if (input != null && !input.available && input.reason != null)
             FocusTraversalOrder(
               order: const NumericFocusOrder(1),
@@ -171,6 +185,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Future<void> _openAccessibilitySettings() async {
     final service = await ref.read(desktopServiceProvider.future);
     await service.openAccessibilitySettings();
+  }
+
+  Future<void> _stopAllScreenStreams() async {
+    final service = await ref.read(desktopServiceProvider.future);
+    for (final device in service.devices) {
+      await service.stopScreenStreamFor(device.id);
+    }
   }
 
   Future<void> _revoke(DeviceId deviceId) async {
@@ -1156,6 +1177,64 @@ class _StatusCard extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// Says, unmissably, that this screen is being watched — and by whom.
+///
+/// Screen streaming is the one capability here that runs continuously without
+/// ever interrupting the user: pairing prompts, incoming transfers, and
+/// permission elevation all stop and ask, while a stream starts because a
+/// paired phone sent a message and then keeps going. This banner is what
+/// replaces that prompt, so it is deliberately loud — error colouring rather
+/// than a neutral chip — and it carries the control to end it, because the
+/// person whose screen it is should not have to pick up the phone to stop it.
+class _ScreenSharingBanner extends StatelessWidget {
+  const _ScreenSharingBanner({required this.viewers, required this.onStop});
+
+  final List<String> viewers;
+  final Future<void> Function() onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final label = viewers.length == 1
+        ? '${viewers.single} is watching this screen'
+        : '${viewers.length} devices are watching this screen: '
+            '${viewers.join(", ")}';
+
+    return Card(
+      color: scheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: <Widget>[
+            Icon(Icons.screen_share, color: scheme.onErrorContainer),
+            const SizedBox(width: 16),
+            Expanded(
+              // Announced as its own live region: a screen-reader user gets no
+              // benefit from a visual banner, and this is exactly the kind of
+              // state change they most need to hear about.
+              child: Semantics(
+                liveRegion: true,
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: scheme.onErrorContainer,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            FilledButton.tonal(
+              onPressed: () => onStop(),
+              child: const Text('Stop sharing'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _PermissionBanner extends StatelessWidget {

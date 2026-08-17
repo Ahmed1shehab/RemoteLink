@@ -293,6 +293,19 @@ final trustedPeersProvider = FutureProvider<List<TrustedPeer>>((ref) async {
 /// even after the user did what it asked. That is a particularly bad failure:
 /// the user follows the instructions, nothing changes, and they conclude the
 /// app is broken.
+/// Devices currently receiving this screen.
+///
+/// Emits the current set before the change stream, for the same reason
+/// [connectedDevicesProvider] does: a stream that only fires on change leaves
+/// the UI in its loading state until something happens, and "is anyone
+/// watching my screen right now" is a question that must be answerable
+/// immediately rather than after the next event.
+final screenViewersProvider = StreamProvider<List<String>>((ref) async* {
+  final service = await ref.watch(desktopServiceProvider.future);
+  yield service.screenViewers;
+  yield* service.screenViewerChanges;
+});
+
 final inputAvailabilityProvider =
     StreamProvider<({bool available, String? reason})>((ref) async* {
   final service = await ref.watch(desktopServiceProvider.future);

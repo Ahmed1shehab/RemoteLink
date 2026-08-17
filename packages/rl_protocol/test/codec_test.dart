@@ -384,6 +384,35 @@ void main() {
       expect(tier.allows(MessageType.mediaState), isTrue);
     });
 
+    test('read-only cannot watch the screen, but can learn its shape', () {
+      // The clipboard has always been gated at standard, and a screen shows
+      // strictly more than a clipboard does. Topology is the exception: it is
+      // geometry, and the phone needs it to aim the touchpad at the right
+      // display.
+      const tier = PermissionTier.readOnly;
+      expect(tier.allows(MessageType.screenStreamStart), isFalse);
+      expect(tier.allows(MessageType.screenStreamStop), isFalse);
+      expect(tier.allows(MessageType.screenFrame), isFalse);
+      expect(tier.allows(MessageType.screenConfigure), isFalse);
+      expect(tier.allows(MessageType.screenTopology), isTrue);
+    });
+
+    test('standard and above may watch the screen', () {
+      for (final tier in <PermissionTier>[
+        PermissionTier.standard,
+        PermissionTier.extended,
+        PermissionTier.admin,
+      ]) {
+        expect(
+          tier.allows(MessageType.screenStreamStart),
+          isTrue,
+          reason: '${tier.name} should be able to start a stream',
+        );
+        expect(tier.canViewScreen, isTrue);
+      }
+      expect(PermissionTier.readOnly.canViewScreen, isFalse);
+    });
+
     test('standard covers input and clipboard but not power', () {
       const tier = PermissionTier.standard;
       expect(tier.allows(MessageType.mouseMove), isTrue);

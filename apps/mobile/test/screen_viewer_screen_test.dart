@@ -261,6 +261,12 @@ void main() {
             (ref) => Stream<ClientState>.value(ClientState.connected),
           ),
           clientProvider.overrideWith((ref) async => client),
+          // The button needs both the desk's capability bit and a tier that
+          // may use it. The bit alone is not enough — see the readOnly test
+          // immediately below.
+          currentPermissionTierProvider.overrideWith(
+            (ref) => Stream<PermissionTier?>.value(PermissionTier.standard),
+          ),
         ],
         child: const MaterialApp(home: ControlScreen()),
       ),
@@ -270,6 +276,102 @@ void main() {
     await tester.pump();
 
     expect(find.byIcon(Icons.screenshot_monitor_outlined), findsOneWidget);
+  });
+
+  testWidgets(
+      'ControlScreen hides the screen stream button at readOnly even when the '
+      'desktop advertises the capability', (tester) async {
+    // The capability bit is advertised per server, not per device, so a
+    // readOnly phone sees it set on a desk that can capture. The desktop then
+    // refuses the request in silence — deliberately, so a peer cannot
+    // enumerate the tier system by probing. Which means the phone must decide
+    // for itself, from the tier it was granted, or the button is one that
+    // sends a message and never hears anything back.
+    late DeviceIdentity desktopIdentity;
+    late DeviceIdentity phoneIdentity;
+    late InMemoryTrustStore desktopTrust;
+    late RemoteLinkServer server;
+    late RemoteLinkClient client;
+
+    await tester.runAsync(() async {
+      phoneIdentity = await DeviceIdentity.generate();
+      desktopIdentity = await DeviceIdentity.generate();
+      desktopTrust = InMemoryTrustStore();
+
+      await desktopTrust.upsert(
+        TrustedPeer(
+          id: phoneIdentity.id,
+          publicKey: phoneIdentity.publicKey,
+          name: 'Test Phone',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: PermissionTier.readOnly.wireValue,
+        ),
+      );
+
+      server = RemoteLinkServer(
+        identity: desktopIdentity,
+        capabilities: const Capabilities(
+          Capabilities.mouse | Capabilities.screenCapture,
+        ),
+        trustStore: desktopTrust,
+        clock: SystemClock(),
+        port: 0,
+      );
+      await server.start();
+
+      client = RemoteLinkClient(
+        identity: phoneIdentity,
+        capabilities: const Capabilities(
+          Capabilities.mouse | Capabilities.screenCapture,
+        ),
+        clock: SystemClock(),
+      );
+
+      final connectedFuture = client.states.firstWhere(
+        (s) => s == ClientState.connected,
+      );
+
+      await client.connect(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: server.boundPort,
+          deviceId: desktopIdentity.id,
+          serverPublicKey: desktopIdentity.publicKey,
+        ),
+      );
+
+      await connectedFuture.timeout(const Duration(seconds: 10));
+    });
+
+    addTearDown(() => tester.runAsync(() async {
+          await client.dispose();
+          await server.stop();
+          await desktopTrust.dispose();
+        }));
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          identityProvider.overrideWith(
+            (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+          ),
+          clientStateProvider.overrideWith(
+            (ref) => Stream<ClientState>.value(ClientState.connected),
+          ),
+          clientProvider.overrideWith((ref) async => client),
+          currentPermissionTierProvider.overrideWith(
+            (ref) => Stream<PermissionTier?>.value(PermissionTier.readOnly),
+          ),
+        ],
+        child: const MaterialApp(home: ControlScreen()),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byIcon(Icons.screenshot_monitor_outlined), findsNothing);
   });
 
   testWidgets(
