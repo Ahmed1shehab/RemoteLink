@@ -32,6 +32,13 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>RemoteLink uses your local network to find and control your computer.</string>
+	<!-- The photo picker runs out of process and needs no permission on iOS 14
+	     and later, which is why it was chosen. This string is here for the
+	     older path image_picker still falls back to, where the prompt appears
+	     and an app without a usage description is terminated rather than
+	     denied. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>RemoteLink needs access to your photos so you can send them to your computer.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

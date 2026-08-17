@@ -12,6 +12,7 @@ import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
+import 'file_picker.dart';
 import 'mobile_transfer_store.dart';
 import 'transfer_model.dart';
 
@@ -708,6 +709,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
     required DeviceId targetPeerId,
     required String targetPeerName,
     required List<File> files,
+    List<String>? fileNames,
   }) async {
     final client = _ref.read(clientProvider).valueOrNull;
     final session = client?.session;
@@ -719,6 +721,12 @@ class MobileTransferController extends StateNotifier<TransferState> {
       throw ArgumentError('files list must not be empty');
     }
 
+    if (fileNames != null && fileNames.length != files.length) {
+      throw ArgumentError(
+        'fileNames has ${fileNames.length} entries for ${files.length} files',
+      );
+    }
+
     final transferId = 't-${DateTime.now().microsecondsSinceEpoch}';
     final offeredFiles = <OfferedFile>[];
     final sources = <String, OutgoingFile>{};
@@ -726,11 +734,17 @@ class MobileTransferController extends StateNotifier<TransferState> {
     for (var i = 0; i < files.length; i++) {
       final file = files[i];
       final fileId = 'file-${i + 1}';
-      final rawName = file.uri.pathSegments.lastWhere(
+      // The caller's name wins when it has one. A picked file's path is a
+      // cache copy — `image_picker_A1B2C3.jpg` — and the name the user
+      // recognises only exists in the picker's own metadata.
+      final pathName = file.uri.pathSegments.lastWhere(
         (s) => s.isNotEmpty,
         orElse: () => 'file_${i + 1}.dat',
       );
-      final fileName = sanitiseFileName(rawName);
+      final fileName = safeOutgoingFileName(
+        <String?>[fileNames?[i], pathName],
+        fallback: 'file_${i + 1}.dat',
+      );
       final length = file.lengthSync();
       final stat = file.statSync();
 
@@ -884,10 +898,46 @@ class MobileTransferController extends StateNotifier<TransferState> {
   }
 }
 
+/// First of [candidates] that survives `sanitiseFileName`, else [fallback].
+///
+/// `sanitiseFileName` throws rather than repairing, which is right for a name
+/// arriving from a peer: there is nothing safe to do with a hostile filename
+/// but refuse it. On the sending side the calculus is different. The user
+/// picked a file and wants it sent, and aborting the whole transfer because the
+/// photo library handed back a name with a trailing space would be the app
+/// inventing a problem the user cannot fix. So each candidate is tried in turn
+/// and a generated name that cannot fail sits at the end.
+///
+/// The check itself is never skipped — every name that goes on the wire has
+/// been through it, this only decides what to do when one is rejected.
+String safeOutgoingFileName(
+  List<String?> candidates, {
+  required String fallback,
+}) {
+  for (final candidate in candidates) {
+    if (candidate == null) continue;
+    try {
+      return sanitiseFileName(candidate);
+    } on ProtocolError {
+      continue;
+    }
+  }
+  return sanitiseFileName(fallback);
+}
+
 /// Provider for mobile transfer state.
 final transferControllerProvider =
     StateNotifierProvider<MobileTransferController, TransferState>(
   MobileTransferController.new,
+);
+
+/// The system file and photo pickers.
+///
+/// Overridden with a fake in widget tests. The real implementation calls
+/// platform channels that do not exist in the test binding, so a test that
+/// reaches it fails with `MissingPluginException` rather than anything useful.
+final transferFilePickerProvider = Provider<TransferFilePicker>(
+  (ref) => SystemTransferFilePicker(),
 );
 
 /// Provider for the download directory store on mobile.

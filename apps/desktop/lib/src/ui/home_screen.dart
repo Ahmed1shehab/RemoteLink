@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:desktop_drop/desktop_drop.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
@@ -310,16 +312,19 @@ class _SendCard extends ConsumerStatefulWidget {
 
 class _SendCardState extends ConsumerState<_SendCard> {
   int _tab = 0; // 0 = File, 1 = Text/URL
-  final TextEditingController _fileController = TextEditingController();
   final TextEditingController _textController = TextEditingController();
   final TextEditingController _snippetNameController = TextEditingController();
+
+  /// Files chosen in the dialog or dropped on the window, in order.
+  final List<File> _picked = <File>[];
+  bool _isPicking = false;
+
   String? _selectedDeviceId;
   String? _statusError;
   bool _isDraggingOver = false;
 
   @override
   void dispose() {
-    _fileController.dispose();
     _textController.dispose();
     _snippetNameController.dispose();
     super.dispose();
@@ -394,24 +399,15 @@ class _SendCardState extends ConsumerState<_SendCard> {
               ),
               const SizedBox(height: 16),
               if (_tab == 0) ...<Widget>[
-                DragTarget<Object>(
-                  onWillAcceptWithDetails: (details) {
-                    setState(() => _isDraggingOver = true);
-                    return true;
-                  },
-                  onLeave: (_) => setState(() => _isDraggingOver = false),
-                  onAcceptWithDetails: (details) {
-                    setState(() => _isDraggingOver = false);
-                    if (details.data is List<String>) {
-                      final paths = details.data as List<String>;
-                      if (paths.isNotEmpty) {
-                        _fileController.text = paths.first;
-                      }
-                    } else if (details.data is String) {
-                      _fileController.text = details.data as String;
-                    }
-                  },
-                  builder: (context, candidateData, rejectedData) => Container(
+                // `DropTarget`, not Flutter's `DragTarget`: the latter only
+                // receives drags that began inside this app, so the zone that
+                // used to be here looked identical and accepted nothing from
+                // Finder or Explorer.
+                DropTarget(
+                  onDragEntered: (_) => setState(() => _isDraggingOver = true),
+                  onDragExited: (_) => setState(() => _isDraggingOver = false),
+                  onDragDone: (details) => _addDropped(details.files),
+                  child: Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
                       border: Border.all(
@@ -443,29 +439,50 @@ class _SendCardState extends ConsumerState<_SendCard> {
                                     fontWeight: FontWeight.w600,
                                   ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Or enter a file path below:',
-                          style: Theme.of(context).textTheme.bodySmall,
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed:
+                              _isPicking ? null : () => unawaited(_pick()),
+                          icon: const Icon(Icons.folder_open),
+                          label: Text(
+                            _picked.isEmpty ? 'Choose files' : 'Add more files',
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _fileController,
-                  decoration: InputDecoration(
-                    labelText: 'File path',
-                    hintText: '/path/to/file.txt',
-                    border: const OutlineInputBorder(),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.folder_open),
-                      tooltip: 'Use sample file',
-                      onPressed: _setSampleFile,
+                if (_picked.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 12),
+                  for (final file in _picked)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: <Widget>[
+                          Icon(
+                            Icons.description,
+                            size: 18,
+                            color: scheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              file.uri.pathSegments.last,
+                              overflow: TextOverflow.ellipsis,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, size: 18),
+                            tooltip: 'Remove ${file.uri.pathSegments.last}',
+                            onPressed: () =>
+                                setState(() => _picked.remove(file)),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ),
+                ],
               ] else ...<Widget>[
                 TextField(
                   controller: _textController,
@@ -506,8 +523,51 @@ class _SendCardState extends ConsumerState<_SendCard> {
     );
   }
 
-  void _setSampleFile() {
-    _fileController.text = '/tmp/sample_desktop_transfer.txt';
+  /// Adds dropped entries, ignoring directories and anything already listed.
+  ///
+  /// A dropped folder arrives as one `XFile` whose path is the directory. The
+  /// transfer engine sends files, so expanding a folder would be a recursive
+  /// walk with its own size and symlink questions — out of scope here, and
+  /// silently sending nothing would be worse than saying so.
+  void _addDropped(List<XFile> dropped) {
+    final directories = <String>[];
+    setState(() {
+      _isDraggingOver = false;
+      for (final entry in dropped) {
+        if (FileSystemEntity.isDirectorySync(entry.path)) {
+          directories.add(entry.name);
+          continue;
+        }
+        if (_picked.any((f) => f.path == entry.path)) continue;
+        _picked.add(File(entry.path));
+      }
+      _statusError = directories.isEmpty
+          ? null
+          : 'Folders cannot be sent yet: ${directories.join(", ")}';
+    });
+  }
+
+  Future<void> _pick() async {
+    if (_isPicking) return;
+    setState(() {
+      _isPicking = true;
+      _statusError = null;
+    });
+    try {
+      final chosen = await openFiles();
+      if (!mounted) return;
+      setState(() {
+        for (final entry in chosen) {
+          if (_picked.any((f) => f.path == entry.path)) continue;
+          _picked.add(File(entry.path));
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _statusError = 'Could not open the file dialog: $e');
+    } finally {
+      if (mounted) setState(() => _isPicking = false);
+    }
   }
 
   Future<void> _send(List<ConnectedDevice> devices) async {
@@ -523,18 +583,26 @@ class _SendCardState extends ConsumerState<_SendCard> {
 
     try {
       if (_tab == 0) {
-        final path = _fileController.text.trim();
-        if (path.isEmpty) {
-          setState(() => _statusError = 'Please enter a valid file path');
+        if (_picked.isEmpty) {
+          setState(() => _statusError = 'Choose at least one file to send');
           return;
         }
-        final file = File(path);
-        if (!file.existsSync()) {
-          await file.parent.create(recursive: true);
-          await file.writeAsString('RemoteLink desktop file content');
+        // Re-checked here rather than trusted from pick time: a file can be
+        // moved or deleted between choosing it and pressing Send, and the
+        // transfer engine's failure for a missing file is far less clear than
+        // this one.
+        final missing = _picked.where((f) => !f.existsSync()).toList();
+        if (missing.isNotEmpty) {
+          setState(() {
+            _picked.removeWhere(missing.contains);
+            _statusError = missing.length == 1
+                ? '${missing.first.uri.pathSegments.last} is no longer there.'
+                : '${missing.length} files are no longer there.';
+          });
+          return;
         }
-        await service.sendFiles(target.id, <File>[file]);
-        _fileController.clear();
+        await service.sendFiles(target.id, List<File>.of(_picked));
+        setState(_picked.clear);
       } else {
         final text = _textController.text;
         if (text.trim().isEmpty) {

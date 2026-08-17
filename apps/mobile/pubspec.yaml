@@ -15,10 +15,25 @@ dependencies:
   # DNS-SD browsing. The only automatic discovery an iPhone can do without the
   # multicast entitlement Apple grants by manual application.
   bonsoir: ^5.1.0
+  # Choosing a file to send needs a plugin: Flutter has no built-in picker, and
+  # there is no amount of Dart that opens the Android Storage Access Framework
+  # or a UIDocumentPickerViewController. Both of these are flutter/packages —
+  # maintained by the Flutter team in the SDK's own repository — which is the
+  # lowest-risk dependency shape available here. `file_picker` is the popular
+  # third-party alternative and would replace both, but it is one maintainer,
+  # and it buys nothing these two do not already do.
+  file_selector: ^1.0.3
   flutter:
     sdk: flutter
   flutter_riverpod: ^2.5.1
   flutter_secure_storage: ^9.2.2
+  # Separate from file_selector, and worth the second dependency: this is the
+  # system photo picker (PHPickerViewController on iOS, the Android photo
+  # picker on API 33+), which runs out-of-process and therefore needs no
+  # photo-library permission at all. Routing photos through the document picker
+  # instead would work, but it would show a file browser to someone who asked
+  # for their camera roll.
+  image_picker: ^1.1.2
   meta: ^1.15.0
   path_provider: ^2.1.4
   rl_core: ^0.1.0

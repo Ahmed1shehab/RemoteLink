@@ -216,16 +216,18 @@ void main() {
       expect(find.text('Photo'), findsOneWidget);
       expect(find.text('Send Text'), findsOneWidget);
 
-      // Switch to File mode
+      // Switch to File mode. This used to assert a "File path" text field, in
+      // which the user was expected to type an absolute path by hand — the
+      // screen offers a picker now, and the field is gone.
       await tester.tap(find.text('File'));
       await tester.pumpAndSettle();
-      expect(find.text('File path'), findsOneWidget);
+      expect(find.text('Choose files'), findsOneWidget);
       expect(find.text('Send File'), findsOneWidget);
 
       // Switch to Photo mode
       await tester.tap(find.text('Photo'));
       await tester.pumpAndSettle();
-      expect(find.text('Photo / Image path'), findsOneWidget);
+      expect(find.text('Choose photos'), findsOneWidget);
       expect(find.text('Send Photo'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });

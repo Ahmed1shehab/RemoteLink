@@ -9,6 +9,7 @@ import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import 'file_picker.dart';
 import 'transfer_controller.dart';
 import 'transfer_model.dart';
 
@@ -24,7 +25,13 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
   int _selectedType = 0; // 0 = Text/URL, 1 = File, 2 = Photo
   final TextEditingController _textController = TextEditingController();
   final TextEditingController _customNameController = TextEditingController();
-  final TextEditingController _filePathController = TextEditingController();
+
+  /// What the user chose in the picker, in the order they chose it.
+  final List<PickedFile> _picked = <PickedFile>[];
+
+  /// True while a picker is open, so a second tap cannot stack two of them.
+  bool _isPicking = false;
+
   String? _selectedTargetId;
   String? _statusError;
 
@@ -32,7 +39,6 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
   void dispose() {
     _textController.dispose();
     _customNameController.dispose();
-    _filePathController.dispose();
     super.dispose();
   }
 
@@ -179,33 +185,13 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
                       border: OutlineInputBorder(),
                     ),
                   ),
-                ] else if (_selectedType == 1) ...<Widget>[
-                  TextField(
-                    controller: _filePathController,
-                    decoration: InputDecoration(
-                      labelText: 'File path',
-                      hintText: '/path/to/document.pdf',
-                      border: const OutlineInputBorder(),
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.folder_open),
-                        tooltip: 'Sample file',
-                        onPressed: _setSampleFile,
-                      ),
-                    ),
-                  ),
                 ] else ...<Widget>[
-                  TextField(
-                    controller: _filePathController,
-                    decoration: InputDecoration(
-                      labelText: 'Photo / Image path',
-                      hintText: '/path/to/photo.jpg',
-                      border: const OutlineInputBorder(),
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.image),
-                        tooltip: 'Sample image',
-                        onPressed: _setSampleImage,
-                      ),
-                    ),
+                  _PickedFilesField(
+                    picked: _picked,
+                    isPhotoMode: _selectedType == 2,
+                    isPicking: _isPicking,
+                    onPick: _pick,
+                    onRemove: (file) => setState(() => _picked.remove(file)),
                   ),
                 ],
                 if (_statusError != null) ...<Widget>[
@@ -220,17 +206,17 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
                 ],
                 const SizedBox(height: 16),
                 FilledButton.icon(
-                  onPressed: isConnected && targets.isNotEmpty
+                  // Disabled with nothing chosen, rather than enabled and then
+                  // complaining. The button is the only place the state is
+                  // visible, and an enabled Send that cannot send is the shape
+                  // of the bug this screen already had once.
+                  onPressed: isConnected &&
+                          targets.isNotEmpty &&
+                          (_selectedType == 0 || _picked.isNotEmpty)
                       ? () => _send(controller, targets)
                       : null,
                   icon: const Icon(Icons.send),
-                  label: Text(
-                    _selectedType == 0
-                        ? 'Send Text'
-                        : _selectedType == 1
-                            ? 'Send File'
-                            : 'Send Photo',
-                  ),
+                  label: Text(_sendLabel),
                 ),
               ],
             ),
@@ -262,12 +248,46 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     );
   }
 
-  void _setSampleFile() {
-    _filePathController.text = '/sdcard/Download/sample_document.pdf';
+  String get _sendLabel {
+    if (_selectedType == 0) return 'Send Text';
+    final noun = _selectedType == 2 ? 'Photo' : 'File';
+    if (_picked.isEmpty) return 'Send $noun';
+    if (_picked.length == 1) return 'Send 1 $noun';
+    return 'Send ${_picked.length} ${noun}s';
   }
 
-  void _setSampleImage() {
-    _filePathController.text = '/sdcard/DCIM/Camera/photo_001.jpg';
+  Future<void> _pick() async {
+    if (_isPicking) return;
+    setState(() {
+      _isPicking = true;
+      _statusError = null;
+    });
+
+    final picker = ref.read(transferFilePickerProvider);
+    try {
+      final chosen = _selectedType == 2
+          ? await picker.pickImages()
+          : await picker.pickFiles();
+      if (!mounted) return;
+      setState(() {
+        // Appended, not replaced. Picking twice is how the user assembles a
+        // set from more than one place — a photo from the camera roll and a
+        // PDF from Files — and replacing would silently discard the first.
+        for (final file in chosen) {
+          if (!_picked.any((p) => p.file.path == file.file.path)) {
+            _picked.add(file);
+          }
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      // A picker can fail for reasons the user can act on — a permission
+      // refused, no photos app on the device — so this is shown rather than
+      // swallowed. A cancel is not an error: it returns an empty list.
+      setState(() => _statusError = 'Could not open the picker: $e');
+    } finally {
+      if (mounted) setState(() => _isPicking = false);
+    }
   }
 
   Future<void> _send(
@@ -300,23 +320,39 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
         _textController.clear();
         _customNameController.clear();
       } else {
-        final path = _filePathController.text.trim();
-        if (path.isEmpty) {
-          setState(() => _statusError = 'Please enter a valid file path');
+        if (_picked.isEmpty) {
+          setState(
+            () => _statusError = _selectedType == 2
+                ? 'Choose at least one photo to send'
+                : 'Choose at least one file to send',
+          );
           return;
         }
-        final file = File(path);
-        if (!file.existsSync()) {
-          // If file doesn't exist on disk, create temporary dummy file for testing/demo
-          await file.parent.create(recursive: true);
-          await file.writeAsString('RemoteLink transfer payload');
+
+        // Re-checked at send time, not only at pick time. Android can evict a
+        // cached copy between the two, and the alternative — the transfer
+        // engine throwing on `lengthSync` — surfaces as an unexplained failure
+        // partway through the offer.
+        final missing = _picked.where((p) => !p.file.existsSync()).toList();
+        if (missing.isNotEmpty) {
+          setState(() {
+            _picked.removeWhere((p) => missing.contains(p));
+            _statusError = missing.length == 1
+                ? '${missing.first.displayName} is no longer available. '
+                    'Choose it again.'
+                : '${missing.length} files are no longer available. '
+                    'Choose them again.';
+          });
+          return;
         }
+
         await controller.sendFiles(
           targetPeerId: target.id,
           targetPeerName: target.name,
-          files: <File>[file],
+          files: <File>[for (final p in _picked) p.file],
+          fileNames: <String>[for (final p in _picked) p.displayName],
         );
-        _filePathController.clear();
+        setState(_picked.clear);
       }
     } catch (e) {
       setState(() => _statusError = 'Send failed: $e');
@@ -345,6 +381,108 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
         unawaited(controller.declineIncomingTransfer(request));
       }
     });
+  }
+}
+
+/// The choose-files control and the list of what is currently chosen.
+///
+/// This replaced a text field that asked the user to type an absolute path,
+/// next to a button that filled in a hard-coded sample one. Nothing about that
+/// arrangement could send a real file, and on iOS — where an app cannot read
+/// outside its own container without going through the picker — no typed path
+/// would ever have worked.
+class _PickedFilesField extends StatelessWidget {
+  const _PickedFilesField({
+    required this.picked,
+    required this.isPhotoMode,
+    required this.isPicking,
+    required this.onPick,
+    required this.onRemove,
+  });
+
+  final List<PickedFile> picked;
+  final bool isPhotoMode;
+  final bool isPicking;
+  final Future<void> Function() onPick;
+  final void Function(PickedFile) onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final noun = isPhotoMode ? 'photos' : 'files';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        OutlinedButton.icon(
+          onPressed: isPicking ? null : () => unawaited(onPick()),
+          icon: isPicking
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Icon(isPhotoMode ? Icons.photo_library : Icons.folder_open),
+          label: Text(
+            picked.isEmpty ? 'Choose $noun' : 'Add more $noun',
+          ),
+        ),
+        if (picked.isEmpty) ...<Widget>[
+          const SizedBox(height: 8),
+          Text(
+            isPhotoMode ? 'Opens your photo library.' : 'Opens your files.',
+            style: Theme.of(context).textTheme.bodySmall,
+            textAlign: TextAlign.center,
+          ),
+        ] else ...<Widget>[
+          const SizedBox(height: 12),
+          for (final file in picked)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: <Widget>[
+                  Icon(
+                    isPhotoMode ? Icons.image_outlined : Icons.description,
+                    size: 18,
+                    color: scheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      file.displayName,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    formatBytes(_lengthOrZero(file.file)),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    tooltip: 'Remove ${file.displayName}',
+                    onPressed: () => onRemove(file),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  /// A size for the row, without letting a vanished file take down the build.
+  ///
+  /// `lengthSync` throws when the path no longer resolves, and a throw inside
+  /// `build` is a red screen rather than a missing number. Send-time re-checks
+  /// the file properly and tells the user; this only has to render.
+  static int _lengthOrZero(File file) {
+    try {
+      return file.lengthSync();
+    } on FileSystemException {
+      return 0;
+    }
   }
 }
 
