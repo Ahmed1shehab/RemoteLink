@@ -6,6 +6,7 @@ import 'package:rl_protocol/rl_protocol.dart';
 
 import '../input_backend.dart';
 import '../keymap.dart';
+import '../monitor_topology.dart';
 import 'coregraphics_ffi.dart';
 
 /// macOS input injection via Quartz Event Services.
@@ -40,6 +41,13 @@ final class MacosInputBackend implements InputBackend {
   /// UTF-16 units injected per event. Core Graphics accepts a string per
   /// keyboard event, so a whole paste can go out in a handful of calls.
   static const int _unicodeBatch = 256;
+
+  /// Ceiling on displays enumerated in one pass.
+  ///
+  /// The count comes from the OS rather than a peer, so this is a sanity bound
+  /// and not a security one — but a bound before an allocation is the habit,
+  /// and 32 is far past any real desk.
+  static const int _maxDisplays = 32;
 
   final CoreGraphicsBindings _bindings;
   final Log _log = Log.scoped('native.input.macos');
@@ -110,8 +118,37 @@ final class MacosInputBackend implements InputBackend {
   @override
   void moveCursorTo(int x, int y) => _moveTo(x, y, deltaX: 0, deltaY: 0);
 
+  /// Virtual desktop bounds for clamping, refreshed at most once a second.
+  ///
+  /// [virtualBounds] now enumerates every display, which is two allocations and
+  /// several framework calls. That is fine for a topology broadcast and not
+  /// fine here: this runs on every relative move, up to 240 times a second, on
+  /// the path whose whole design constraint is that it allocates nothing per
+  /// event. A second of staleness costs nothing a user can perceive — the only
+  /// consequence is that for up to a second after plugging in a monitor the
+  /// cursor cannot be pushed onto it, and the next move fixes that.
+  ScreenBounds get _clampBounds {
+    final cached = _cachedVirtualBounds;
+    if (cached != null &&
+        _geometryAge.elapsedMilliseconds < _geometryTtlMillis) {
+      return cached;
+    }
+    final fresh = virtualBounds;
+    _cachedVirtualBounds = fresh;
+    _geometryAge.reset();
+    return fresh;
+  }
+
+  static const int _geometryTtlMillis = 1000;
+
+  /// Monotonic, so it is unaffected by the clock jumping — and deliberately not
+  /// the injected [Clock], which exists for code a test drives. Nothing here is
+  /// reachable without a real display server.
+  final Stopwatch _geometryAge = Stopwatch()..start();
+  ScreenBounds? _cachedVirtualBounds;
+
   void _moveTo(int x, int y, {required int deltaX, required int deltaY}) {
-    final bounds = virtualBounds;
+    final bounds = _clampBounds;
     _point.ref
       // Clamping is not cosmetic: Core Graphics accepts off-screen coordinates
       // and the cursor genuinely disappears, with no way to recover it from the
@@ -457,8 +494,53 @@ final class MacosInputBackend implements InputBackend {
   }
 
   @override
-  List<ScreenBounds> get displays {
-    final displayId = _bindings.mainDisplayId();
+  List<MonitorInfo> get monitors {
+    // Two calls rather than one: the documented way to size the array is to ask
+    // with a null pointer first. Skipping that and guessing a fixed capacity
+    // would silently truncate on the one setup that most needs enumeration —
+    // the desk with more screens than the guess allowed for.
+    var capacity = 0;
+    final countOut = calloc<Uint32>();
+    try {
+      if (_bindings.getActiveDisplayList(0, nullptr, countOut) != 0) {
+        _log.warn('CGGetActiveDisplayList could not report a display count');
+        return const <MonitorInfo>[];
+      }
+      capacity = countOut.value;
+      if (capacity == 0) return const <MonitorInfo>[];
+      if (capacity > _maxDisplays) capacity = _maxDisplays;
+
+      final ids = calloc<Uint32>(capacity);
+      try {
+        if (_bindings.getActiveDisplayList(capacity, ids, countOut) != 0) {
+          _log.warn('CGGetActiveDisplayList failed');
+          return const <MonitorInfo>[];
+        }
+
+        final count = countOut.value < capacity ? countOut.value : capacity;
+        final result = <MonitorInfo>[];
+        for (var i = 0; i < count; i++) {
+          result.add(_describe(ids[i], ordinal: i + 1));
+        }
+
+        // Primary first, matching the contract on `InputBackend.monitors`. A
+        // phone that ignores the flag and renders the list in order still puts
+        // the screen the user thinks of as "the" screen where they expect it.
+        result.sort((a, b) {
+          if (a.isPrimary != b.isPrimary) return a.isPrimary ? -1 : 1;
+          return 0;
+        });
+        return result;
+      } finally {
+        calloc.free(ids);
+      }
+    } finally {
+      calloc.free(countOut);
+    }
+  }
+
+  /// Builds a [MonitorInfo] for one `CGDirectDisplayID`.
+  MonitorInfo _describe(int displayId, {required int ordinal}) {
     final bounds = _bindings.displayBounds(displayId);
 
     // CGDisplayBounds reports points; CGDisplayPixelsWide reports backing
@@ -467,27 +549,46 @@ final class MacosInputBackend implements InputBackend {
     final pixelWidth = _bindings.displayPixelsWide(displayId);
     final scale = bounds.size.width > 0 ? pixelWidth / bounds.size.width : 1.0;
 
-    return <ScreenBounds>[
-      ScreenBounds(
+    // No name is available without IOKit or AppKit, neither of which this
+    // package links. "Built-in" versus an ordinal is what CoreGraphics alone
+    // can honestly say, and it is enough to tell a laptop screen from the
+    // monitor next to it — which is the distinction a picker actually needs.
+    final isBuiltin = _bindings.displayIsBuiltin(displayId) != 0;
+
+    return MonitorInfo(
+      // CGDirectDisplayID is never zero for a real display (zero is
+      // kCGNullDirectDisplay), which is what lets zero stay reserved on the
+      // wire for "the whole virtual desktop".
+      id: displayId,
+      bounds: ScreenBounds(
         x: bounds.origin.x.round(),
         y: bounds.origin.y.round(),
         width: bounds.size.width.round(),
         height: bounds.size.height.round(),
         scaleFactor: scale,
       ),
-    ];
+      name: isBuiltin ? 'Built-in Display' : 'Display $ordinal',
+      isPrimary: _bindings.displayIsMain(displayId) != 0,
+    );
   }
 
   @override
   ScreenBounds get virtualBounds {
-    // Enumerating every display needs CGGetActiveDisplayList and an array
-    // marshal, which milestone 1 does not require. The main display bounds
-    // cover clamping and absolute positioning on the overwhelmingly common
-    // single-display setup; multi-display lands with screen sharing.
-    final all = displays;
-    return all.isEmpty
-        ? const ScreenBounds(x: 0, y: 0, width: 0, height: 0)
-        : all.first;
+    final all = monitors;
+    if (all.isNotEmpty) return MonitorTopology.union(all);
+
+    // Enumeration can fail — a display reconfiguration racing the call returns
+    // an error rather than a short list. The main display is a worse answer
+    // than the union but a far better one than a zero-sized rectangle, which
+    // would clamp every absolute move onto the top-left pixel.
+    final displayId = _bindings.mainDisplayId();
+    final bounds = _bindings.displayBounds(displayId);
+    return ScreenBounds(
+      x: bounds.origin.x.round(),
+      y: bounds.origin.y.round(),
+      width: bounds.size.width.round(),
+      height: bounds.size.height.round(),
+    );
   }
 
   @override

@@ -189,6 +189,29 @@ typedef CGDisplayBoundsDart = CGRect Function(int display);
 typedef _CGDisplayPixelsWideNative = IntPtr Function(Uint32 display);
 typedef CGDisplayPixelsWideDart = int Function(int display);
 
+/// `CGGetActiveDisplayList(maxDisplays, displays, displayCount)`.
+///
+/// "Active" rather than "online" is the right list: it excludes displays that
+/// are mirroring another one, which would otherwise appear as a second monitor
+/// occupying the same rectangle — a screen picker with two entries the user
+/// cannot tell apart, one of which does nothing distinguishable.
+typedef _CGGetActiveDisplayListNative = Int32 Function(
+  Uint32 maxDisplays,
+  Pointer<Uint32> activeDisplays,
+  Pointer<Uint32> displayCount,
+);
+typedef CGGetActiveDisplayListDart = int Function(
+  int maxDisplays,
+  Pointer<Uint32> activeDisplays,
+  Pointer<Uint32> displayCount,
+);
+
+typedef _CGDisplayIsBuiltinNative = Uint32 Function(Uint32 display);
+typedef CGDisplayIsBuiltinDart = int Function(int display);
+
+typedef _CGDisplayIsMainNative = Uint32 Function(Uint32 display);
+typedef CGDisplayIsMainDart = int Function(int display);
+
 typedef _AXIsProcessTrustedNative = Bool Function();
 typedef AXIsProcessTrustedDart = bool Function();
 
@@ -245,6 +268,13 @@ final class CoreGraphicsBindings {
         CGDisplayBoundsDart>('CGDisplayBounds');
     displayPixelsWide = _coreGraphics.lookupFunction<_CGDisplayPixelsWideNative,
         CGDisplayPixelsWideDart>('CGDisplayPixelsWide');
+    getActiveDisplayList = _coreGraphics.lookupFunction<
+        _CGGetActiveDisplayListNative,
+        CGGetActiveDisplayListDart>('CGGetActiveDisplayList');
+    displayIsBuiltin = _coreGraphics.lookupFunction<_CGDisplayIsBuiltinNative,
+        CGDisplayIsBuiltinDart>('CGDisplayIsBuiltin');
+    displayIsMain = _coreGraphics.lookupFunction<_CGDisplayIsMainNative,
+        CGDisplayIsMainDart>('CGDisplayIsMain');
 
     release = _coreFoundation
         .lookupFunction<_CFReleaseNative, CFReleaseDart>('CFRelease');
@@ -274,6 +304,9 @@ final class CoreGraphicsBindings {
   late final CGMainDisplayIDDart mainDisplayId;
   late final CGDisplayBoundsDart displayBounds;
   late final CGDisplayPixelsWideDart displayPixelsWide;
+  late final CGGetActiveDisplayListDart getActiveDisplayList;
+  late final CGDisplayIsBuiltinDart displayIsBuiltin;
+  late final CGDisplayIsMainDart displayIsMain;
   late final CFReleaseDart release;
 
   /// Whether the process holds Accessibility permission.

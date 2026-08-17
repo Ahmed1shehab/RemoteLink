@@ -42,6 +42,7 @@ export 'src/macos/macos_media.dart';
 export 'src/macos/macos_network_adapters.dart';
 export 'src/macos/macos_system_info.dart';
 export 'src/media_backend.dart';
+export 'src/monitor_topology.dart';
 export 'src/network_adapter_backend.dart';
 export 'src/system_info_backend.dart';
 export 'src/windows/win32_brightness.dart';

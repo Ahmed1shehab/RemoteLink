@@ -80,11 +80,20 @@ final class CommandDispatcher {
         _input.moveCursorBy(message.deltaX, message.deltaY);
 
       case MouseMoveAbsolute():
-        final bounds = _input.virtualBounds;
-        _input.moveCursorTo(
-          bounds.x + (message.x.clamp(0.0, 1.0) * bounds.width).round(),
-          bounds.y + (message.y.clamp(0.0, 1.0) * bounds.height).round(),
+        // `monitors` is only enumerated when the peer names one. A phone that
+        // addresses the whole desktop — every build before RL-302 — takes the
+        // same single-query path it always did, so nothing on the hot path got
+        // more expensive for the common case.
+        final (x, y) = MonitorTopology.resolve(
+          monitors: message.monitorId == MonitorTopology.wholeVirtualDesktop
+              ? const <MonitorInfo>[]
+              : _input.monitors,
+          virtualBounds: _input.virtualBounds,
+          monitorId: message.monitorId,
+          x: message.x,
+          y: message.y,
         );
+        _input.moveCursorTo(x, y);
 
       case MouseButtonEvent():
         _applyMouseButton(message);

@@ -244,6 +244,103 @@ void main() {
     }
   });
 
+  group('CommandDispatcher MouseMoveAbsolute monitor addressing', () {
+    // The backend's fake desk: a 1920x1080 primary at the origin and a 2x
+    // 1512x982 panel starting at x = 1920, union 3432x1080.
+
+    test('an unaddressed move still spans the whole virtual desktop', () {
+      // Exactly what every phone built before this feature sends. Its taps must
+      // land where they always did, or an appended field would have changed
+      // behaviour without changing the bytes.
+      final backend = _RecordingInputBackend();
+      final dispatcher = createTestDispatcher(input: backend);
+
+      final result = dispatcher.dispatch(
+        const MouseMoveAbsolute(x: 0.5, y: 0.5),
+        PermissionTier.standard,
+      );
+
+      expect(result, isTrue);
+      // round(0.5 * 3431) = 1716, i.e. just past the seam — which is precisely
+      // why addressing a monitor is worth having.
+      expect(backend.movedTo, (1716, 540));
+    });
+
+    test('a move naming a monitor lands in the middle of that monitor', () {
+      final backend = _RecordingInputBackend();
+      final dispatcher = createTestDispatcher(input: backend);
+
+      dispatcher.dispatch(
+        const MouseMoveAbsolute(x: 0.5, y: 0.5, monitorId: 22),
+        PermissionTier.standard,
+      );
+
+      // Middle of the 2x panel: 1920 + round(0.5 * 1511) = 2676.
+      expect(backend.movedTo, (2676, 491));
+      expect(backend.movedTo!.$1, greaterThanOrEqualTo(1920));
+    });
+
+    test('the same coordinate on the primary stays on the primary', () {
+      final backend = _RecordingInputBackend();
+      final dispatcher = createTestDispatcher(input: backend);
+
+      dispatcher.dispatch(
+        const MouseMoveAbsolute(x: 1.0, y: 0.5, monitorId: 11),
+        PermissionTier.standard,
+      );
+
+      // The right edge of the primary, not the first column of its neighbour.
+      expect(backend.movedTo, (1919, 540));
+    });
+
+    test('a stale monitor id falls back instead of dropping the move', () {
+      final backend = _RecordingInputBackend();
+      final dispatcher = createTestDispatcher(input: backend);
+
+      final result = dispatcher.dispatch(
+        const MouseMoveAbsolute(x: 0.0, y: 0.0, monitorId: 4242),
+        PermissionTier.standard,
+      );
+
+      expect(result, isTrue);
+      expect(backend.movedTo, (0, 0));
+    });
+
+    test('a NaN coordinate resolves to a defined point', () {
+      // x and y are float32 fields filled by an untrusted peer. The dispatcher
+      // reaches `round()`, which throws `UnsupportedError` on NaN unless
+      // `clamp` absorbs it first — and whether it does is undocumented
+      // behaviour that differs from what `num.clamp` promises. The resolver
+      // decides instead, so the input path cannot inherit that coin flip.
+      final backend = _RecordingInputBackend();
+      final dispatcher = createTestDispatcher(input: backend);
+
+      final result = dispatcher.dispatch(
+        const MouseMoveAbsolute(x: double.nan, y: double.nan, monitorId: 22),
+        PermissionTier.standard,
+      );
+
+      expect(result, isTrue);
+      // The origin of the addressed monitor, not the far corner and not a
+      // thrown UnsupportedError.
+      expect(backend.movedTo, (1920, 0));
+    });
+
+    test('is denied at readOnly tier like every other pointer message', () {
+      final backend = _RecordingInputBackend();
+      final dispatcher = createTestDispatcher(input: backend);
+
+      final result = dispatcher.dispatch(
+        const MouseMoveAbsolute(x: 0.5, y: 0.5, monitorId: 22),
+        PermissionTier.readOnly,
+      );
+
+      expect(result, isFalse);
+      expect(dispatcher.deniedCount, 1);
+      expect(backend.movedTo, isNull);
+    });
+  });
+
   group('CommandDispatcher ClipboardSyncToggle across PermissionTier', () {
     const toggleCommand = ClipboardSyncToggle(
       enabled: false,
@@ -294,6 +391,7 @@ class _RecordingInputBackend implements InputBackend {
   double? magnifyDelta;
   double? rotateDegrees;
   ({int fingerCount, SwipeDirection direction})? swipeDetails;
+  (int x, int y)? movedTo;
 
   @override
   bool get isAvailable => true;
@@ -304,22 +402,44 @@ class _RecordingInputBackend implements InputBackend {
   @override
   (int, int) get cursorPosition => (0, 0);
 
+  /// The union of [monitors], as a real backend reports it.
   @override
   ScreenBounds get virtualBounds => const ScreenBounds(
         x: 0,
         y: 0,
-        width: 1920,
+        width: 3432,
         height: 1080,
       );
 
+  /// A mixed-DPI pair sharing the seam at x = 1920, so a coordinate that
+  /// resolves against the wrong rectangle lands on the wrong screen rather
+  /// than merely a few pixels out.
   @override
-  List<ScreenBounds> get displays => const <ScreenBounds>[];
+  List<MonitorInfo> get monitors => const <MonitorInfo>[
+        MonitorInfo(
+          id: 11,
+          bounds: ScreenBounds(x: 0, y: 0, width: 1920, height: 1080),
+          name: 'Display 1',
+          isPrimary: true,
+        ),
+        MonitorInfo(
+          id: 22,
+          bounds: ScreenBounds(
+            x: 1920,
+            y: 0,
+            width: 1512,
+            height: 982,
+            scaleFactor: 2.0,
+          ),
+          name: 'Built-in Display',
+        ),
+      ];
 
   @override
   void moveCursorBy(int dx, int dy) {}
 
   @override
-  void moveCursorTo(int x, int y) {}
+  void moveCursorTo(int x, int y) => movedTo = (x, y);
 
   @override
   void mouseDown(MouseButton button, {int clickCount = 1}) {}

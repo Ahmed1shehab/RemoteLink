@@ -6,6 +6,7 @@ import 'package:rl_protocol/rl_protocol.dart';
 
 import '../input_backend.dart';
 import '../keymap.dart';
+import '../monitor_topology.dart';
 import 'win32_ffi.dart';
 
 /// Windows input injection via `SendInput`.
@@ -32,15 +33,20 @@ final class Win32InputBackend implements InputBackend {
     // worst realistic case, and that is split across two calls anyway).
     _batch = calloc<INPUT>(_batchCapacity);
     _point = calloc<POINT>();
+    _monitorInfo = calloc<MONITORINFOEXW>();
   }
 
   static const int _batchCapacity = 16;
+
+  /// Ceiling on monitors collected in one enumeration pass.
+  static const int _maxMonitors = 32;
 
   final Win32Bindings _bindings;
   final Log _log = Log.scoped('native.input.win32');
 
   late final Pointer<INPUT> _batch;
   late final Pointer<POINT> _point;
+  late final Pointer<MONITORINFOEXW> _monitorInfo;
 
   final Set<int> _heldKeys = <int>{};
   final Set<MouseButton> _heldButtons = <MouseButton>{};
@@ -417,17 +423,115 @@ final class Win32InputBackend implements InputBackend {
   }
 
   @override
-  List<ScreenBounds> get displays {
-    // Enumerating every monitor needs EnumDisplayMonitors and a callback, which
-    // is more FFI surface than milestone 1 requires. The primary display plus
-    // the virtual desktop bounds covers absolute positioning and DPI reporting;
-    // per-monitor enumeration lands with the screen-sharing feature that
-    // actually needs it.
-    final width = _bindings.getSystemMetrics(SM_CXSCREEN);
-    final height = _bindings.getSystemMetrics(SM_CYSCREEN);
-    return <ScreenBounds>[
-      ScreenBounds(x: 0, y: 0, width: width, height: height),
-    ];
+  List<MonitorInfo> get monitors {
+    // The callback cannot close over `this` — `Pointer.fromFunction` only
+    // accepts a static target — so handles land in a static buffer and are
+    // processed here. Safe because enumeration is synchronous and
+    // single-isolate: nothing else can run between the clear and the read.
+    _enumeratedMonitors.clear();
+    final ok = _bindings.enumDisplayMonitors(
+      0,
+      nullptr,
+      Pointer.fromFunction<MonitorEnumProcNative>(_collectMonitor, 0),
+      0,
+    );
+    if (ok == 0 && _enumeratedMonitors.isEmpty) {
+      _log.debug(
+        () => 'EnumDisplayMonitors failed',
+        fields: <String, Object?>{'lastError': _bindings.getLastError()},
+      );
+      return const <MonitorInfo>[];
+    }
+
+    final handles = List<int>.of(_enumeratedMonitors);
+    _enumeratedMonitors.clear();
+
+    final result = <MonitorInfo>[];
+    for (var i = 0; i < handles.length; i++) {
+      final monitor = _describe(handles[i], ordinal: i + 1);
+      if (monitor != null) result.add(monitor);
+    }
+
+    result.sort((a, b) {
+      if (a.isPrimary != b.isPrimary) return a.isPrimary ? -1 : 1;
+      return 0;
+    });
+    return result;
+  }
+
+  /// Builds a [MonitorInfo] for one `HMONITOR`, or null if Windows refuses.
+  MonitorInfo? _describe(int handle, {required int ordinal}) {
+    _monitorInfo.ref.cbSize = sizeOf<MONITORINFOEXW>();
+    if (_bindings.getMonitorInfo(handle, _monitorInfo) == 0) return null;
+
+    final info = _monitorInfo.ref;
+    final rect = info.rcMonitor;
+
+    // `szDevice` is a fixed 32-unit array, NUL-padded rather than NUL-checked
+    // by the caller. Reading all 32 units would append the padding to the name.
+    final buffer = StringBuffer();
+    for (var i = 0; i < CCHDEVICENAME; i++) {
+      final unit = info.szDevice[i];
+      if (unit == 0) break;
+      buffer.writeCharCode(unit);
+    }
+    final device = buffer.toString();
+
+    var scale = 1.0;
+    final dpiFor = _bindings.getDpiForMonitor;
+    if (dpiFor != null) {
+      final dpiX = calloc<Uint32>();
+      final dpiY = calloc<Uint32>();
+      try {
+        if (dpiFor(handle, MDT_EFFECTIVE_DPI, dpiX, dpiY) == 0) {
+          scale = dpiX.value / USER_DEFAULT_SCREEN_DPI;
+        }
+      } finally {
+        calloc
+          ..free(dpiX)
+          ..free(dpiY);
+      }
+    }
+
+    return MonitorInfo(
+      id: _stableId(device),
+      bounds: ScreenBounds(
+        x: rect.left,
+        y: rect.top,
+        width: rect.right - rect.left,
+        height: rect.bottom - rect.top,
+        scaleFactor: scale,
+      ),
+      // `\\.\DISPLAY1` is an adapter path, not something to show a user.
+      name: _friendlyName(device, ordinal),
+      isPrimary: info.dwFlags & MONITORINFOF_PRIMARY != 0,
+    );
+  }
+
+  static String _friendlyName(String device, int ordinal) {
+    const prefix = r'\\.\DISPLAY';
+    if (device.startsWith(prefix) && device.length > prefix.length) {
+      return 'Display ${device.substring(prefix.length)}';
+    }
+    return device.isEmpty ? 'Display $ordinal' : device;
+  }
+
+  /// A stable non-zero id derived from the adapter name.
+  ///
+  /// The obvious candidate — `HMONITOR` — is documented as not persistent, and
+  /// in practice changes when a display is turned off and on again. A phone
+  /// holding an id across that would address a monitor that no longer exists.
+  /// `\\.\DISPLAYn` survives it, so its FNV-1a hash is used as the id: the
+  /// value is opaque to both sides and only ever compared for equality.
+  static int _stableId(String device) {
+    var hash = 0x811c9dc5;
+    for (final unit in device.codeUnits) {
+      hash = ((hash ^ unit) * 0x01000193) & 0xFFFFFFFF;
+    }
+    // Zero is reserved on the wire for "the whole virtual desktop", so a
+    // display must never claim it. Collapsing to 1 is fine — an id only has to
+    // be distinct from the *other* monitors present.
+    return hash == 0 ? 1 : hash;
   }
 
   @override
@@ -445,6 +549,19 @@ final class Win32InputBackend implements InputBackend {
     _disposed = true;
     calloc
       ..free(_batch)
-      ..free(_point);
+      ..free(_point)
+      ..free(_monitorInfo);
   }
+}
+
+/// Handles collected by [_collectMonitor] during one `EnumDisplayMonitors` call.
+final List<int> _enumeratedMonitors = <int>[];
+
+/// `MONITORENUMPROC`. Must be a static target: `Pointer.fromFunction` cannot
+/// take a closure, which is why the results land in a library-private list
+/// instead of being appended to an instance field.
+int _collectMonitor(int hMonitor, int hdc, Pointer<RECT> clip, int data) {
+  if (_enumeratedMonitors.length >= Win32InputBackend._maxMonitors) return 0;
+  _enumeratedMonitors.add(hMonitor);
+  return 1;
 }

@@ -413,3 +413,50 @@ entirely.
 Named shortcuts (`copy`, `taskManager`, …) travel as *intent* rather than as
 keystrokes, and the desktop resolves them. That is why the phone ships one Copy
 button rather than a per-platform branch.
+
+---
+
+## 11. Monitor topology
+
+`screenTopology` (`0x0605`) is the desktop's description of the desk: for each
+monitor an id, an origin, a size, a DPI scale, a primary flag, and a name. It is
+sent once on connect and again whenever the layout changes.
+
+```text
+count        varuint, refused above 32 before anything is allocated
+per monitor:
+  id         varuint, never 0
+  x, y       varint (zig-zag — a monitor left of the primary has a negative x)
+  width      varuint
+  height     varuint
+  scale      float32
+  flags      uint8, bit 0 = primary
+  name       length-prefixed UTF-8, through `sanitiseDeviceName` on the way in
+```
+
+It is the only implemented code in the `0x06xx` range. `screenStreamStart`,
+`screenStreamStop`, `screenFrame`, and `screenConfigure` are still declared and
+decode as opaque bytes; they land with screen streaming itself.
+
+### Addressing a monitor
+
+`mouseMoveAbsolute` carries `monitorId` as an **appended** field, after the
+`displayIndex` that shipped before it. The rules in §5 are what make that safe,
+and both directions are tested against a frozen copy of the older decoder in
+`mouse_move_absolute_compatibility_test.dart`.
+
+`monitorId == 0` means the whole virtual desktop. That is not an arbitrary
+sentinel — it is what a peer that predates the field sends, because the field is
+absent from its payload and absence decodes as zero. Giving zero any other
+meaning (the primary monitor, say) would change where every deployed phone's
+taps land without altering a single byte on the wire, which is the silent kind
+of break the append-only rule exists to prevent. A real monitor therefore never
+carries id 0, and one that claims it is dropped on decode.
+
+An **id**, not an index: unplugging the first of three monitors renumbers the
+rest, so a phone still holding "display 1" would quietly start driving a
+different screen. An id that no longer resolves falls back to the virtual
+desktop, which is recoverable; addressing the wrong screen is not.
+
+Normalisation is against `extent - 1`, so `1.0` is the last addressable pixel of
+that monitor rather than the first pixel of its neighbour.
