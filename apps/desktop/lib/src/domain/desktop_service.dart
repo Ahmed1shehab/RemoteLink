@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:meta/meta.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_native/rl_native.dart';
@@ -27,6 +28,7 @@ Capabilities buildCapabilities({
   required bool mediaAvailable,
   bool gesturesAvailable = false,
   bool brightnessAvailable = false,
+  bool screenCaptureAvailable = false,
 }) {
   var capabilities = const Capabilities(
     Capabilities.powerControl |
@@ -60,6 +62,11 @@ Capabilities buildCapabilities({
   if (brightnessAvailable) {
     // Advertised only when a working brightness backend is detected.
     capabilities = capabilities.plus(Capabilities.brightness);
+  }
+  if (screenCaptureAvailable) {
+    // Advertised only when screen recording permission is granted and a
+    // working screen capture backend is available.
+    capabilities = capabilities.plus(Capabilities.screenCapture);
   }
   return capabilities;
 }
@@ -177,6 +184,7 @@ final class DesktopService {
     BrightnessBackend? brightness,
     SystemInfoBackend? systemInfo,
     NetworkAdapterBackend? networkAdapters,
+    ScreenCaptureBackend? screenCapture,
     ClipboardHistory? clipboardHistory,
     this.incomingTransferStore,
     this.peerClipboardSettingsFile,
@@ -189,7 +197,8 @@ final class DesktopService {
         _brightness = brightness ?? NativeBackends.createBrightness(),
         _systemInfo = systemInfo ?? NativeBackends.createSystemInfo(),
         _networkAdapters =
-            networkAdapters ?? NativeBackends.createNetworkAdapters();
+            networkAdapters ?? NativeBackends.createNetworkAdapters(),
+        _screenCapture = screenCapture ?? NativeBackends.createScreenCapture();
 
   final DeviceIdentity identity;
   final TrustStore trustStore;
@@ -210,6 +219,7 @@ final class DesktopService {
   final BrightnessBackend _brightness;
   final SystemInfoBackend _systemInfo;
   final NetworkAdapterBackend _networkAdapters;
+  final ScreenCaptureBackend _screenCapture;
   final Log _log = Log.scoped('desktop.service');
 
   late final PairingCoordinator _pairing = PairingCoordinator(
@@ -242,6 +252,9 @@ final class DesktopService {
     onDeviceRename: _onDeviceRename,
     onFileTransferMessage: _onFileTransferMessage,
     onPermissionRequest: _onPermissionRequest,
+    onScreenStreamStart: _onScreenStreamStart,
+    onScreenStreamStop: _onScreenStreamStop,
+    onScreenConfigure: _onScreenConfigure,
   );
 
   RemoteLinkServer? _server;
@@ -249,6 +262,8 @@ final class DesktopService {
   BonjourAdvertiser? _bonjour;
 
   final Map<String, ConnectedDevice> _devices = <String, ConnectedDevice>{};
+  final Map<String, _ActiveScreenStream> _screenStreams =
+      <String, _ActiveScreenStream>{};
   final Map<String, int> _grantExpiryGenerations = <String, int>{};
   final Map<String, PeerClipboardConfig> _peerClipboardSettings =
       <String, PeerClipboardConfig>{};
@@ -331,6 +346,11 @@ final class DesktopService {
 
   String? get brightnessUnavailableReason => _brightness.unavailableReason;
 
+  bool get screenCaptureAvailable => _screenCapture.isAvailable;
+
+  String? get screenCaptureUnavailableReason =>
+      _screenCapture.unavailableReason;
+
   int get commandAppliedCount => _dispatcher.appliedCount;
 
   int get commandDeniedCount => _dispatcher.deniedCount;
@@ -340,13 +360,15 @@ final class DesktopService {
   /// Capabilities computed from the backends' *current* state.
   ///
   /// Recomputed on every read rather than cached at startup, because on macOS
-  /// Accessibility permission can be granted while the service is running.
+  /// Accessibility and Screen Recording permissions can be granted while the
+  /// service is running.
   Capabilities get currentCapabilities => buildCapabilities(
         inputAvailable: _input.isAvailable,
         clipboardAvailable: _clipboardBackend.isAvailable,
         mediaAvailable: _media.isAvailable,
         gesturesAvailable: _input.isAvailable && _input is MacosInputBackend,
         brightnessAvailable: _brightness.isAvailable,
+        screenCaptureAvailable: _screenCapture.isAvailable,
       );
 
   /// The desk's monitor layout, or `null` when the host cannot report one.
@@ -387,6 +409,7 @@ final class DesktopService {
 
   Timer? _permissionWatch;
   bool? _lastInputAvailable;
+  bool? _lastScreenCaptureAvailable;
 
   int get boundPort => _server?.boundPort ?? servicePort;
 
@@ -591,12 +614,19 @@ final class DesktopService {
   /// stale capabilities until the app is restarted.
   void _startPermissionWatch() {
     _lastInputAvailable = _input.isAvailable;
+    _lastScreenCaptureAvailable = _screenCapture.isAvailable;
     _inputAvailability.add(_lastInputAvailable!);
 
     _permissionWatch = Timer.periodic(const Duration(seconds: 2), (_) {
-      final available = _input.isAvailable;
-      if (available == _lastInputAvailable) return;
-      _lastInputAvailable = available;
+      final inputAvailable = _input.isAvailable;
+      final captureAvailable = _screenCapture.isAvailable;
+      if (inputAvailable == _lastInputAvailable &&
+          captureAvailable == _lastScreenCaptureAvailable) {
+        return;
+      }
+      final inputChanged = inputAvailable != _lastInputAvailable;
+      _lastInputAvailable = inputAvailable;
+      _lastScreenCaptureAvailable = captureAvailable;
 
       // New sessions must be offered the updated capability set. Existing
       // sessions negotiated theirs at handshake time and keep it until they
@@ -608,12 +638,21 @@ final class DesktopService {
       // TXT record is only read at resolve time, so it has to be republished.
       unawaited(_bonjour?.refresh() ?? Future<void>.value());
       _log.info(
-        'input availability changed',
-        fields: <String, Object?>{'available': available},
+        'input or capture availability changed',
+        fields: <String, Object?>{
+          'input': inputAvailable,
+          'screenCapture': captureAvailable,
+        },
       );
-      if (!_inputAvailability.isClosed) _inputAvailability.add(available);
+      if (inputChanged && !_inputAvailability.isClosed) {
+        _inputAvailability.add(inputAvailable);
+      }
     });
   }
+
+  @visibleForTesting
+  Future<void> registerSessionForTesting(ServerSession session) =>
+      _onAccepted(session);
 
   Future<void> _onAccepted(ServerSession session) async {
     final peer = await trustStore.findByPublicKey(
@@ -704,6 +743,13 @@ final class DesktopService {
     if (snapshot != null) await session.session.send(snapshot);
   }
 
+  @visibleForTesting
+  Future<void> handleMessageForTesting(
+    ServerSession session,
+    Message message,
+  ) =>
+      _onMessage(session, message);
+
   Future<void> _onMessage(ServerSession session, Message message) async {
     final device = _devices[session.peerId.value];
     if (device == null) return;
@@ -754,6 +800,7 @@ final class DesktopService {
     _grantExpiryGenerations[session.peerId.value] =
         (_grantExpiryGenerations[session.peerId.value] ?? 0) + 1;
     await _messageSubscriptions.remove(session.peerId.value)?.cancel();
+    _stopScreenStream(session.peerId.value);
     _devices.remove(session.peerId.value);
     await _transferReceivers.remove(session.peerId.value)?.dispose();
     _publishDevices();
@@ -2142,12 +2189,18 @@ final class DesktopService {
     await clipboard.dispose();
     await _pairing.dispose();
 
+    for (final stream in _screenStreams.values) {
+      stream.cancel();
+    }
+    _screenStreams.clear();
+
     _input.dispose();
     _clipboardBackend.dispose();
     _media.dispose();
     _brightness.dispose();
     _systemInfo.dispose();
     _networkAdapters.dispose();
+    _screenCapture.dispose();
 
     _devices.clear();
     await _deviceChanges.close();
@@ -2157,5 +2210,206 @@ final class DesktopService {
     await _transferChanges.close();
 
     _log.info('desktop service stopped');
+  }
+
+  void _onScreenStreamStart(ScreenStreamStart command) {
+    final peerId = _activeSessionPeerId;
+    if (peerId == null) return;
+    final device = _devices[peerId.value];
+    if (device == null) return;
+
+    if (!_screenCapture.isAvailable) {
+      _log.warn(
+        'screen capture requested but backend is unavailable',
+        fields: <String, Object?>{
+          'peer': peerId.value,
+          'reason': _screenCapture.unavailableReason,
+        },
+      );
+      unawaited(
+        device.serverSession.session.send(
+          const ScreenStreamStop(reason: ScreenStopReason.unsupportedCodec),
+        ),
+      );
+      return;
+    }
+
+    _stopScreenStream(peerId.value);
+
+    final stream = _ActiveScreenStream(
+      session: device.serverSession,
+      start: command,
+      clock: _clock,
+    );
+    _screenStreams[peerId.value] = stream;
+
+    _startScreenCaptureTimer(stream);
+    _log.info(
+      'screen streaming started',
+      fields: <String, Object?>{
+        'peer': peerId.value,
+        'fps': stream.targetFps,
+        'monitorId': stream.monitorId,
+      },
+    );
+  }
+
+  void _onScreenStreamStop(ScreenStreamStop command) {
+    final peerId = _activeSessionPeerId;
+    if (peerId == null) return;
+    _stopScreenStream(peerId.value);
+    _log.info(
+      'screen streaming stopped by peer',
+      fields: <String, Object?>{
+        'peer': peerId.value,
+        'reason': command.reason.name,
+      },
+    );
+  }
+
+  void _onScreenConfigure(ScreenConfigure command) {
+    final peerId = _activeSessionPeerId;
+    if (peerId == null) return;
+    final stream = _screenStreams[peerId.value];
+    if (stream == null) return;
+
+    final oldFps = stream.targetFps;
+    stream.configure(command);
+    if (stream.targetFps != oldFps) {
+      _startScreenCaptureTimer(stream);
+    }
+    _log.info(
+      'screen stream reconfigured',
+      fields: <String, Object?>{
+        'peer': peerId.value,
+        'fps': stream.targetFps,
+        'monitorId': stream.monitorId,
+        'max': '${stream.maxWidth}x${stream.maxHeight}',
+      },
+    );
+  }
+
+  void _startScreenCaptureTimer(_ActiveScreenStream stream) {
+    stream.cancel();
+    final interval = Duration(milliseconds: (1000 / stream.targetFps).round());
+    stream.timer = Timer.periodic(interval, (_) {
+      unawaited(screenCaptureTick(stream.session.peerId));
+    });
+  }
+
+  void _stopScreenStream(String peerKey) {
+    final stream = _screenStreams.remove(peerKey);
+    stream?.cancel();
+  }
+
+  /// Whether a screen capture stream is actively running for [peerId].
+  bool isStreamingScreen(DeviceId peerId) =>
+      _screenStreams.containsKey(peerId.value);
+
+  /// Total frames skipped for [peerId] due to backpressure.
+  int screenStreamSkippedCount(DeviceId peerId) =>
+      _screenStreams[peerId.value]?.skippedFrames ?? 0;
+
+  /// Total frames successfully captured and transmitted for [peerId].
+  int screenStreamCapturedCount(DeviceId peerId) =>
+      _screenStreams[peerId.value]?.capturedFrames ?? 0;
+
+  /// Captures a single frame for [peerId] and transmits it if not congested.
+  ///
+  /// Backpressure rule:
+  /// Capture is polled on a timer according to target FPS. If the previous
+  /// frame's capture or network transmission is still in-flight
+  /// (`isFrameInFlight == true`), this tick is skipped immediately.
+  /// Skipped ticks do not allocate or encode a frame, avoiding backlog buildup
+  /// in the network send queue and ensuring that the client receives the freshest
+  /// frame as soon as the transport drains.
+  Future<void> screenCaptureTick(DeviceId peerId) async {
+    final stream = _screenStreams[peerId.value];
+    if (stream == null) return;
+    final device = _devices[peerId.value];
+    if (device == null || !device.serverSession.session.isEstablished) {
+      _stopScreenStream(peerId.value);
+      return;
+    }
+
+    if (stream.isFrameInFlight) {
+      stream.skippedFrames++;
+      return;
+    }
+
+    stream.isFrameInFlight = true;
+    try {
+      final frame = await _screenCapture.captureFrame(
+        monitorId: stream.monitorId,
+        maxWidth: stream.maxWidth,
+        maxHeight: stream.maxHeight,
+      );
+      if (frame == null) return;
+      if (!_screenStreams.containsKey(peerId.value)) return;
+
+      final ptsMicros = _clock.now().microsecondsSinceEpoch;
+      final screenFrame = ScreenFrame(
+        sequence: stream.sequence++,
+        ptsMicros: ptsMicros,
+        isKeyframe: true,
+        width: frame.width,
+        height: frame.height,
+        data: frame.data,
+      );
+      stream.capturedFrames++;
+      await stream.session.session.send(screenFrame);
+    } on Object catch (e) {
+      _log.warn('screen frame send failed', error: e);
+    } finally {
+      stream.isFrameInFlight = false;
+    }
+  }
+}
+
+/// Tracks active screen streaming state for a connected peer.
+final class _ActiveScreenStream {
+  _ActiveScreenStream({
+    required this.session,
+    required this.start,
+    required this.clock,
+  })  : monitorId = start.monitorId,
+        codec = start.codec,
+        targetFps = start.targetFps.clamp(kMinFps, kMaxFps),
+        targetBitrateKbps = start.targetBitrateKbps,
+        maxWidth = start.maxWidth,
+        maxHeight = start.maxHeight;
+
+  final ServerSession session;
+  final ScreenStreamStart start;
+  final Clock clock;
+
+  int monitorId;
+  ScreenCodec codec;
+  int targetFps;
+  int targetBitrateKbps;
+  int maxWidth;
+  int maxHeight;
+
+  int sequence = 0;
+  int skippedFrames = 0;
+  int capturedFrames = 0;
+  bool isFrameInFlight = false;
+  Timer? timer;
+
+  void configure(ScreenConfigure update) {
+    if (update.monitorId != null) monitorId = update.monitorId!;
+    if (update.maxWidth != null) maxWidth = update.maxWidth!;
+    if (update.maxHeight != null) maxHeight = update.maxHeight!;
+    if (update.targetBitrateKbps != null) {
+      targetBitrateKbps = update.targetBitrateKbps!;
+    }
+    if (update.targetFps != null) {
+      targetFps = update.targetFps!.clamp(kMinFps, kMaxFps);
+    }
+  }
+
+  void cancel() {
+    timer?.cancel();
+    timer = null;
   }
 }

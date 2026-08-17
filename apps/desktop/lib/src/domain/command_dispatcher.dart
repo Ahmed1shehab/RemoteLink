@@ -31,6 +31,9 @@ final class CommandDispatcher {
     required this.onDeviceRename,
     required this.onFileTransferMessage,
     required this.onPermissionRequest,
+    required this.onScreenStreamStart,
+    required this.onScreenStreamStop,
+    required this.onScreenConfigure,
   }) : _input = input;
 
   final InputBackend _input;
@@ -51,6 +54,9 @@ final class CommandDispatcher {
   final void Function(DeviceRename command) onDeviceRename;
   final void Function(Message message) onFileTransferMessage;
   final void Function(PermissionRequest command) onPermissionRequest;
+  final void Function(ScreenStreamStart command) onScreenStreamStart;
+  final void Function(ScreenStreamStop command) onScreenStreamStop;
+  final void Function(ScreenConfigure command) onScreenConfigure;
 
   final Log _log = Log.scoped('desktop.dispatcher');
 
@@ -207,6 +213,15 @@ final class CommandDispatcher {
             FileComplete() ||
             FileAbort():
         onFileTransferMessage(message);
+
+      case ScreenStreamStart():
+        onScreenStreamStart(message);
+
+      case ScreenStreamStop():
+        onScreenStreamStop(message);
+
+      case ScreenConfigure():
+        onScreenConfigure(message);
 
       default:
         _unsupported++;

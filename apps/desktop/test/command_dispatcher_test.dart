@@ -509,6 +509,76 @@ void main() {
       });
     }
   });
+
+  group('CommandDispatcher screen streaming', () {
+    test('routes ScreenStreamStart across permission tiers', () {
+      for (final tier in PermissionTier.values) {
+        ScreenStreamStart? received;
+        final dispatcher = createTestDispatcher(
+          onScreenStreamStart: (start) => received = start,
+        );
+
+        const startMsg = ScreenStreamStart(
+          targetFps: 30,
+          codec: ScreenCodec.jpeg,
+          maxWidth: 1280,
+          maxHeight: 720,
+        );
+
+        final result = dispatcher.dispatch(startMsg, tier);
+        expect(result, isTrue);
+        expect(dispatcher.appliedCount, 1);
+        expect(dispatcher.deniedCount, 0);
+        expect(received, isNotNull);
+        expect(received!.targetFps, 30);
+        expect(received!.codec, ScreenCodec.jpeg);
+        expect(received!.maxWidth, 1280);
+        expect(received!.maxHeight, 720);
+      }
+    });
+
+    test('routes ScreenStreamStop across permission tiers', () {
+      for (final tier in PermissionTier.values) {
+        ScreenStreamStop? received;
+        final dispatcher = createTestDispatcher(
+          onScreenStreamStop: (stop) => received = stop,
+        );
+
+        const stopMsg = ScreenStreamStop(
+          reason: ScreenStopReason.userClosed,
+        );
+
+        final result = dispatcher.dispatch(stopMsg, tier);
+        expect(result, isTrue);
+        expect(dispatcher.appliedCount, 1);
+        expect(dispatcher.deniedCount, 0);
+        expect(received, isNotNull);
+        expect(received!.reason, ScreenStopReason.userClosed);
+      }
+    });
+
+    test('routes ScreenConfigure across permission tiers', () {
+      for (final tier in PermissionTier.values) {
+        ScreenConfigure? received;
+        final dispatcher = createTestDispatcher(
+          onScreenConfigure: (cfg) => received = cfg,
+        );
+
+        const cfgMsg = ScreenConfigure(
+          targetFps: 60,
+          maxWidth: 1920,
+        );
+
+        final result = dispatcher.dispatch(cfgMsg, tier);
+        expect(result, isTrue);
+        expect(dispatcher.appliedCount, 1);
+        expect(dispatcher.deniedCount, 0);
+        expect(received, isNotNull);
+        expect(received!.targetFps, 60);
+        expect(received!.maxWidth, 1920);
+      }
+    });
+  });
 }
 
 class _RecordingInputBackend implements InputBackend {

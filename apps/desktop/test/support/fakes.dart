@@ -175,6 +175,9 @@ CommandDispatcher createTestDispatcher({
   void Function(DeviceRename)? onDeviceRename,
   void Function(Message)? onFileTransferMessage,
   void Function(PermissionRequest)? onPermissionRequest,
+  void Function(ScreenStreamStart)? onScreenStreamStart,
+  void Function(ScreenStreamStop)? onScreenStreamStop,
+  void Function(ScreenConfigure)? onScreenConfigure,
 }) =>
     CommandDispatcher(
       input: input ?? const UnsupportedInputBackend('test'),
@@ -191,4 +194,7 @@ CommandDispatcher createTestDispatcher({
       onDeviceRename: onDeviceRename ?? (_) {},
       onFileTransferMessage: onFileTransferMessage ?? (_) {},
       onPermissionRequest: onPermissionRequest ?? (_) {},
+      onScreenStreamStart: onScreenStreamStart ?? (_) {},
+      onScreenStreamStop: onScreenStreamStop ?? (_) {},
+      onScreenConfigure: onScreenConfigure ?? (_) {},
     );
