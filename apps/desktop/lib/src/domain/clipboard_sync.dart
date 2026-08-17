@@ -482,6 +482,9 @@ final class ClipboardSyncService {
 
     final text = update.plainText;
     if (text != null) {
+      if (update.originSequence > _localSequence) {
+        _localSequence = update.originSequence;
+      }
       _recordSelfWrite(update.contentHash);
       _clipboard.writeText(text);
       _currentHash = update.contentHash;
@@ -537,6 +540,9 @@ final class ClipboardSyncService {
       return false;
     }
 
+    if (update.originSequence > _localSequence) {
+      _localSequence = update.originSequence;
+    }
     _recordSelfWrite(update.contentHash);
     _clipboard.writeImagePng(imageItem.data);
     _currentHash = update.contentHash;
@@ -642,10 +648,32 @@ final class ClipboardSyncService {
   /// Deterministic on both sides from the same inputs, so the two devices
   /// converge without exchanging another message.
   bool remoteWins(ClipboardUpdate remote) {
-    if (remote.originSequence != _localSequence) {
-      return remote.originSequence > _localSequence;
+    final sequencesDiffer = remote.originSequence != _localSequence;
+    final wins = sequencesDiffer
+        ? remote.originSequence > _localSequence
+        : remote.originDeviceId.compareTo(localDeviceId.value) > 0;
+
+    if (!wins) {
+      // The reason is named, not just the numbers. Losing on sequence and
+      // losing the tie-break at an equal sequence are different situations —
+      // the first says the clocks have drifted, the second is the tie-break
+      // doing its job — and a line that reports both as "does not beat" sends
+      // the reader to the wrong place. Which is how this bug survived: the
+      // discard left no trace at all.
+      _log.debug(
+        () => sequencesDiffer
+            ? 'discarded an inbound clipboard update: its clock is behind ours'
+            : 'discarded an inbound clipboard update: equal clocks, and the '
+                'device-id tie-break went to this machine',
+        fields: <String, Object?>{
+          'remoteSequence': remote.originSequence,
+          'localSequence': _localSequence,
+          'remoteDeviceId': remote.originDeviceId,
+          'localDeviceId': localDeviceId.value,
+        },
+      );
     }
-    return remote.originDeviceId.compareTo(localDeviceId.value) > 0;
+    return wins;
   }
 
   /// First 16 bytes of SHA-256.

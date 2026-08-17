@@ -161,6 +161,10 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     if (Primitives.constantTimeEquals(update.contentHash, _lastHash)) return;
     _lastHash = update.contentHash;
 
+    if (update.originSequence > _sequence) {
+      _sequence = update.originSequence;
+    }
+
     await Clipboard.setData(ClipboardData(text: text));
     state = ClipboardState(
       text: text,
