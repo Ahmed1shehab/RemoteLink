@@ -94,6 +94,35 @@ void main() {
     });
   }
 
+  testWidgets('the mouse-button labels stay on one line', (tester) async {
+    // The failure this guards against throws nothing and clips nothing. "Mid"
+    // sat in a box narrower than the word, so it wrapped *per character* into
+    // a column three letters tall — which still fits its parent, so no
+    // overflow is reported and `takeException` stays null. It is only visible
+    // to someone looking at the phone.
+    //
+    // Measured rather than asserted structurally: comparing against "Left",
+    // which has always fitted, is what makes this a statement about layout
+    // instead of a restatement of the widget's own properties.
+    tester.view.physicalSize = const Size(1170, 2532); // iPhone at 3x
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(touchpad(tester, 1));
+    await tester.pump();
+
+    final leftHeight = tester.getSize(find.text('Left')).height;
+    final midHeight = tester.getSize(find.text('Mid')).height;
+
+    expect(
+      midHeight,
+      lessThanOrEqualTo(leftHeight),
+      reason: '"Mid" wrapped onto ${(midHeight / leftHeight).round()} lines; '
+          'it is a three-letter word and the button is too narrow for it',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('every keycap is still present and legible at 2x text',
       (tester) async {
     await tester.pumpWidget(scaled(keyboard(), 2));

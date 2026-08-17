@@ -790,6 +790,14 @@ class _ButtonRow extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Expanded(
+                // Two, not one. At flex 1 against two flex-3 neighbours this
+                // came out about 42pt wide on a 393pt phone, and a tonal
+                // button spends roughly half of that on its own horizontal
+                // padding — so "Mid" was laid out in a column one letter tall
+                // and three letters high. Still the narrow one, because it is
+                // the least-used of the three and the other two are what a
+                // thumb reaches for without looking.
+                flex: 2,
                 child: _PadButton(
                   label: 'Mid',
                   semanticLabel: 'Middle click',
@@ -843,10 +851,28 @@ class _PadButton extends StatelessWidget {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
+          // The default horizontal padding is most of the width of the
+          // narrowest button here, which leaves the label less room than the
+          // label needs. The tap target is unaffected — it is the whole
+          // button, and the row's minHeight is what keeps it thumb-sized.
+          padding: const EdgeInsets.symmetric(horizontal: 4),
         ),
         // `semanticsLabel` replaces the announced string without touching what
         // is drawn, which is exactly the split wanted here: the button stays
         // narrow, and it stops announcing a bare direction.
-        child: Text(label, semanticsLabel: semanticLabel),
+        //
+        // `maxLines: 1` and no soft wrap because the failure to avoid is not
+        // an overflow warning but a silent one: a three-letter word in a
+        // too-narrow box wraps *per character* and still fits its parent, so
+        // nothing throws and nothing is clipped. It just becomes unreadable.
+        // Ellipsis is the honest end state if a translation ever makes the
+        // label genuinely too long for the space.
+        child: Text(
+          label,
+          semanticsLabel: semanticLabel,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
+        ),
       );
 }
