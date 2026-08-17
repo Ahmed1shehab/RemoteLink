@@ -6,6 +6,8 @@
 
 import 'dart:ffi';
 
+import 'package:ffi/ffi.dart';
+
 /// Opaque Core Foundation and Core Graphics handles.
 typedef CGEventRef = Pointer<Void>;
 typedef CGEventSourceRef = Pointer<Void>;
@@ -215,6 +217,115 @@ typedef CGDisplayIsMainDart = int Function(int display);
 typedef _AXIsProcessTrustedNative = Bool Function();
 typedef AXIsProcessTrustedDart = bool Function();
 
+typedef _CGPreflightScreenCaptureAccessNative = Bool Function();
+typedef CGPreflightScreenCaptureAccessDart = bool Function();
+
+typedef _CGRequestScreenCaptureAccessNative = Bool Function();
+typedef CGRequestScreenCaptureAccessDart = bool Function();
+
+typedef _CGDisplayCreateImageNative = Pointer<Void> Function(Uint32 displayID);
+typedef CGDisplayCreateImageDart = Pointer<Void> Function(int displayID);
+
+typedef _CGImageGetWidthNative = IntPtr Function(Pointer<Void> image);
+typedef CGImageGetWidthDart = int Function(Pointer<Void> image);
+
+typedef _CGImageGetHeightNative = IntPtr Function(Pointer<Void> image);
+typedef CGImageGetHeightDart = int Function(Pointer<Void> image);
+
+typedef _CGColorSpaceCreateDeviceRGBNative = Pointer<Void> Function();
+typedef CGColorSpaceCreateDeviceRGBDart = Pointer<Void> Function();
+
+typedef _CGBitmapContextCreateNative = Pointer<Void> Function(
+  Pointer<Void> data,
+  IntPtr width,
+  IntPtr height,
+  IntPtr bitsPerComponent,
+  IntPtr bytesPerRow,
+  Pointer<Void> space,
+  Uint32 bitmapInfo,
+);
+typedef CGBitmapContextCreateDart = Pointer<Void> Function(
+  Pointer<Void> data,
+  int width,
+  int height,
+  int bitsPerComponent,
+  int bytesPerRow,
+  Pointer<Void> space,
+  int bitmapInfo,
+);
+
+typedef _CGContextDrawImageNative = Void Function(
+  Pointer<Void> c,
+  CGRect rect,
+  Pointer<Void> image,
+);
+typedef CGContextDrawImageDart = void Function(
+  Pointer<Void> c,
+  CGRect rect,
+  Pointer<Void> image,
+);
+
+typedef _CGBitmapContextCreateImageNative = Pointer<Void> Function(
+  Pointer<Void> context,
+);
+typedef CGBitmapContextCreateImageDart = Pointer<Void> Function(
+  Pointer<Void> context,
+);
+
+typedef _CFDataCreateMutableNative = Pointer<Void> Function(
+  Pointer<Void> allocator,
+  IntPtr capacity,
+);
+typedef CFDataCreateMutableDart = Pointer<Void> Function(
+  Pointer<Void> allocator,
+  int capacity,
+);
+
+typedef _CFDataGetLengthNative = IntPtr Function(Pointer<Void> theData);
+typedef CFDataGetLengthDart = int Function(Pointer<Void> theData);
+
+typedef _CFDataGetBytePtrNative = Pointer<Uint8> Function(
+    Pointer<Void> theData);
+typedef CFDataGetBytePtrDart = Pointer<Uint8> Function(Pointer<Void> theData);
+
+typedef _CFStringCreateWithCStringNative = Pointer<Void> Function(
+  Pointer<Void> alloc,
+  Pointer<Utf8> cStr,
+  Uint32 encoding,
+);
+typedef CFStringCreateWithCStringDart = Pointer<Void> Function(
+  Pointer<Void> alloc,
+  Pointer<Utf8> cStr,
+  int encoding,
+);
+
+typedef _CGImageDestinationCreateWithDataNative = Pointer<Void> Function(
+  Pointer<Void> data,
+  Pointer<Void> type,
+  IntPtr count,
+  Pointer<Void> options,
+);
+typedef CGImageDestinationCreateWithDataDart = Pointer<Void> Function(
+  Pointer<Void> data,
+  Pointer<Void> type,
+  int count,
+  Pointer<Void> options,
+);
+
+typedef _CGImageDestinationAddImageNative = Void Function(
+  Pointer<Void> idst,
+  Pointer<Void> image,
+  Pointer<Void> properties,
+);
+typedef CGImageDestinationAddImageDart = void Function(
+  Pointer<Void> idst,
+  Pointer<Void> image,
+  Pointer<Void> properties,
+);
+
+typedef _CGImageDestinationFinalizeNative = Bool Function(Pointer<Void> idst);
+typedef CGImageDestinationFinalizeDart = bool Function(Pointer<Void> idst);
+
 /// Resolved Core Graphics entry points.
 final class CoreGraphicsBindings {
   CoreGraphicsBindings()
@@ -227,6 +338,9 @@ final class CoreGraphicsBindings {
         _applicationServices = DynamicLibrary.open(
           '/System/Library/Frameworks/ApplicationServices.framework/'
           'ApplicationServices',
+        ),
+        _imageIO = DynamicLibrary.open(
+          '/System/Library/Frameworks/ImageIO.framework/ImageIO',
         ) {
     eventSourceCreate = _coreGraphics.lookupFunction<_CGEventSourceCreateNative,
         CGEventSourceCreateDart>('CGEventSourceCreate');
@@ -276,6 +390,53 @@ final class CoreGraphicsBindings {
     displayIsMain = _coreGraphics.lookupFunction<_CGDisplayIsMainNative,
         CGDisplayIsMainDart>('CGDisplayIsMain');
 
+    preflightScreenCaptureAccess = _coreGraphics.lookupFunction<
+        _CGPreflightScreenCaptureAccessNative,
+        CGPreflightScreenCaptureAccessDart>('CGPreflightScreenCaptureAccess');
+    requestScreenCaptureAccess = _coreGraphics.lookupFunction<
+        _CGRequestScreenCaptureAccessNative,
+        CGRequestScreenCaptureAccessDart>('CGRequestScreenCaptureAccess');
+    displayCreateImage = _coreGraphics.lookupFunction<
+        _CGDisplayCreateImageNative,
+        CGDisplayCreateImageDart>('CGDisplayCreateImage');
+    imageGetWidth = _coreGraphics.lookupFunction<_CGImageGetWidthNative,
+        CGImageGetWidthDart>('CGImageGetWidth');
+    imageGetHeight = _coreGraphics.lookupFunction<_CGImageGetHeightNative,
+        CGImageGetHeightDart>('CGImageGetHeight');
+    colorSpaceCreateDeviceRGB = _coreGraphics.lookupFunction<
+        _CGColorSpaceCreateDeviceRGBNative,
+        CGColorSpaceCreateDeviceRGBDart>('CGColorSpaceCreateDeviceRGB');
+    bitmapContextCreate = _coreGraphics.lookupFunction<
+        _CGBitmapContextCreateNative,
+        CGBitmapContextCreateDart>('CGBitmapContextCreate');
+    contextDrawImage = _coreGraphics.lookupFunction<_CGContextDrawImageNative,
+        CGContextDrawImageDart>('CGContextDrawImage');
+    bitmapContextCreateImage = _coreGraphics.lookupFunction<
+        _CGBitmapContextCreateImageNative,
+        CGBitmapContextCreateImageDart>('CGBitmapContextCreateImage');
+
+    cfDataCreateMutable = _coreFoundation.lookupFunction<
+        _CFDataCreateMutableNative,
+        CFDataCreateMutableDart>('CFDataCreateMutable');
+    cfDataGetLength = _coreFoundation.lookupFunction<_CFDataGetLengthNative,
+        CFDataGetLengthDart>('CFDataGetLength');
+    cfDataGetBytePtr = _coreFoundation.lookupFunction<_CFDataGetBytePtrNative,
+        CFDataGetBytePtrDart>('CFDataGetBytePtr');
+    cfStringCreateWithCString = _coreFoundation.lookupFunction<
+        _CFStringCreateWithCStringNative,
+        CFStringCreateWithCStringDart>('CFStringCreateWithCString');
+
+    imageDestinationCreateWithData = _imageIO.lookupFunction<
+            _CGImageDestinationCreateWithDataNative,
+            CGImageDestinationCreateWithDataDart>(
+        'CGImageDestinationCreateWithData');
+    imageDestinationAddImage = _imageIO.lookupFunction<
+        _CGImageDestinationAddImageNative,
+        CGImageDestinationAddImageDart>('CGImageDestinationAddImage');
+    imageDestinationFinalize = _imageIO.lookupFunction<
+        _CGImageDestinationFinalizeNative,
+        CGImageDestinationFinalizeDart>('CGImageDestinationFinalize');
+
     release = _coreFoundation
         .lookupFunction<_CFReleaseNative, CFReleaseDart>('CFRelease');
 
@@ -287,6 +448,7 @@ final class CoreGraphicsBindings {
   final DynamicLibrary _coreGraphics;
   final DynamicLibrary _coreFoundation;
   final DynamicLibrary _applicationServices;
+  final DynamicLibrary _imageIO;
 
   late final CGEventSourceCreateDart eventSourceCreate;
   late final CGEventCreateMouseEventDart createMouseEvent;
@@ -307,6 +469,23 @@ final class CoreGraphicsBindings {
   late final CGGetActiveDisplayListDart getActiveDisplayList;
   late final CGDisplayIsBuiltinDart displayIsBuiltin;
   late final CGDisplayIsMainDart displayIsMain;
+  late final CGPreflightScreenCaptureAccessDart preflightScreenCaptureAccess;
+  late final CGRequestScreenCaptureAccessDart requestScreenCaptureAccess;
+  late final CGDisplayCreateImageDart displayCreateImage;
+  late final CGImageGetWidthDart imageGetWidth;
+  late final CGImageGetHeightDart imageGetHeight;
+  late final CGColorSpaceCreateDeviceRGBDart colorSpaceCreateDeviceRGB;
+  late final CGBitmapContextCreateDart bitmapContextCreate;
+  late final CGContextDrawImageDart contextDrawImage;
+  late final CGBitmapContextCreateImageDart bitmapContextCreateImage;
+  late final CFDataCreateMutableDart cfDataCreateMutable;
+  late final CFDataGetLengthDart cfDataGetLength;
+  late final CFDataGetBytePtrDart cfDataGetBytePtr;
+  late final CFStringCreateWithCStringDart cfStringCreateWithCString;
+  late final CGImageDestinationCreateWithDataDart
+      imageDestinationCreateWithData;
+  late final CGImageDestinationAddImageDart imageDestinationAddImage;
+  late final CGImageDestinationFinalizeDart imageDestinationFinalize;
   late final CFReleaseDart release;
 
   /// Whether the process holds Accessibility permission.

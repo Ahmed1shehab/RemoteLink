@@ -21,9 +21,11 @@ import 'src/macos/macos_clipboard.dart';
 import 'src/macos/macos_input.dart';
 import 'src/macos/macos_media.dart';
 import 'src/macos/macos_network_adapters.dart';
+import 'src/macos/macos_screen_capture.dart';
 import 'src/macos/macos_system_info.dart';
 import 'src/media_backend.dart';
 import 'src/network_adapter_backend.dart';
+import 'src/screen_capture_backend.dart';
 import 'src/system_info_backend.dart';
 import 'src/windows/win32_brightness.dart';
 import 'src/windows/win32_clipboard.dart';
@@ -40,10 +42,12 @@ export 'src/macos/macos_clipboard.dart';
 export 'src/macos/macos_input.dart';
 export 'src/macos/macos_media.dart';
 export 'src/macos/macos_network_adapters.dart';
+export 'src/macos/macos_screen_capture.dart';
 export 'src/macos/macos_system_info.dart';
 export 'src/media_backend.dart';
 export 'src/monitor_topology.dart';
 export 'src/network_adapter_backend.dart';
+export 'src/screen_capture_backend.dart';
 export 'src/system_info_backend.dart';
 export 'src/windows/win32_brightness.dart';
 export 'src/windows/win32_clipboard.dart';
@@ -162,6 +166,22 @@ abstract final class NativeBackends {
       log.error('could not load native networking libraries', error: e);
       return const UnsupportedNetworkAdapterBackend(
         'native networking libraries could not be loaded',
+      );
+    }
+  }
+
+  /// Builds the screen capture backend, or an unsupported stub.
+  static ScreenCaptureBackend createScreenCapture() {
+    final log = Log.scoped('native.factory');
+    try {
+      if (Platform.isMacOS) return MacosScreenCaptureBackend();
+      return const UnsupportedScreenCaptureBackend(
+        'screen capture is not implemented on this platform',
+      );
+    } on ArgumentError catch (e) {
+      log.error('could not load native screen capture libraries', error: e);
+      return const UnsupportedScreenCaptureBackend(
+        'native screen capture libraries could not be loaded',
       );
     }
   }

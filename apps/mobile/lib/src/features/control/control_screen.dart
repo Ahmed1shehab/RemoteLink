@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
+import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/motion.dart';
@@ -12,6 +13,7 @@ import '../clipboard/clipboard_history_controller.dart';
 import '../input/touchpad_screen.dart';
 import '../keyboard/keyboard_screen.dart';
 import '../media/media_screen.dart';
+import '../screen/screen_viewer_screen.dart';
 import '../settings/settings_screen.dart';
 import '../transfer/transfer_screen.dart';
 
@@ -49,6 +51,19 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(clientStateProvider).valueOrNull;
     final quality = ref.watch(connectionQualityProvider).valueOrNull;
+    final capabilities =
+        ref.watch(clientProvider).valueOrNull?.session?.capabilities;
+
+    // Two conditions, not one. The capability bit says the desk *can* share its
+    // screen; it is advertised per server, not per device, so it says nothing
+    // about whether this phone is allowed to ask. The tier is what decides
+    // that, and a desktop refuses out-of-tier messages in silence by design —
+    // so a button gated on the bit alone would be tappable, would send a
+    // request, and would sit there receiving nothing.
+    final tier = ref.watch(currentPermissionTierProvider).valueOrNull;
+    final canViewScreen =
+        capabilities?.has(Capabilities.screenCapture) == true &&
+            (tier?.canViewScreen ?? false);
 
     return Scaffold(
       appBar: AppBar(
@@ -69,6 +84,16 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                 child: Text(
                   '${quality.roundTripMillis.toStringAsFixed(0)} ms',
                   style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ),
+            ),
+          if (canViewScreen)
+            IconButton(
+              icon: const Icon(Icons.screenshot_monitor_outlined),
+              tooltip: 'Screen Stream',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const ScreenViewerScreen(),
                 ),
               ),
             ),

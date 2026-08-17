@@ -509,6 +509,95 @@ void main() {
       });
     }
   });
+
+  group('CommandDispatcher screen streaming', () {
+    // Every streaming code is checked against every tier rather than against
+    // the one that is supposed to work. `allows` denies by default, so a
+    // message that is refused everywhere and a message that is permitted
+    // everywhere both look like "the check exists" from a single-tier test.
+    const streamingMessages = <Message>[
+      ScreenStreamStart(
+        targetFps: 30,
+        codec: ScreenCodec.jpeg,
+        maxWidth: 1280,
+        maxHeight: 720,
+      ),
+      ScreenStreamStop(reason: ScreenStopReason.userClosed),
+      ScreenConfigure(targetFps: 60, maxWidth: 1920),
+    ];
+
+    for (final message in streamingMessages) {
+      test('refuses ${message.runtimeType} at readOnly', () {
+        final dispatcher = createTestDispatcher(
+          onScreenStreamStart: (_) => fail('start reached the host'),
+          onScreenStreamStop: (_) => fail('stop reached the host'),
+          onScreenConfigure: (_) => fail('configure reached the host'),
+        );
+
+        expect(
+          dispatcher.dispatch(message, PermissionTier.readOnly),
+          isFalse,
+        );
+        expect(dispatcher.deniedCount, 1);
+        expect(dispatcher.appliedCount, 0);
+      });
+
+      test('accepts ${message.runtimeType} at standard and above', () {
+        for (final tier in <PermissionTier>[
+          PermissionTier.standard,
+          PermissionTier.extended,
+          PermissionTier.admin,
+        ]) {
+          var reached = false;
+          final dispatcher = createTestDispatcher(
+            onScreenStreamStart: (_) => reached = true,
+            onScreenStreamStop: (_) => reached = true,
+            onScreenConfigure: (_) => reached = true,
+          );
+
+          expect(
+            dispatcher.dispatch(message, tier),
+            isTrue,
+            reason: '${message.runtimeType} should be allowed at ${tier.name}',
+          );
+          expect(reached, isTrue);
+          expect(dispatcher.deniedCount, 0);
+        }
+      });
+    }
+
+    test('the fields survive the trip to the host', () {
+      ScreenStreamStart? received;
+      final dispatcher = createTestDispatcher(
+        onScreenStreamStart: (start) => received = start,
+      );
+
+      dispatcher.dispatch(
+        const ScreenStreamStart(
+          targetFps: 30,
+          codec: ScreenCodec.jpeg,
+          maxWidth: 1280,
+          maxHeight: 720,
+        ),
+        PermissionTier.standard,
+      );
+
+      expect(received, isNotNull);
+      expect(received!.targetFps, 30);
+      expect(received!.codec, ScreenCodec.jpeg);
+      expect(received!.maxWidth, 1280);
+      expect(received!.maxHeight, 720);
+    });
+
+    test('monitor topology stays readable at readOnly', () {
+      // The counterpart to the split in `PermissionTier.allows`: geometry is
+      // not content, and a phone needs it to aim at the right display.
+      expect(
+        PermissionTier.readOnly.allows(MessageType.screenTopology),
+        isTrue,
+      );
+    });
+  });
 }
 
 class _RecordingInputBackend implements InputBackend {
