@@ -13,6 +13,7 @@ import '../control/control_screen.dart';
 import '../pairing/pairing_screen.dart';
 import '../settings/settings_screen.dart';
 import 'auto_connect.dart';
+import 'wake_on_lan.dart';
 
 /// One row in the list, from either discovery or the trust store.
 ///
@@ -31,6 +32,7 @@ class _Entry {
     required this.isLive,
     this.platform = PlatformKind.unknown,
     this.publicKey,
+    this.macAddress,
   });
 
   final DeviceId? id;
@@ -49,6 +51,20 @@ class _Entry {
   /// Present only when paired; turns trust-on-first-use into strict
   /// verification.
   final Uint8List? publicKey;
+
+  /// The computer's hardware address, if it reported one while connected.
+  ///
+  /// Its only use is Wake-on-LAN, so it is absent for anything this phone has
+  /// not paired with and for computers running a build that predates the field.
+  final MacAddress? macAddress;
+
+  /// Whether offering to wake this computer could plausibly do something.
+  ///
+  /// A live computer does not need waking, an unpaired one is not ours to wake,
+  /// and without a hardware address there is nothing to address the packet to.
+  /// The last of those is the reason this is a getter rather than a bare
+  /// `!isLive`: a Wake button that cannot possibly work is worse than no button.
+  bool get canWake => isPaired && !isLive && macAddress != null;
 }
 
 /// Lists computers and connects to one.
@@ -106,7 +122,8 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
         const <DiscoveredDevice>[];
     final paired =
         ref.watch(trustedPeersProvider).valueOrNull ?? const <TrustedPeer>[];
-    final entries = _merge(discovered, paired);
+    final wakeAddresses = ref.watch(wakeAddressesProvider);
+    final entries = _merge(discovered, paired, wakeAddresses);
     final clientState = ref.watch(clientStateProvider).valueOrNull;
     final client = ref.watch(clientProvider).valueOrNull;
     final revokedPeerId = clientState == ClientState.failed &&
@@ -168,6 +185,9 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
                     onRename: entry.isPaired && entry.id != null
                         ? () => _renameComputer(context, entry)
                         : null,
+                    onWake: entry.canWake && !wasRevoked
+                        ? () => _wake(context, entry)
+                        : null,
                   );
                 },
               ),
@@ -179,6 +199,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
   static List<_Entry> _merge(
     List<DiscoveredDevice> discovered,
     List<TrustedPeer> paired,
+    Map<String, MacAddress> wakeAddresses,
   ) {
     final byId = <String, TrustedPeer>{
       for (final peer in paired) peer.id.value: peer,
@@ -201,6 +222,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
           isLive: true,
           platform: device.beacon.platform,
           publicKey: peer?.publicKey,
+          macAddress: wakeAddresses[device.id.value],
         ),
       );
     }
@@ -219,6 +241,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
           isLive: false,
           platform: peer.platform,
           publicKey: peer.publicKey,
+          macAddress: wakeAddresses[peer.id.value],
         ),
       );
     }
@@ -293,6 +316,46 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
 
     if (!context.mounted) return;
     await _connect(context, entry, freshPairing: true);
+  }
+
+  /// Sends a Wake-on-LAN magic packet, after telling the user what it needs.
+  ///
+  /// The confirmation step is not ceremony. Wake-on-LAN depends on three
+  /// settings the phone cannot see and cannot check — firmware, driver, and
+  /// whether the machine is on Ethernet at all — and it reports nothing back,
+  /// so a bare button that fires and shrugs leaves the user with no idea
+  /// whether to wait, retry, or go and change a BIOS setting. Saying so before
+  /// the packet goes out is the only place the explanation is useful.
+  Future<void> _wake(BuildContext context, _Entry entry) async {
+    final mac = entry.macAddress;
+    if (mac == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => _WakeDialog(name: entry.name, mac: mac),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final attempt = await ref
+        .read(wakeOnLanSenderProvider)
+        .wake(mac, lastKnownAddress: entry.host);
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          attempt.anyDelivered
+              // Deliberately not "waking up": nothing acknowledges a magic
+              // packet, so claiming the computer is waking would be a guess
+              // presented as a fact.
+              ? 'Wake-up sent to ${entry.name}. Give it up to a minute, then '
+                  'search again.'
+              : 'This network refused the wake-up broadcast. It cannot be sent '
+                  'from a mobile data connection or a guest network.',
+        ),
+        duration: const Duration(seconds: 6),
+      ),
+    );
   }
 
   Future<void> _renameComputer(BuildContext context, _Entry entry) async {
@@ -448,6 +511,7 @@ class _DeviceTile extends StatelessWidget {
     required this.onTap,
     required this.onPairAgain,
     this.onRename,
+    this.onWake,
   });
 
   final _Entry entry;
@@ -455,6 +519,10 @@ class _DeviceTile extends StatelessWidget {
   final VoidCallback? onTap;
   final VoidCallback? onPairAgain;
   final VoidCallback? onRename;
+
+  /// Null unless this computer is paired, absent, and has a known hardware
+  /// address — the only combination where waking it is a real option.
+  final VoidCallback? onWake;
 
   @override
   Widget build(BuildContext context) {
@@ -494,6 +562,11 @@ class _DeviceTile extends StatelessWidget {
               ? Row(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
+                    if (onWake != null)
+                      TextButton(
+                        onPressed: onWake,
+                        child: const Text('Wake'),
+                      ),
                     if (onRename != null)
                       IconButton(
                         icon: const Icon(Icons.edit_outlined),
@@ -505,6 +578,67 @@ class _DeviceTile extends StatelessWidget {
                 )
               : const Icon(Icons.chevron_right),
       onTap: onTap,
+    );
+  }
+}
+
+/// Explains what Wake-on-LAN needs, then sends the packet.
+///
+/// Every requirement listed here is one the phone cannot detect and the user
+/// cannot infer from a failure, because a failed wake looks exactly like a
+/// successful one from this side. Stating them up front is what stops "Wake"
+/// from being a button that appears broken on the very common setup — a laptop
+/// on Wi-Fi — where it can never work.
+class _WakeDialog extends StatelessWidget {
+  const _WakeDialog({required this.name, required this.mac});
+
+  final String name;
+  final MacAddress mac;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return AlertDialog(
+      title: Text('Wake $name'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            'Broadcasts a wake-up packet to ${mac.canonical}.',
+            style: textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 12),
+          Text('This only works if:', style: textTheme.bodyMedium),
+          const SizedBox(height: 8),
+          Text(
+            '•  The computer is connected by Ethernet cable. Most Wi-Fi '
+            'adapters cannot be woken this way.\n'
+            '•  Wake-on-LAN is enabled in the computer’s BIOS or UEFI '
+            'firmware.\n'
+            '•  “Wake on Magic Packet” is enabled for its network adapter in '
+            'the operating system.\n'
+            '•  This phone is on the same Wi-Fi network, not mobile data.',
+            style: textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'A sleeping computer cannot confirm it heard the packet, so '
+            'RemoteLink cannot tell you whether this worked.',
+            style: textTheme.bodySmall,
+          ),
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Send wake-up'),
+        ),
+      ],
     );
   }
 }

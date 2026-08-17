@@ -35,6 +35,12 @@ const String _deviceNameKey = 'remotelink.device.name';
 const String _pointerSettingsKey = 'remotelink.settings.pointer';
 const String _clipboardSettingsKey = 'remotelink.settings.clipboard';
 
+/// Where hardware addresses of paired computers are persisted.
+///
+/// Public, unlike its neighbours, so a test can seed realistic stored state and
+/// exercise the same load path the app uses rather than a parallel one.
+const String kWakeAddressesKey = 'remotelink.wake.addresses';
+
 /// Where the client keeps its long-term key and trust list.
 ///
 /// Two implementations, chosen by platform rather than by preference. The
@@ -195,6 +201,70 @@ Future<void> persistTrustStore(TrustStore store, IdentityStore storage) async {
   );
 }
 
+/// Hardware addresses of paired computers, keyed by device ID.
+///
+/// Stored beside the trust store rather than inside it. `TrustedPeer` lives in
+/// `rl_crypto` and its persisted shape is shared with the desktop, where a MAC
+/// has no meaning — the desktop reads its own from the OS. This is phone-side
+/// state about a paired computer, so it is keyed by the same device ID and
+/// written through the same [IdentityStore], and a peer the user un-pairs
+/// simply stops being looked up.
+///
+/// An address here is a convenience, never a trust input: it decides which
+/// bytes get broadcast to a sleeping machine, and the woken machine still has
+/// to complete the same handshake as ever.
+final class WakeAddressesNotifier
+    extends StateNotifier<Map<String, MacAddress>> {
+  WakeAddressesNotifier(this._ref) : super(const <String, MacAddress>{}) {
+    unawaited(_load());
+  }
+
+  final Ref _ref;
+
+  Future<void> _load() async {
+    final storage = await _ref.read(identityStoreProvider.future);
+    final raw = await storage.read(kWakeAddressesKey);
+    if (raw == null) return;
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return;
+      state = <String, MacAddress>{
+        for (final entry in decoded.entries)
+          if (entry.value is String)
+            if (MacAddress.tryParse(entry.value as String) case final mac?)
+              entry.key: mac,
+      };
+    } on FormatException {
+      // A corrupt file costs the user a Wake button until the computer next
+      // reports its address. Not worth failing the launch over.
+    }
+  }
+
+  /// Records [mac] for [peerId], persisting only when it actually changed.
+  Future<void> remember(DeviceId peerId, MacAddress mac) async {
+    if (state[peerId.value] == mac) return;
+    state = <String, MacAddress>{...state, peerId.value: mac};
+
+    final storage = await _ref.read(identityStoreProvider.future);
+    await storage.write(
+      kWakeAddressesKey,
+      jsonEncode(<String, String>{
+        for (final entry in state.entries) entry.key: entry.value.canonical,
+      }),
+    );
+  }
+
+  /// The address stored for [peerId], if this computer ever reported one.
+  MacAddress? addressFor(DeviceId? peerId) =>
+      peerId == null ? null : state[peerId.value];
+}
+
+final wakeAddressesProvider =
+    StateNotifierProvider<WakeAddressesNotifier, Map<String, MacAddress>>(
+  WakeAddressesNotifier.new,
+);
+
 /// Whether automatic discovery can work on this device and network.
 ///
 /// False on an iPhone without Apple's multicast entitlement, and on networks
@@ -321,6 +391,12 @@ Future<void> _rememberPeerDetails(Ref ref, DeviceInfo info) async {
   final store = await ref.read(trustStoreProvider.future);
   final peer = await store.findById(info.id);
   if (peer == null) return;
+
+  // Recorded while the computer is awake and talking, because that is the only
+  // time it can be: once it is asleep there is nothing left to ask.
+  if (info.macAddress case final mac? when mac.isWakeable) {
+    await ref.read(wakeAddressesProvider.notifier).remember(info.id, mac);
+  }
 
   final needsUpdate = peer.platform != info.platform || peer.name != info.name;
   if (!needsUpdate) return;

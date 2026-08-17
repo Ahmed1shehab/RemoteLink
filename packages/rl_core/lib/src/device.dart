@@ -1,5 +1,7 @@
 import 'package:meta/meta.dart';
 
+import 'mac_address.dart';
+
 /// Which side of the connection a process is on.
 enum PeerRole {
   /// Desktop companion. Listens, owns the input/clipboard/screen backends.
@@ -123,6 +125,7 @@ final class DeviceInfo {
     required this.role,
     required this.appVersion,
     this.model,
+    this.macAddress,
   });
 
   final DeviceId id;
@@ -139,13 +142,26 @@ final class DeviceInfo {
   /// Hardware model string when available, e.g. `Mac16,7` or `Pixel 9`.
   final String? model;
 
-  DeviceInfo copyWith({String? name, String? model}) => DeviceInfo(
+  /// Hardware address of the adapter this peer is reachable on, when it knows
+  /// one.
+  ///
+  /// Reported so the other side can wake this machine with a Wake-on-LAN magic
+  /// packet once it is asleep and no longer answering. Null on peers that do
+  /// not advertise it — every build older than this field, and any host whose
+  /// platform would not give up an address. Never a trust input: an address a
+  /// peer claims only ever decides which bytes get broadcast, and the machine
+  /// still has to authenticate normally once it is awake.
+  final MacAddress? macAddress;
+
+  DeviceInfo copyWith({String? name, String? model, MacAddress? macAddress}) =>
+      DeviceInfo(
         id: id,
         name: name ?? this.name,
         platform: platform,
         role: role,
         appVersion: appVersion,
         model: model ?? this.model,
+        macAddress: macAddress ?? this.macAddress,
       );
 
   @override
@@ -157,10 +173,12 @@ final class DeviceInfo {
           other.platform == platform &&
           other.role == role &&
           other.appVersion == appVersion &&
-          other.model == model);
+          other.model == model &&
+          other.macAddress == macAddress);
 
   @override
-  int get hashCode => Object.hash(id, name, platform, role, appVersion, model);
+  int get hashCode =>
+      Object.hash(id, name, platform, role, appVersion, model, macAddress);
 
   @override
   String toString() => 'DeviceInfo(${id.short}, $name, ${platform.name})';
