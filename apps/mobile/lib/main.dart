@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 
+import 'src/app/theme.dart';
 import 'src/features/devices/device_list_screen.dart';
 
 /// Entry point for the phone app.
@@ -28,17 +29,8 @@ class RemoteLinkApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
         title: 'RemoteLink',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF3D5AFE)),
-          useMaterial3: true,
-        ),
-        darkTheme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF3D5AFE),
-            brightness: Brightness.dark,
-          ),
-          useMaterial3: true,
-        ),
+        theme: remoteLinkTheme(Brightness.light),
+        darkTheme: remoteLinkTheme(Brightness.dark),
         // System-following by default. A remote control is used in the dark as
         // often as not, and a phone that lights up the room is a worse remote.
         themeMode: ThemeMode.system,

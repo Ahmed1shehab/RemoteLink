@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/motion.dart';
 import '../../app/providers.dart';
 import '../clipboard/clipboard_controller.dart';
 import '../clipboard/clipboard_history_controller.dart';
@@ -411,25 +412,36 @@ class _ConnectionBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final (color, animate) = switch (state) {
-      ClientState.connected => (scheme.primary, false),
-      ClientState.reconnecting || ClientState.connecting => (
-          scheme.tertiary,
-          true,
-        ),
-      ClientState.failed => (scheme.error, false),
-      _ => (scheme.surfaceContainerHighest, false),
+    final (color, animate, label) = switch (state) {
+      ClientState.connected => (scheme.primary, false, 'Connected'),
+      ClientState.reconnecting => (scheme.tertiary, true, 'Reconnecting'),
+      ClientState.connecting => (scheme.tertiary, true, 'Connecting'),
+      ClientState.pairing => (scheme.tertiary, true, 'Pairing'),
+      ClientState.failed => (scheme.error, false, 'Connection failed'),
+      _ => (scheme.surfaceContainerHighest, false, 'Not connected'),
     };
 
-    return SizedBox(
-      height: 2,
-      child: animate
-          ? LinearProgressIndicator(
-              minHeight: 2,
-              backgroundColor: scheme.surfaceContainerHighest,
-              color: color,
-            )
-          : ColoredBox(color: color, child: const SizedBox.expand()),
+    // The connection state was carried by this bar's colour and by nothing
+    // else — the app bar shows a latency figure only once already connected.
+    // Colour alone is not a signal available to every user, so the same fact is
+    // stated here in words.
+    return Semantics(
+      label: 'Connection status: $label',
+      liveRegion: true,
+      child: SizedBox(
+        height: 2,
+        child: animate && !context.prefersReducedMotion
+            ? LinearProgressIndicator(
+                minHeight: 2,
+                backgroundColor: scheme.surfaceContainerHighest,
+                color: color,
+              )
+            // Under reduced motion the same information is carried by the
+            // colour, held still. An indeterminate bar is a perpetual motion
+            // machine two pixels from the top of the screen — small, but it
+            // never stops, and it is in peripheral vision the whole session.
+            : ColoredBox(color: color, child: const SizedBox.expand()),
+      ),
     );
   }
 }
@@ -491,24 +503,34 @@ class SystemStatusStrip extends ConsumerWidget {
                     ? colorScheme.primary
                     : colorScheme.onSurfaceVariant,
                 label: '${status.batteryPercent}%',
+                // Charging is shown by a different glyph and by nothing else.
+                semanticLabel: isCharging
+                    ? 'Computer battery ${status.batteryPercent} percent, '
+                        'charging'
+                    : 'Computer battery ${status.batteryPercent} percent',
               ),
             if (hasCpu)
               _StatusChip(
                 icon: Icons.memory,
                 iconColor: colorScheme.onSurfaceVariant,
                 label: 'CPU ${status.cpuPercent!.toStringAsFixed(0)}%',
+                semanticLabel: 'Processor '
+                    '${status.cpuPercent!.toStringAsFixed(0)} percent',
               ),
             if (hasMemory)
               _StatusChip(
                 icon: Icons.pie_chart_outline,
                 iconColor: colorScheme.onSurfaceVariant,
                 label: 'RAM ${status.memoryPercent!.toStringAsFixed(0)}%',
+                semanticLabel: 'Memory '
+                    '${status.memoryPercent!.toStringAsFixed(0)} percent',
               ),
             if (hasUptime)
               _StatusChip(
                 icon: Icons.schedule,
                 iconColor: colorScheme.onSurfaceVariant,
                 label: _formatUptime(status.uptimeSeconds),
+                semanticLabel: 'Up ${_formatUptime(status.uptimeSeconds)}',
               ),
           ],
         ),
@@ -541,28 +563,47 @@ class _StatusChip extends StatelessWidget {
     required this.icon,
     required this.iconColor,
     required this.label,
+    required this.semanticLabel,
   });
 
   final IconData icon;
   final Color iconColor;
   final String label;
 
+  /// The chip read out in full.
+  ///
+  /// The visible labels are abbreviations sized for a strip two lines tall:
+  /// '88%' on its own says nothing about what is 88%, and the icon that
+  /// supplies the missing noun is announced as nothing.
+  final String semanticLabel;
+
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Icon(icon, size: 14, color: iconColor),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: textTheme.labelSmall?.copyWith(
-            letterSpacing: 0.1,
+    return Semantics(
+      label: semanticLabel,
+      excludeSemantics: true,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 14, color: iconColor),
+          const SizedBox(width: 4),
+          // Shrinks rather than overflowing. The strip is a single row of four
+          // chips: at a large text size the row was wider than the phone, and
+          // an overflowing Row clips its last child — the uptime.
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: textTheme.labelSmall?.copyWith(
+                letterSpacing: 0.1,
+              ),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

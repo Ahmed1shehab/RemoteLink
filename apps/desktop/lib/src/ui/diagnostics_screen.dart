@@ -7,6 +7,7 @@ import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
 import '../app/providers.dart';
+import '../app/theme.dart';
 
 /// Diagnostics panel displaying service status, dispatcher counters,
 /// backend availability with failure reasons, connected peers, and logs.
@@ -863,7 +864,10 @@ class _LogViewerCard extends StatelessWidget {
 
     final levelColor = switch (record.level) {
       LogLevel.error => colorScheme.error,
-      LogLevel.warn => Colors.orange,
+      // `Colors.orange` is a mid-tone tuned for a white background and sat at
+      // roughly 2:1 on the light surface this list is drawn on. See
+      // [warningColor].
+      LogLevel.warn => warningColor(colorScheme),
       LogLevel.info => colorScheme.primary,
       LogLevel.debug => colorScheme.onSurfaceVariant,
       LogLevel.trace => colorScheme.outline,
@@ -896,11 +900,10 @@ class _LogViewerCard extends StatelessWidget {
             ),
             TextSpan(
               text: record.message,
-              style: TextStyle(
-                color: theme.brightness == Brightness.dark
-                    ? Colors.white
-                    : Colors.black87,
-              ),
+              // `onSurface` rather than a hand-picked white/black pair: it is
+              // the scheme's own guaranteed-contrast partner for the surface
+              // this is painted on, in either theme.
+              style: TextStyle(color: colorScheme.onSurface),
             ),
             if (record.fields.isNotEmpty)
               TextSpan(

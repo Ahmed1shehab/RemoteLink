@@ -8,6 +8,7 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'src/app/providers.dart';
+import 'src/app/theme.dart';
 import 'src/domain/auto_start.dart';
 import 'src/ui/home_screen.dart';
 
@@ -90,17 +91,8 @@ class RemoteLinkDesktopApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
         title: 'RemoteLink',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF3D5AFE)),
-          useMaterial3: true,
-        ),
-        darkTheme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF3D5AFE),
-            brightness: Brightness.dark,
-          ),
-          useMaterial3: true,
-        ),
+        theme: remoteLinkTheme(Brightness.light),
+        darkTheme: remoteLinkTheme(Brightness.dark),
         home: const _TrayHost(child: HomeScreen()),
       );
 }

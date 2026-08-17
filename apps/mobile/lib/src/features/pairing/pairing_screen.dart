@@ -8,6 +8,7 @@ import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
 import '../control/control_screen.dart';
+import 'pairing_code.dart';
 
 /// Shows the six-digit code and waits for the user to confirm it matches.
 ///
@@ -130,13 +131,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 32),
-              Text(
-                _grouped(_code!),
-                style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                      fontFamily: 'monospace',
-                      letterSpacing: 6,
-                    ),
-              ),
+              PairingCodeDisplay(digits: _code!),
               const SizedBox(height: 32),
               Text(
                 'If the numbers are different, something is intercepting the '
@@ -160,15 +155,6 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
       ),
     );
   }
-
-  static String _grouped(String digits) {
-    final buffer = StringBuffer();
-    for (var i = 0; i < digits.length; i++) {
-      if (i > 0 && i % 3 == 0) buffer.write(' ');
-      buffer.write(digits[i]);
-    }
-    return buffer.toString();
-  }
 }
 
 class _PairingFailed extends StatelessWidget {
@@ -178,10 +164,12 @@ class _PairingFailed extends StatelessWidget {
   Widget build(BuildContext context) => Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(
-            Icons.gpp_bad_outlined,
-            size: 56,
-            color: Theme.of(context).colorScheme.error,
+          ExcludeSemantics(
+            child: Icon(
+              Icons.gpp_bad_outlined,
+              size: 56,
+              color: Theme.of(context).colorScheme.error,
+            ),
           ),
           const SizedBox(height: 16),
           Text(

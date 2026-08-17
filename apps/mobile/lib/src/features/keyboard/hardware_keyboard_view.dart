@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart' as proto;
 
+import '../../app/theme.dart';
+
 /// What a key does when pressed.
 enum KeyCapKind {
   /// Sends a HID usage: press, release.
@@ -23,14 +25,25 @@ final class KeyCap {
     this.modifierBit,
     this.kind = KeyCapKind.normal,
     this.flex = 1,
+    this.spokenLabel,
   });
 
   /// Modifier key: label plus the bit it toggles.
-  const KeyCap.modifier(this.label, this.modifierBit, {this.flex = 1})
-      : usage = null,
+  const KeyCap.modifier(
+    this.label,
+    this.modifierBit, {
+    this.flex = 1,
+    this.spokenLabel,
+  })  : usage = null,
         kind = KeyCapKind.modifier;
 
   final String label;
+
+  /// Overrides what a screen reader announces, where [label] cannot carry it.
+  ///
+  /// Left null by every current cap: [semanticLabel] resolves them all from the
+  /// printed label, so a new key cannot be added without one.
+  final String? spokenLabel;
 
   /// USB HID usage from [proto.HidKey], for normal keys.
   final int? usage;
@@ -42,7 +55,66 @@ final class KeyCap {
 
   /// Relative width. A spacebar is `flex: 6`, a letter `flex: 1`.
   final double flex;
+
+  /// What a screen reader announces for this key.
+  ///
+  /// A rendered keyboard is the worst case for icon-only controls, and this one
+  /// was entirely unlabelled: the caps are drawn with the glyphs a real
+  /// keyboard is printed with, and those are exactly the characters a screen
+  /// reader cannot say. '⌘' is announced as "place of interest sign", '⌫' as
+  /// "erase to the left", '◀' as "black left-pointing triangle" — or, with
+  /// punctuation reading off, as nothing at all, which is worse, because the
+  /// key then appears not to exist.
+  ///
+  /// So the printed label and the spoken label are separate strings by design.
+  /// Anything already a word speaks for itself; everything below is a glyph or
+  /// an abbreviation that does not.
+  String get semanticLabel => spokenLabel ?? spokenKeyLabel(label);
 }
+
+/// The spoken form of a printed key label.
+String spokenKeyLabel(String label) => _spokenKeyLabels[label] ?? label;
+
+const Map<String, String> _spokenKeyLabels = <String, String>{
+  // Glyphs. Each is a real Unicode character with a real Unicode name, and
+  // none of those names is the name of the key.
+  '⌫': 'Backspace',
+  '⌨': 'Switch to the phone keyboard',
+  '◀': 'Left arrow',
+  '▲': 'Up arrow',
+  '▼': 'Down arrow',
+  '▶': 'Right arrow',
+  '⌘': 'Command',
+  '⌥': 'Option',
+  '⌃': 'Control',
+  ' ': 'Space',
+  // Abbreviations. Read aloud, "esc" and "del" are noises.
+  'esc': 'Escape',
+  'del': 'Delete',
+  'tab': 'Tab',
+  'caps': 'Caps lock',
+  'return': 'Return',
+  'shift': 'Shift',
+  'ctrl': 'Control',
+  'alt': 'Alt',
+  'alt gr': 'Alt Gr',
+  'CMD': 'Command',
+  'WIN': 'Windows',
+  'META': 'Meta',
+  // Punctuation. Announced inconsistently between platforms and voices, and
+  // silently by several when punctuation reading is off — the iOS default.
+  '`': 'Backtick',
+  '-': 'Minus',
+  '=': 'Equals',
+  '[': 'Left bracket',
+  ']': 'Right bracket',
+  r'\': 'Backslash',
+  ';': 'Semicolon',
+  "'": 'Apostrophe',
+  ',': 'Comma',
+  '.': 'Full stop',
+  '/': 'Slash',
+};
 
 /// A rendered hardware keyboard.
 ///
@@ -287,45 +359,74 @@ class HardwareKeyboardView extends StatelessWidget {
   Widget build(BuildContext context) {
     final rows = _rows();
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Keys are sized to fill the width and share the height evenly, so the
-        // whole keyboard is always reachable without scrolling. A keyboard you
-        // have to scroll to reach Enter on is not a keyboard.
-        const spacing = 4.0;
-        final rowHeight =
-            (constraints.maxHeight - spacing * (rows.length + 1)) / rows.length;
+    // Keycaps are clamped rather than scaled without limit. See
+    // [kKeyCapMaxTextScale]: past that point a label cannot fit a key at any
+    // row height, and the labels inside shrink to fit rather than clip.
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: kKeyCapMaxTextScale,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Keys are sized to fill the width and share the height evenly, so
+          // the whole keyboard is reachable without scrolling. A keyboard you
+          // have to scroll to reach Enter on is not a keyboard.
+          const spacing = 4.0;
 
-        return Padding(
-          padding: const EdgeInsets.all(spacing),
-          child: Column(
-            children: <Widget>[
-              for (final row in rows) ...<Widget>[
-                SizedBox(
-                  height: rowHeight.clamp(28.0, 72.0),
-                  child: Row(
-                    children: <Widget>[
-                      for (final cap in row) ...<Widget>[
-                        Expanded(
-                          flex: (cap.flex * 10).round(),
-                          child: _Key(
-                            cap: cap,
-                            active: _isActive(cap),
-                            enabled: enabled,
-                            onPressed: () => _press(cap),
+          // Rows grow with the text setting, so a larger label has somewhere to
+          // go before it has to shrink.
+          final scale =
+              textScaleFactorOf(context).clamp(1.0, kKeyCapMaxTextScale);
+          final minRow = 28.0 * scale;
+          final maxRow = 72.0 * scale;
+
+          // Every row contributes its height plus one gap, and the surrounding
+          // Padding adds one more gap at each end: `rows + 2`, not `rows + 1`.
+          // The original arithmetic was short by exactly one gap, which is why
+          // a tight fit overflowed by precisely 4 pixels.
+          final gaps = spacing * (rows.length + 2);
+          final available = constraints.maxHeight - gaps;
+          final rowHeight = (available / rows.length).clamp(minRow, maxRow);
+
+          // The clamp can ask for more height than there is: a short window at
+          // a large text size. Scrolling then is the lesser evil — the previous
+          // code clamped the same way and simply overflowed, which drops the
+          // bottom row, and the bottom row is where the modifiers live.
+          final needed = rowHeight * rows.length + gaps;
+
+          final keyboard = Padding(
+            padding: const EdgeInsets.all(spacing),
+            child: Column(
+              children: <Widget>[
+                for (final row in rows) ...<Widget>[
+                  SizedBox(
+                    height: rowHeight,
+                    child: Row(
+                      children: <Widget>[
+                        for (final cap in row) ...<Widget>[
+                          Expanded(
+                            flex: (cap.flex * 10).round(),
+                            child: _Key(
+                              cap: cap,
+                              active: _isActive(cap),
+                              enabled: enabled,
+                              onPressed: () => _press(cap),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: spacing),
+                          const SizedBox(width: spacing),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: spacing),
+                  const SizedBox(height: spacing),
+                ],
               ],
-            ],
-          ),
-        );
-      },
+            ),
+          );
+
+          return needed > constraints.maxHeight
+              ? SingleChildScrollView(child: keyboard)
+              : keyboard;
+        },
+      ),
     );
   }
 }
@@ -343,33 +444,63 @@ class _Key extends StatelessWidget {
   final bool enabled;
   final VoidCallback onPressed;
 
+  /// True for keys that stay on until pressed again, which announce a state.
+  bool get _isToggle =>
+      cap.kind == KeyCapKind.modifier || cap.usage == proto.HidKey.capsLock;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: !enabled
-          ? scheme.surfaceContainerLow
-          : active
-              ? scheme.primary
-              : scheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(6),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: enabled ? onPressed : null,
-        child: Center(
-          child: Text(
-            cap.label,
-            maxLines: 1,
-            style: TextStyle(
-              // Long labels shrink rather than wrap or clip: ALTGR must stay
-              // legible next to a single-letter key.
-              fontSize: cap.label.length > 3 ? 11 : 14,
-              fontWeight: FontWeight.w600,
-              color: !enabled
-                  ? scheme.onSurfaceVariant.withValues(alpha: 0.4)
-                  : active
-                      ? scheme.onPrimary
-                      : scheme.onSurface,
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: cap.semanticLabel,
+      // A held modifier is the one piece of keyboard state whose consequences
+      // are invisible: Shift stuck on produces baffling results three
+      // keystrokes later. Sighted users get the colour change; `toggled` is how
+      // the same fact reaches everyone else.
+      toggled: _isToggle ? active : null,
+      // The label above replaces the glyph. Without this the reader announces
+      // both, and the glyph is the half it cannot say.
+      excludeSemantics: true,
+      child: Material(
+        color: !enabled
+            ? scheme.surfaceContainerLow
+            : active
+                ? scheme.primary
+                : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: enabled ? onPressed : null,
+          child: Center(
+            // Scales the label down instead of clipping it. A clipped keycap is
+            // not merely ugly — 'F11' cut to 'F1' is a different key, and there
+            // is no way to tell which one was pressed.
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Text(
+                  cap.label,
+                  maxLines: 1,
+                  style: TextStyle(
+                    // Long labels start smaller: ALTGR must stay legible next
+                    // to a single-letter key.
+                    fontSize: cap.label.length > 3 ? 11 : 14,
+                    fontWeight: FontWeight.w600,
+                    color: !enabled
+                        // Material's own disabled opacity. Disabled controls
+                        // are exempt from the contrast minimum, and looking
+                        // disabled is the point: the whole keyboard greys out
+                        // when the computer is not connected.
+                        ? scheme.onSurfaceVariant.withValues(alpha: 0.38)
+                        : active
+                            ? scheme.onPrimary
+                            : scheme.onSurface,
+                  ),
+                ),
+              ),
             ),
           ),
         ),

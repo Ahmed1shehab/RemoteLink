@@ -86,6 +86,10 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
         Row(
           children: <Widget>[
             IconButton(
+              // The icon alone says nothing, and which way it toggles is not
+              // guessable from a speaker glyph — so the label states the
+              // action, not the state.
+              tooltip: (state?.isMuted ?? false) ? 'Unmute' : 'Mute',
               icon: Icon(
                 (state?.isMuted ?? false)
                     ? Icons.volume_off
@@ -103,6 +107,12 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
             Expanded(
               child: Slider(
                 value: volume.clamp(0.0, 1.0),
+                label: '${(volume * 100).round()}%',
+                // Without this a screen reader reads the raw 0–1 double: "zero
+                // point four two". Volume is a percentage everywhere else in
+                // the app and on the computer being controlled.
+                semanticFormatterCallback: (value) =>
+                    'Volume ${(value * 100).round()} percent',
                 onChanged: connected
                     ? (value) => setState(() => _dragging = value)
                     : null,
@@ -119,27 +129,38 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
                 },
               ),
             ),
-            const Icon(Icons.volume_up),
+            // A scale marker at the end of the slider, not a control.
+            const ExcludeSemantics(child: Icon(Icons.volume_up)),
           ],
         ),
         const SizedBox(height: 8),
         Center(
-          child: Text(
-            '${(volume * 100).round()}%',
-            style: Theme.of(context).textTheme.labelMedium,
+          // Excluded because the slider already announces this number. Left
+          // visible because a sighted user cannot read a slider to the percent.
+          child: ExcludeSemantics(
+            child: Text(
+              '${(volume * 100).round()}%',
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
           ),
         ),
         if (brightnessSupported) ...<Widget>[
           const SizedBox(height: 24),
           Row(
             children: <Widget>[
-              const Padding(
-                padding: EdgeInsets.all(12.0),
-                child: Icon(Icons.brightness_low),
+              const ExcludeSemantics(
+                child: Padding(
+                  padding: EdgeInsets.all(12.0),
+                  child: Icon(Icons.brightness_low),
+                ),
               ),
               Expanded(
                 child: Slider(
                   value: (_brightnessDragging ?? _brightness).clamp(0.0, 1.0),
+                  label:
+                      '${((_brightnessDragging ?? _brightness) * 100).round()}%',
+                  semanticFormatterCallback: (value) =>
+                      'Screen brightness ${(value * 100).round()} percent',
                   onChanged: connected
                       ? (value) => setState(() => _brightnessDragging = value)
                       : null,
@@ -156,17 +177,21 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
                   },
                 ),
               ),
-              const Padding(
-                padding: EdgeInsets.all(12.0),
-                child: Icon(Icons.brightness_high),
+              const ExcludeSemantics(
+                child: Padding(
+                  padding: EdgeInsets.all(12.0),
+                  child: Icon(Icons.brightness_high),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 8),
           Center(
-            child: Text(
-              '${((_brightnessDragging ?? _brightness) * 100).round()}%',
-              style: Theme.of(context).textTheme.labelMedium,
+            child: ExcludeSemantics(
+              child: Text(
+                '${((_brightnessDragging ?? _brightness) * 100).round()}%',
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
             ),
           ),
         ],
@@ -195,10 +220,15 @@ class _NowPlaying extends StatelessWidget {
             color: scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(16),
           ),
-          child: Icon(
-            Icons.music_note,
-            size: 64,
-            color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
+          // A placeholder where artwork would go. Announcing "music note"
+          // before the track title tells a screen-reader user nothing the
+          // title will not.
+          child: ExcludeSemantics(
+            child: Icon(
+              Icons.music_note,
+              size: 64,
+              color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
+            ),
           ),
         ),
         const SizedBox(height: 20),
@@ -270,16 +300,22 @@ class _TransportRow extends StatelessWidget {
         children: <Widget>[
           IconButton.filledTonal(
             iconSize: 32,
+            tooltip: 'Previous track',
             onPressed: enabled ? onPrevious : null,
             icon: const Icon(Icons.skip_previous),
           ),
           IconButton.filled(
             iconSize: 44,
+            // Names what pressing it does, which is the opposite of the state
+            // it reports. "Pause" while paused is a lie a sighted user can see
+            // past and a screen-reader user cannot.
+            tooltip: isPlaying ? 'Pause' : 'Play',
             onPressed: enabled ? onPlayPause : null,
             icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
           ),
           IconButton.filledTonal(
             iconSize: 32,
+            tooltip: 'Next track',
             onPressed: enabled ? onNext : null,
             icon: const Icon(Icons.skip_next),
           ),
@@ -297,7 +333,9 @@ class _Unsupported extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              const Icon(Icons.music_off_outlined, size: 48),
+              const ExcludeSemantics(
+                child: Icon(Icons.music_off_outlined, size: 48),
+              ),
               const SizedBox(height: 16),
               Text(
                 'Media control isn’t available',
