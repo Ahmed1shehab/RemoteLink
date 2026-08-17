@@ -207,6 +207,110 @@ void main() {
       expect(decoded.type, MessageType.screenFrame);
     });
 
+    test('carries the cursor position when the desk reported one', () {
+      final withCursor = ScreenFrame(
+        sequence: 7,
+        ptsMicros: 1,
+        isKeyframe: true,
+        width: 1440,
+        height: 900,
+        data: frameData,
+        cursorX: 0.25,
+        cursorY: 0.75,
+      );
+
+      final decoded = ScreenFrame.readFrom(ByteReader(encode(withCursor)));
+      // float32, so exact equality is the wrong assertion — a quarter and
+      // three quarters happen to be exact, but nothing else would be.
+      expect(decoded.cursorX, closeTo(0.25, 1e-6));
+      expect(decoded.cursorY, closeTo(0.75, 1e-6));
+    });
+
+    test('says nothing about the cursor when it is on another display', () {
+      final decoded = ScreenFrame.readFrom(ByteReader(encode(sample)));
+      expect(decoded.cursorX, isNull);
+      expect(decoded.cursorY, isNull);
+    });
+
+    test('reads a frame from a peer built before the cursor existed', () {
+      // §5 rule 2, from the other side: this is the exact payload an older
+      // desktop writes — five fields and then nothing. It must decode as "no
+      // cursor" rather than throwing on a short read, or a version mismatch
+      // turns into a dead stream instead of a missing pointer.
+      final writer = ByteWriter()
+        ..writeVarUint(9)
+        ..writeUint64(4242)
+        ..writeBool(true)
+        ..writeVarUint(1280)
+        ..writeVarUint(720)
+        ..writeLengthPrefixedBytes(frameData);
+
+      final decoded = ScreenFrame.readFrom(ByteReader(writer.toBytes()));
+      expect(decoded.sequence, 9);
+      expect(decoded.width, 1280);
+      expect(decoded.data, frameData);
+      expect(decoded.cursorX, isNull);
+      expect(decoded.cursorY, isNull);
+    });
+
+    test('refuses a cursor position that is not on the frame', () {
+      // A peer can put anything in a float32, and these values would each
+      // propagate straight into a layout calculation on the phone: NaN poisons
+      // every arithmetic it touches, and an out-of-range value would draw a
+      // pointer outside the picture or clamped to an edge it is not on.
+      for (final pair in <List<double>>[
+        <double>[double.nan, 0.5],
+        <double>[0.5, double.nan],
+        <double>[double.infinity, 0.5],
+        <double>[-0.5, 0.5],
+        <double>[0.5, 1.5],
+      ]) {
+        final writer = ByteWriter()
+          ..writeVarUint(1)
+          ..writeUint64(1)
+          ..writeBool(true)
+          ..writeVarUint(100)
+          ..writeVarUint(100)
+          ..writeLengthPrefixedBytes(frameData)
+          ..writeBool(true)
+          ..writeFloat32(pair[0])
+          ..writeFloat32(pair[1]);
+
+        final decoded = ScreenFrame.readFrom(ByteReader(writer.toBytes()));
+        expect(
+          decoded.cursorX,
+          isNull,
+          reason: 'accepted a cursor at ${pair[0]},${pair[1]}',
+        );
+        expect(decoded.cursorY, isNull);
+      }
+    });
+
+    test('the corners of the frame are valid cursor positions', () {
+      // The boundary the check above rejects past. A pointer parked in a corner
+      // is ordinary, and rejecting it would make the cursor vanish there.
+      for (final corner in <List<double>>[
+        <double>[0, 0],
+        <double>[1, 1],
+        <double>[0, 1],
+        <double>[1, 0],
+      ]) {
+        final frame = ScreenFrame(
+          sequence: 1,
+          ptsMicros: 1,
+          isKeyframe: true,
+          width: 100,
+          height: 100,
+          data: frameData,
+          cursorX: corner[0],
+          cursorY: corner[1],
+        );
+        final decoded = ScreenFrame.readFrom(ByteReader(encode(frame)));
+        expect(decoded.cursorX, corner[0]);
+        expect(decoded.cursorY, corner[1]);
+      }
+    });
+
     test('delta frame round-trip', () {
       final delta = ScreenFrame(
         sequence: 1235,
@@ -285,15 +389,56 @@ void main() {
       expect(decoded.data, frameData);
     });
 
-    test('truncation at every length throws ProtocolError', () {
+    test('truncation inside the required fields throws ProtocolError', () {
+      // The cursor is an appended field, so the payload now ends with a
+      // presence byte that a decoder is allowed not to find — §5 rule 2 makes
+      // "the appended tail is missing" indistinguishable from "the peer that
+      // sent this predates the field", and a decoder cannot treat one as an
+      // error without treating the other as one too.
+      //
+      // Everything before that tail is still required, and this is where the
+      // boundary is checked. `sample` carries no cursor, so its encoding is the
+      // required prefix plus one presence byte.
       final valid = encode(sample);
-      for (var i = 0; i < valid.length; i++) {
+      final requiredLength = valid.length - 1;
+
+      for (var i = 0; i < requiredLength; i++) {
         final truncated = Uint8List.sublistView(valid, 0, i);
         expect(
           () => ScreenFrame.readFrom(ByteReader(truncated)),
           throwsA(isA<ProtocolError>()),
           reason:
               'truncation at length $i of ${valid.length} did not throw ProtocolError',
+        );
+      }
+    });
+
+    test('truncation inside the cursor fields throws ProtocolError', () {
+      // The tail is optional as a whole, not field by field. A payload that
+      // claims a cursor and then stops halfway through it is malformed, and
+      // reading past the end would be the short-read the decoder exists to
+      // reject.
+      final withCursor = ScreenFrame(
+        sequence: 3,
+        ptsMicros: 5,
+        isKeyframe: true,
+        width: 800,
+        height: 600,
+        data: frameData,
+        cursorX: 0.5,
+        cursorY: 0.5,
+      );
+      final valid = encode(withCursor);
+
+      // The presence byte plus two float32s.
+      const cursorBytes = 1 + 4 + 4;
+      for (var i = valid.length - cursorBytes + 1; i < valid.length; i++) {
+        expect(
+          () => ScreenFrame.readFrom(
+            ByteReader(Uint8List.sublistView(valid, 0, i)),
+          ),
+          throwsA(isA<ProtocolError>()),
+          reason: 'a half-written cursor at length $i decoded without error',
         );
       }
     });

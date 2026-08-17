@@ -69,3 +69,40 @@ Offset? mapTouchToNormalisedCoordinates({
 
   return Offset(normX, normY);
 }
+
+/// Maps normalised (0.0..1.0) coordinates back to a point in container
+/// coordinates, for drawing something the desk reported — the mouse cursor.
+///
+/// The exact inverse of [mapTouchToNormalisedCoordinates], and it has to be:
+/// the two run against the same picture, so any disagreement shows up as a
+/// pointer that is drawn beside the place a tap actually lands. That is worse
+/// than drawing no pointer at all, because the user then aims at the drawn one.
+///
+/// Returns `null` for a position outside 0..1 or for a container the image
+/// cannot be drawn in, rather than clamping — a cursor is either on this
+/// display or it is not, and a cursor pinned to an edge is a lie about where
+/// the pointer is.
+Offset? mapNormalisedToContainerPosition({
+  required Offset normalised,
+  required Size containerSize,
+  required Size imageSize,
+}) {
+  if (!normalised.dx.isFinite || !normalised.dy.isFinite) return null;
+  if (normalised.dx < 0 ||
+      normalised.dx > 1 ||
+      normalised.dy < 0 ||
+      normalised.dy > 1) {
+    return null;
+  }
+
+  final drawnRect = computeContainedImageRect(
+    containerSize: containerSize,
+    imageSize: imageSize,
+  );
+  if (drawnRect.isEmpty) return null;
+
+  return Offset(
+    drawnRect.left + normalised.dx * drawnRect.width,
+    drawnRect.top + normalised.dy * drawnRect.height,
+  );
+}

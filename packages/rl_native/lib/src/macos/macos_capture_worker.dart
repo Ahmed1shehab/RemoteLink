@@ -96,7 +96,7 @@ final class MacosCaptureWorker {
   }
 
   void _completeResponse(Object? message) {
-    if (message is! List || message.length != 4) return;
+    if (message is! List || message.length != 6) return;
     final id = message[0] as int;
     final completer = _pending.remove(id);
     if (completer == null || completer.isCompleted) return;
@@ -112,6 +112,8 @@ final class MacosCaptureWorker {
         width: message[1] as int,
         height: message[2] as int,
         data: payload.materialize().asUint8List(),
+        cursorX: message[4] as double?,
+        cursorY: message[5] as double?,
       ),
     );
   }
@@ -185,6 +187,8 @@ void _captureWorkerMain(SendPort responses) {
         TransferableTypedData.fromList(<Uint8List>[frame.data])
       else
         null,
+      frame?.cursorX,
+      frame?.cursorY,
     ]);
   });
 }

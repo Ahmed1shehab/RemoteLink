@@ -7,6 +7,7 @@ import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
+import 'remote_cursor.dart';
 import 'screen_coordinate_mapping.dart';
 import 'screen_stream_request.dart';
 
@@ -348,6 +349,19 @@ class _ControllableFrameState extends State<_ControllableFrame> {
     );
   }
 
+  Size get _imageSize => Size(
+        widget.frame.width.toDouble(),
+        widget.frame.height.toDouble(),
+      );
+
+  /// The desk's pointer position, if this frame reported one.
+  Offset? get _cursor {
+    final x = widget.frame.cursorX;
+    final y = widget.frame.cursorY;
+    if (x == null || y == null) return null;
+    return Offset(x, y);
+  }
+
   @override
   Widget build(BuildContext context) {
     final image = Image.memory(
@@ -358,8 +372,9 @@ class _ControllableFrameState extends State<_ControllableFrame> {
 
     // Without the tier for input this is a picture, and deliberately just a
     // picture — no listener, so nothing is sent that the desktop would refuse
-    // without saying so.
-    if (!widget.canSendInput) return image;
+    // without saying so. The cursor still gets drawn: watching where someone
+    // else is pointing is the whole value of a view-only stream.
+    if (!widget.canSendInput) return _withCursor(image);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -392,11 +407,40 @@ class _ControllableFrameState extends State<_ControllableFrame> {
               const MouseButtonEvent(button: MouseButton.left, pressed: false),
             );
           },
-          child: image,
+          child: Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              image,
+              RemoteCursor(
+                normalised: _cursor,
+                containerSize: containerSize,
+                imageSize: _imageSize,
+              ),
+            ],
+          ),
         );
       },
     );
   }
+
+  /// Overlays the desk's pointer on [image].
+  ///
+  /// Its own [LayoutBuilder] because the cursor's position depends on where the
+  /// picture was actually drawn, and under `BoxFit.contain` that is not the
+  /// widget's own rectangle — it is the letterboxed rectangle inside it.
+  Widget _withCursor(Widget image) => LayoutBuilder(
+        builder: (context, constraints) => Stack(
+          fit: StackFit.expand,
+          children: <Widget>[
+            image,
+            RemoteCursor(
+              normalised: _cursor,
+              containerSize: Size(constraints.maxWidth, constraints.maxHeight),
+              imageSize: _imageSize,
+            ),
+          ],
+        ),
+      );
 }
 
 class _UnsupportedScreenViewer extends StatelessWidget {

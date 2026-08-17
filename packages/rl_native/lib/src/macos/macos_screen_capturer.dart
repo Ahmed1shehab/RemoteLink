@@ -112,10 +112,13 @@ final class MacosScreenCapturer {
       try {
         final jpegBytes = _encodeJpeg(imageToEncode, quality);
         if (jpegBytes == null) return null;
+        final cursor = _cursorWithin(displayId);
         return CapturedFrame(
           width: targetWidth,
           height: targetHeight,
           data: jpegBytes,
+          cursorX: cursor?.x,
+          cursorY: cursor?.y,
         );
       } finally {
         if (scaledImage != nullptr) {
@@ -124,6 +127,45 @@ final class MacosScreenCapturer {
       }
     } finally {
       _bindings.release(image);
+    }
+  }
+
+  /// Where the pointer is inside [displayId], in 0..1, or null if elsewhere.
+  ///
+  /// `CGDisplayCreateImage` composites windows but not the cursor, so this is
+  /// the only way the viewer learns where the pointer is. Read here, alongside
+  /// the frame, so the position and the picture describe the same instant — a
+  /// cursor sampled on a different tick lands visibly beside the thing it is
+  /// hovering over during any fast movement.
+  ///
+  /// `CGEventCreate(null)` returns an event carrying the current pointer
+  /// location, which is the documented way to ask without an event to hand and
+  /// costs nothing beyond one allocation.
+  ({double x, double y})? _cursorWithin(int displayId) {
+    final event = _bindings.createEvent(nullptr);
+    if (event == nullptr) return null;
+
+    try {
+      final location = _bindings.getLocation(event);
+      final bounds = _bindings.displayBounds(displayId);
+      final width = bounds.size.width;
+      final height = bounds.size.height;
+      if (width <= 0 || height <= 0) return null;
+
+      final x = (location.x - bounds.origin.x) / width;
+      final y = (location.y - bounds.origin.y) / height;
+
+      // Outside this display on a multi-monitor desk. Reporting nothing is
+      // right: the pointer genuinely is not in this picture, and clamping it
+      // to an edge would draw a cursor that is not there.
+      if (!x.isFinite || !y.isFinite) return null;
+      if (x < 0 || x > 1 || y < 0 || y > 1) return null;
+
+      return (x: x, y: y);
+    } on Object catch (_) {
+      return null;
+    } finally {
+      _bindings.release(event.cast());
     }
   }
 

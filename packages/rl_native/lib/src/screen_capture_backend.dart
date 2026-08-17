@@ -68,7 +68,17 @@ final class CapturedFrame {
     required this.width,
     required this.height,
     required this.data,
+    this.cursorX,
+    this.cursorY,
   });
+
+  /// Where the pointer sits within this frame, in 0..1, or null if it is not on
+  /// the captured display.
+  ///
+  /// Separate from [data] because the capture APIs do not composite the cursor
+  /// into the image — see `ScreenFrame.cursorX` for what that costs a viewer.
+  final double? cursorX;
+  final double? cursorY;
 
   /// Decoded width in pixels.
   final int width;

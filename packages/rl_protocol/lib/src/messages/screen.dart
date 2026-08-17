@@ -389,6 +389,8 @@ final class ScreenFrame extends Message {
     required this.width,
     required this.height,
     required Uint8List data,
+    this.cursorX,
+    this.cursorY,
   }) : data = Uint8List.fromList(data);
 
   /// Monotonically increasing frame sequence number on this stream.
@@ -409,6 +411,26 @@ final class ScreenFrame extends Message {
   /// Encoded frame payload (e.g. H.264 NALUs or JPEG bytes).
   final Uint8List data;
 
+  /// Where the pointer is within this frame, in 0..1, or null if it is not on
+  /// this display.
+  ///
+  /// Carried because the frame does not contain it. `CGDisplayCreateImage` —
+  /// and the equivalent on every other platform worth having — composites
+  /// windows but not the cursor, so a viewer that draws only the frame shows a
+  /// desk with no pointer on it. The user then has no idea where they are
+  /// aiming, which makes an otherwise working remote pointer unusable.
+  ///
+  /// Normalised rather than in pixels so the phone can draw a crisp pointer at
+  /// its own scale instead of one that was rasterised at the frame's size and
+  /// then stretched. Sending it separately also keeps the picture free of a
+  /// cursor burned into the JPEG, which would smear whenever the frame
+  /// deduplicates or the encoder blocks.
+  ///
+  /// Appended fields, under §5 rule 2: a peer built before these existed reads
+  /// the five fields it knows, stops, and ignores the rest.
+  final double? cursorX;
+  final double? cursorY;
+
   @override
   MessageType get type => MessageType.screenFrame;
 
@@ -421,6 +443,15 @@ final class ScreenFrame extends Message {
       ..writeVarUint(width)
       ..writeVarUint(height)
       ..writeLengthPrefixedBytes(data);
+
+    final x = cursorX;
+    final y = cursorY;
+    writer.writeBool(x != null && y != null);
+    if (x != null && y != null) {
+      writer
+        ..writeFloat32(x)
+        ..writeFloat32(y);
+    }
   }
 
   static ScreenFrame readFrom(ByteReader reader) {
@@ -433,6 +464,24 @@ final class ScreenFrame extends Message {
       maxLength: kMaxScreenFrameBytes,
     );
 
+    // Absent on a peer built before the cursor was carried, which is the
+    // ordinary case rather than an error: it means "this frame says nothing
+    // about the pointer", and the viewer draws none.
+    double? cursorX;
+    double? cursorY;
+    if (!reader.isAtEnd && reader.readBool()) {
+      final x = reader.readFloat32();
+      final y = reader.readFloat32();
+      // float32 from a peer: NaN and infinity cost nothing to send and would
+      // propagate into a layout calculation on the phone. A cursor outside the
+      // frame is dropped rather than clamped to an edge, because a pointer
+      // pinned to a border is a lie about where it is.
+      if (x.isFinite && y.isFinite && x >= 0 && x <= 1 && y >= 0 && y <= 1) {
+        cursorX = x;
+        cursorY = y;
+      }
+    }
+
     return ScreenFrame(
       sequence: sequence,
       ptsMicros: ptsMicros,
@@ -440,13 +489,16 @@ final class ScreenFrame extends Message {
       width: width,
       height: height,
       data: data,
+      cursorX: cursorX,
+      cursorY: cursorY,
     );
   }
 
   @override
   String toString() => 'ScreenFrame(#$sequence, pts: $ptsMicros, '
       '${isKeyframe ? "keyframe" : "delta"}, '
-      '${width}x$height, ${data.length} bytes)';
+      '${width}x$height, ${data.length} bytes'
+      '${cursorX == null ? "" : ", cursor at $cursorX,$cursorY"})';
 }
 
 /// Client → server. Adjusts stream parameters mid-stream.

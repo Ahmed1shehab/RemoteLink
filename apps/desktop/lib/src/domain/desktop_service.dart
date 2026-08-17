@@ -2471,6 +2471,11 @@ final class DesktopService {
         width: frame.width,
         height: frame.height,
         data: frame.data,
+        // The capture APIs leave the cursor out of the picture, so it travels
+        // beside it. Without this the viewer shows a desk with no pointer on
+        // it and the user is aiming blind.
+        cursorX: frame.cursorX,
+        cursorY: frame.cursorY,
       );
       stream.capturedFrames++;
       // `awaitDrain` is what makes `isFrameInFlight` mean anything. A plain

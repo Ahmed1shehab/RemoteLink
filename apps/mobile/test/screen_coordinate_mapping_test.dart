@@ -248,4 +248,111 @@ void main() {
       );
     });
   });
+  _cursorMappingTests();
+}
+
+void _cursorMappingTests() {
+  group('mapping the desk cursor back onto the picture', () {
+    // The inverse has to agree with the forward mapping exactly. If it does
+    // not, the drawn pointer sits beside the place a tap actually lands, and
+    // the user aims at the drawn one — which is worse than showing no pointer,
+    // because a missing pointer is obviously missing and a wrong one is not.
+    test('round-trips with the touch mapping at every corner and centre', () {
+      const container = Size(400, 800);
+      const image = Size(1600, 1000);
+
+      for (final point in <Offset>[
+        Offset.zero,
+        const Offset(1, 1),
+        const Offset(0, 1),
+        const Offset(1, 0),
+        const Offset(0.5, 0.5),
+        const Offset(0.13, 0.87),
+      ]) {
+        final drawn = mapNormalisedToContainerPosition(
+          normalised: point,
+          containerSize: container,
+          imageSize: image,
+        );
+        expect(drawn, isNotNull, reason: '$point produced no position');
+
+        final back = mapTouchToNormalisedCoordinates(
+          touchPosition: drawn!,
+          containerSize: container,
+          imageSize: image,
+        );
+        expect(back, isNotNull, reason: '$point mapped outside the picture');
+        expect(back!.dx, closeTo(point.dx, 1e-9));
+        expect(back.dy, closeTo(point.dy, 1e-9));
+      }
+    });
+
+    test('places the cursor inside the letterboxed picture, not the widget',
+        () {
+      // A wide desk in a tall widget. Mapping against the widget rather than
+      // against the drawn rectangle puts the pointer in the black bar — the
+      // same off-by-a-letterbox mistake, in the other direction.
+      const container = Size(400, 800);
+      const image = Size(1600, 800); // 2:1, so drawn 400x200, centred
+
+      final centre = mapNormalisedToContainerPosition(
+        normalised: const Offset(0.5, 0.5),
+        containerSize: container,
+        imageSize: image,
+      );
+
+      expect(centre!.dx, closeTo(200, 1e-9));
+      expect(centre.dy, closeTo(400, 1e-9));
+
+      final topLeft = mapNormalisedToContainerPosition(
+        normalised: Offset.zero,
+        containerSize: container,
+        imageSize: image,
+      );
+      // 300, not 0: the picture starts below the bar.
+      expect(topLeft!.dy, closeTo(300, 1e-9));
+      expect(topLeft.dx, closeTo(0, 1e-9));
+    });
+
+    test('refuses a position that is not on the picture', () {
+      const container = Size(400, 800);
+      const image = Size(1600, 1000);
+
+      for (final bad in <Offset>[
+        const Offset(-0.01, 0.5),
+        const Offset(1.01, 0.5),
+        const Offset(0.5, -0.01),
+        const Offset(0.5, 1.01),
+        const Offset(double.nan, 0.5),
+        const Offset(0.5, double.infinity),
+      ]) {
+        expect(
+          mapNormalisedToContainerPosition(
+            normalised: bad,
+            containerSize: container,
+            imageSize: image,
+          ),
+          isNull,
+          reason: 'drew a cursor at $bad',
+        );
+      }
+    });
+
+    test('refuses a container or image that cannot be drawn in', () {
+      for (final sizes in <List<Size>>[
+        <Size>[Size.zero, const Size(100, 100)],
+        <Size>[const Size(100, 100), Size.zero],
+        <Size>[const Size(-100, 100), const Size(100, 100)],
+      ]) {
+        expect(
+          mapNormalisedToContainerPosition(
+            normalised: const Offset(0.5, 0.5),
+            containerSize: sizes[0],
+            imageSize: sizes[1],
+          ),
+          isNull,
+        );
+      }
+    });
+  });
 }
