@@ -138,6 +138,31 @@ void main() {
       expect(destination.existsSync(), isTrue);
       expect(await destination.readAsBytes(), <int>[1, 2, 3, 4, 5, 6, 7, 8]);
     });
+
+    test('a hostile fileType from a peer does not influence destination path',
+        () async {
+      final hostileOffer = FileOffer(
+        transferId: 'hostile-mime-mobile',
+        files: <OfferedFile>[
+          OfferedFile(
+            fileId: 'f-1',
+            fileName: 'safe_document.pdf',
+            size: 4,
+            fileType: '../../../../evil/path/traversal.sh',
+          ),
+        ],
+      );
+
+      final files = await store.prepare(hostileOffer, namespace: 'session-3');
+      final incoming = files['f-1']!;
+      await incoming.write(0, Uint8List.fromList(<int>[1, 2, 3, 4]));
+      await incoming.commit();
+
+      final destination = File('${tempDir.path}/safe_document.pdf');
+      expect(destination.existsSync(), isTrue);
+      expect(await destination.readAsBytes(), <int>[1, 2, 3, 4]);
+      expect(File('${tempDir.parent.path}/traversal.sh').existsSync(), isFalse);
+    });
   });
 
   group('TransferScreen Widget Tests', () {
@@ -213,7 +238,7 @@ void main() {
       expect(find.text('Send to device'), findsOneWidget);
       expect(find.text('Text / URL'), findsOneWidget);
       expect(find.text('File'), findsOneWidget);
-      expect(find.text('Photo'), findsOneWidget);
+      expect(find.text('Media'), findsOneWidget);
       expect(find.text('Send Text'), findsOneWidget);
 
       // Switch to File mode. This used to assert a "File path" text field, in
@@ -224,12 +249,191 @@ void main() {
       expect(find.text('Choose files'), findsOneWidget);
       expect(find.text('Send File'), findsOneWidget);
 
-      // Switch to Photo mode
-      await tester.tap(find.text('Photo'));
+      // Switch to Media mode
+      await tester.tap(find.text('Media'));
       await tester.pumpAndSettle();
-      expect(find.text('Choose photos'), findsOneWidget);
-      expect(find.text('Send Photo'), findsOneWidget);
+      expect(find.text('Choose media'), findsOneWidget);
+      expect(find.text('Send Media'), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'a long device name renders without an overflow in the target dropdown',
+        (tester) async {
+      tester.view.physicalSize = const Size(375, 667);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      // Max device name length allowed by protocol is 64 graphemes.
+      const longName =
+          'My Very Long Desktop Workstation Computer Name Graphemes 1234567';
+      expect(longName.length, lessThanOrEqualTo(64));
+
+      final now = DateTime.now();
+      final targetPeer = TrustedPeer(
+        id: const DeviceId('desktop-long-name-id'),
+        name: longName,
+        platform: PlatformKind.macos,
+        publicKey: Uint8List(32),
+        pairedAt: now,
+        permissionTier: PermissionTier.extended.wireValue,
+      );
+
+      final beacon = Beacon(
+        kind: BeaconKind.announce,
+        deviceId: const DeviceId('desktop-long-name-id'),
+        name: longName,
+        platform: PlatformKind.macos,
+        servicePort: 41234,
+        protocolVersion: 1,
+        publicKeyFingerprint: Uint8List(8),
+        capabilities: const Capabilities(Capabilities.sessionResumption),
+      );
+
+      final discoveredDevice = DiscoveredDevice(
+        beacon: beacon,
+        address: '192.168.1.50',
+        firstSeen: now,
+        lastSeen: now,
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            identityProvider.overrideWith(
+              (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+            ),
+            clientStateProvider.overrideWith(
+              (ref) => Stream<ClientState>.value(ClientState.connected),
+            ),
+            discoveredDevicesProvider.overrideWith(
+              (ref) => Stream<List<DiscoveredDevice>>.value(<DiscoveredDevice>[
+                discoveredDevice,
+              ]),
+            ),
+            trustedPeersProvider.overrideWith(
+              (ref) async => <TrustedPeer>[targetPeer],
+            ),
+            mobileTransferStoreProvider.overrideWith(
+              (ref) async => MobileTransferStore(Directory.systemTemp),
+            ),
+          ],
+          child: const MaterialApp(home: Scaffold(body: TransferScreen())),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'choosing and sending a video results in an offer with video MIME type',
+        (tester) async {
+      await tester.runAsync(() async {
+        final phoneIdentity = await DeviceIdentity.generate();
+        final desktopIdentity = await DeviceIdentity.generate();
+
+        final desktopTrust = InMemoryTrustStore();
+        await desktopTrust.upsert(
+          TrustedPeer(
+            id: phoneIdentity.id,
+            publicKey: phoneIdentity.publicKey,
+            name: 'Test Phone',
+            platform: PlatformKind.android,
+            pairedAt: DateTime.now(),
+            permissionTier: PermissionTier.extended.wireValue,
+          ),
+        );
+
+        final server = RemoteLinkServer(
+          identity: desktopIdentity,
+          capabilities: const Capabilities(Capabilities.sessionResumption),
+          trustStore: desktopTrust,
+          clock: SystemClock(),
+          port: 0,
+        );
+        await server.start();
+
+        final client = RemoteLinkClient(
+          identity: phoneIdentity,
+          capabilities: const Capabilities(Capabilities.sessionResumption),
+          clock: SystemClock(),
+        );
+
+        final acceptedFuture = server.accepted.first;
+
+        final connectedFuture = client.states.firstWhere(
+          (s) => s == ClientState.connected,
+        );
+
+        await client.connect(
+          ConnectionTarget(
+            host: '127.0.0.1',
+            port: server.boundPort,
+            deviceId: desktopIdentity.id,
+            serverPublicKey: desktopIdentity.publicKey,
+          ),
+        );
+
+        await connectedFuture.timeout(const Duration(seconds: 10));
+        final serverSession =
+            await acceptedFuture.timeout(const Duration(seconds: 10));
+
+        final tempDir =
+            Directory.systemTemp.createTempSync('video_transfer_test');
+
+        final videoFile = File('${tempDir.path}/holiday.mp4')
+          ..writeAsStringSync('dummy mp4 video bytes');
+
+        final container = ProviderContainer(
+          overrides: <Override>[
+            clientProvider.overrideWith((ref) async => client),
+            clientStateProvider.overrideWith(
+              (ref) => Stream<ClientState>.value(ClientState.connected),
+            ),
+            transferControllerProvider.overrideWith(
+              (ref) => MobileTransferController(
+                ref,
+                customTransferStore: MobileTransferStore(tempDir),
+              ),
+            ),
+          ],
+        );
+
+        try {
+          await container.read(clientProvider.future);
+          final controller =
+              container.read(transferControllerProvider.notifier);
+
+          final offerFuture = serverSession.session.messages.firstWhere(
+            (msg) => msg is FileOffer,
+          );
+
+          await controller.sendFiles(
+            targetPeerId: desktopIdentity.id,
+            targetPeerName: 'Desktop Server',
+            files: <File>[videoFile],
+            fileNames: <String>['holiday.mp4'],
+          );
+
+          final receivedMessage =
+              await offerFuture.timeout(const Duration(seconds: 5));
+          expect(receivedMessage, isA<FileOffer>());
+          final offer = receivedMessage as FileOffer;
+          expect(offer.files, hasLength(1));
+          expect(offer.files.single.fileName, 'holiday.mp4');
+          expect(offer.files.single.fileType, 'video/mp4');
+          expect(
+              offer.files.single.fileType, isNot('application/octet-stream'));
+        } finally {
+          container.dispose();
+          tempDir.deleteSync(recursive: true);
+          await client.dispose();
+          await server.stop();
+          await desktopTrust.dispose();
+        }
+      });
     });
 
     testWidgets('renders active transfers with progress, speed, ETA and cancel',

@@ -39,8 +39,8 @@ abstract interface class TransferFilePicker {
   /// Any file. Returns an empty list when the user cancels.
   Future<List<PickedFile>> pickFiles();
 
-  /// Photos and images, through the system photo picker.
-  Future<List<PickedFile>> pickImages();
+  /// Photos and videos, through the system media picker.
+  Future<List<PickedFile>> pickMedia();
 }
 
 /// The real picker, backed by the platform's own dialogs.
@@ -62,9 +62,9 @@ final class SystemTransferFilePicker implements TransferFilePicker {
   }
 
   @override
-  Future<List<PickedFile>> pickImages() async {
-    final selected = await _imagePicker.pickMultiImage();
-    _log.debug(() => 'picked ${selected.length} image(s)');
+  Future<List<PickedFile>> pickMedia() async {
+    final selected = await _imagePicker.pickMultipleMedia();
+    _log.debug(() => 'picked ${selected.length} media item(s)');
     return _toPickedFiles(selected);
   }
 

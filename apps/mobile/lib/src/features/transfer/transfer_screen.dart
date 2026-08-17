@@ -22,7 +22,7 @@ class TransferScreen extends ConsumerStatefulWidget {
 }
 
 class _TransferScreenState extends ConsumerState<TransferScreen> {
-  int _selectedType = 0; // 0 = Text/URL, 1 = File, 2 = Photo
+  int _selectedType = 0; // 0 = Text/URL, 1 = File, 2 = Media
   final TextEditingController _textController = TextEditingController();
   final TextEditingController _customNameController = TextEditingController();
 
@@ -130,6 +130,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
                   )
                 else
                   DropdownButtonFormField<String>(
+                    isExpanded: true,
                     initialValue: _selectedTargetId,
                     decoration: const InputDecoration(
                       labelText: 'Target device',
@@ -142,6 +143,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
                           value: t.id.value,
                           child: Text(
                             '${t.name} ${t.isLive ? "(online)" : "(offline)"}',
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                     ],
@@ -162,8 +164,8 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
                     ),
                     ButtonSegment<int>(
                       value: 2,
-                      label: Text('Photo'),
-                      icon: Icon(Icons.photo_outlined),
+                      label: Text('Media'),
+                      icon: Icon(Icons.perm_media_outlined),
                     ),
                   ],
                   selected: <int>{_selectedType},
@@ -193,7 +195,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
                 ] else ...<Widget>[
                   _PickedFilesField(
                     picked: _picked,
-                    isPhotoMode: _selectedType == 2,
+                    isMediaMode: _selectedType == 2,
                     isPicking: _isPicking,
                     onPick: _pick,
                     onRemove: (file) => setState(() => _picked.remove(file)),
@@ -255,8 +257,11 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
 
   String get _sendLabel {
     if (_selectedType == 0) return 'Send Text';
-    final noun = _selectedType == 2 ? 'Photo' : 'File';
-    if (_picked.isEmpty) return 'Send $noun';
+    // "Item" for media, because the tab now mixes photos and videos and
+    // "Send 3 Media" is not a sentence. Files keep their own noun: there is
+    // only one kind of thing on that tab and naming it reads better.
+    final noun = _selectedType == 2 ? 'Item' : 'File';
+    if (_picked.isEmpty) return _selectedType == 2 ? 'Send Media' : 'Send File';
     if (_picked.length == 1) return 'Send 1 $noun';
     return 'Send ${_picked.length} ${noun}s';
   }
@@ -271,7 +276,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     final picker = ref.read(transferFilePickerProvider);
     try {
       final chosen = _selectedType == 2
-          ? await picker.pickImages()
+          ? await picker.pickMedia()
           : await picker.pickFiles();
       if (!mounted) return;
       setState(() {
@@ -328,7 +333,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
         if (_picked.isEmpty) {
           setState(
             () => _statusError = _selectedType == 2
-                ? 'Choose at least one photo to send'
+                ? 'Choose at least one photo or video to send'
                 : 'Choose at least one file to send',
           );
           return;
@@ -399,14 +404,14 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
 class _PickedFilesField extends StatelessWidget {
   const _PickedFilesField({
     required this.picked,
-    required this.isPhotoMode,
+    required this.isMediaMode,
     required this.isPicking,
     required this.onPick,
     required this.onRemove,
   });
 
   final List<PickedFile> picked;
-  final bool isPhotoMode;
+  final bool isMediaMode;
   final bool isPicking;
   final Future<void> Function() onPick;
   final void Function(PickedFile) onRemove;
@@ -414,7 +419,7 @@ class _PickedFilesField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final noun = isPhotoMode ? 'photos' : 'files';
+    final noun = isMediaMode ? 'media' : 'files';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -427,7 +432,8 @@ class _PickedFilesField extends StatelessWidget {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : Icon(isPhotoMode ? Icons.photo_library : Icons.folder_open),
+              : Icon(
+                  isMediaMode ? Icons.perm_media_outlined : Icons.folder_open),
           label: Text(
             picked.isEmpty ? 'Choose $noun' : 'Add more $noun',
           ),
@@ -435,7 +441,9 @@ class _PickedFilesField extends StatelessWidget {
         if (picked.isEmpty) ...<Widget>[
           const SizedBox(height: 8),
           Text(
-            isPhotoMode ? 'Opens your photo library.' : 'Opens your files.',
+            isMediaMode
+                ? 'Opens your photo and video library.'
+                : 'Opens your files.',
             style: Theme.of(context).textTheme.bodySmall,
             textAlign: TextAlign.center,
           ),
@@ -447,7 +455,7 @@ class _PickedFilesField extends StatelessWidget {
               child: Row(
                 children: <Widget>[
                   Icon(
-                    isPhotoMode ? Icons.image_outlined : Icons.description,
+                    isMediaMode ? Icons.perm_media_outlined : Icons.description,
                     size: 18,
                     color: scheme.primary,
                   ),
@@ -477,11 +485,6 @@ class _PickedFilesField extends StatelessWidget {
     );
   }
 
-  /// A size for the row, without letting a vanished file take down the build.
-  ///
-  /// `lengthSync` throws when the path no longer resolves, and a throw inside
-  /// `build` is a red screen rather than a missing number. Send-time re-checks
-  /// the file properly and tells the user; this only has to render.
   static int _lengthOrZero(File file) {
     try {
       return file.lengthSync();

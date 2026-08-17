@@ -86,6 +86,7 @@ void main() {
       final known = <String>{
         for (final interface in await NetworkInterface.list(
           includeLoopback: true,
+          includeLinkLocal: true,
           type: InternetAddressType.IPv4,
         ))
           for (final address in interface.addresses) address.address,
