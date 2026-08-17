@@ -12,6 +12,7 @@ import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
+import 'file_picker.dart';
 import 'mobile_transfer_store.dart';
 import 'transfer_model.dart';
 
@@ -708,6 +709,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
     required DeviceId targetPeerId,
     required String targetPeerName,
     required List<File> files,
+    List<String>? fileNames,
   }) async {
     final client = _ref.read(clientProvider).valueOrNull;
     final session = client?.session;
@@ -719,6 +721,12 @@ class MobileTransferController extends StateNotifier<TransferState> {
       throw ArgumentError('files list must not be empty');
     }
 
+    if (fileNames != null && fileNames.length != files.length) {
+      throw ArgumentError(
+        'fileNames has ${fileNames.length} entries for ${files.length} files',
+      );
+    }
+
     final transferId = 't-${DateTime.now().microsecondsSinceEpoch}';
     final offeredFiles = <OfferedFile>[];
     final sources = <String, OutgoingFile>{};
@@ -726,10 +734,16 @@ class MobileTransferController extends StateNotifier<TransferState> {
     for (var i = 0; i < files.length; i++) {
       final file = files[i];
       final fileId = 'file-${i + 1}';
-      final rawName = file.uri.pathSegments.lastWhere(
-        (s) => s.isNotEmpty,
-        orElse: () => 'file_${i + 1}.dat',
-      );
+      // The caller's name wins when it has one. A picked file's path is a
+      // cache copy — `image_picker_A1B2C3.jpg` — and the name the user
+      // recognises only exists in the picker's own metadata. Sanitisation
+      // still applies to both: a display name arrives from a content provider,
+      // which is no more trustworthy than a path.
+      final rawName = fileNames?[i] ??
+          file.uri.pathSegments.lastWhere(
+            (s) => s.isNotEmpty,
+            orElse: () => 'file_${i + 1}.dat',
+          );
       final fileName = sanitiseFileName(rawName);
       final length = file.lengthSync();
       final stat = file.statSync();
@@ -888,6 +902,15 @@ class MobileTransferController extends StateNotifier<TransferState> {
 final transferControllerProvider =
     StateNotifierProvider<MobileTransferController, TransferState>(
   MobileTransferController.new,
+);
+
+/// The system file and photo pickers.
+///
+/// Overridden with a fake in widget tests. The real implementation calls
+/// platform channels that do not exist in the test binding, so a test that
+/// reaches it fails with `MissingPluginException` rather than anything useful.
+final transferFilePickerProvider = Provider<TransferFilePicker>(
+  (ref) => SystemTransferFilePicker(),
 );
 
 /// Provider for the download directory store on mobile.
