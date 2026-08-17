@@ -747,13 +747,14 @@ class MobileTransferController extends StateNotifier<TransferState> {
       );
       final length = file.lengthSync();
       final stat = file.statSync();
+      final fileType = mimeTypeForFileName(fileName);
 
       offeredFiles.add(
         OfferedFile(
           fileId: fileId,
           fileName: fileName,
           size: length,
-          fileType: 'application/octet-stream',
+          fileType: fileType,
           modifiedAt: stat.modified.toUtc(),
         ),
       );

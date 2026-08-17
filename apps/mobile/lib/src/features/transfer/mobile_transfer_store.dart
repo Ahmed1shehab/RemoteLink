@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 // ignore_for_file: avoid_slow_async_io
 
+import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
@@ -74,9 +75,9 @@ final class MobileTransferStore implements IncomingTransferStore {
         .where((entry) => entry.key != reservationKey)
         .fold(0, (total, entry) => total + entry.value);
     if (requiredBytes > available - reservedElsewhere) {
-      throw FileSystemException(
-        'transfer needs $requiredBytes bytes but only $available are free',
-        root,
+      throw InsufficientSpaceError(
+        requiredBytes: requiredBytes,
+        availableBytes: available,
       );
     }
     _reservations[reservationKey] = requiredBytes;

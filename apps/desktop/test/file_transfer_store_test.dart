@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:remotelink_desktop/src/domain/file_transfer_store.dart';
+import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
 void main() {
@@ -83,7 +84,7 @@ void main() {
 
     await expectLater(
       store.prepare(_offer('escape', 4), namespace: 'peer-1'),
-      throwsA(isA<FileSystemException>()),
+      throwsA(isA<FileSystemException>()), // escape, not a space problem
     );
     expect(await outside.list().toList(), isEmpty);
   });
@@ -97,7 +98,7 @@ void main() {
 
     await expectLater(
       store.prepare(_offer('too-large', 4), namespace: 'peer-1'),
-      throwsA(isA<FileSystemException>()),
+      throwsA(isA<InsufficientSpaceError>()),
     );
     final entities = destination.existsSync()
         ? await destination.list(recursive: true, followLinks: false).toList()
@@ -138,8 +139,39 @@ void main() {
 
     await expectLater(
       store.prepare(_offer('second', 4), namespace: 'peer-2'),
-      throwsA(isA<FileSystemException>()),
+      throwsA(isA<InsufficientSpaceError>()),
     );
+  });
+
+  test(
+      'a hostile fileType arriving from a peer does not influence destination path',
+      () async {
+    final store = FileTransferStore(
+      destination,
+      diskSpaceProbe: (_) async => 1024,
+    );
+    final hostileOffer = FileOffer(
+      transferId: 'hostile-mime',
+      files: <OfferedFile>[
+        OfferedFile(
+          fileId: 'file-1',
+          fileName: 'report.pdf',
+          size: 4,
+          fileType: '../../../../evil/path/traversal.sh',
+        ),
+      ],
+    );
+    final prepared =
+        (await store.prepare(hostileOffer, namespace: 'peer-1'))['file-1']!;
+    await prepared.write(0, Uint8List.fromList(<int>[1, 2, 3, 4]));
+    await prepared.commit();
+
+    expect(
+      await File('${destination.path}/report.pdf').readAsBytes(),
+      <int>[1, 2, 3, 4],
+    );
+    expect(File('${sandbox.path}/traversal.sh').existsSync(), isFalse);
+    expect(File('${sandbox.path}/evil').existsSync(), isFalse);
   });
 }
 

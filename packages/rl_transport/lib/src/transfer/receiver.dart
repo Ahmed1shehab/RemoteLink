@@ -125,17 +125,24 @@ final class FileTransferReceiver {
     try {
       targets = await _store.prepare(offer, namespace: storageNamespace);
     } on Object catch (error, stackTrace) {
-      // `ioError`, not `tooLarge`. Every failure here used to be reported as
-      // "not enough storage space", which is one specific cause among many and
-      // was almost never the real one: a destination the app is not permitted
-      // to write to fails in exactly the same place, and the sender was told a
-      // story about disk space while the actual problem was an entitlement.
-      // A wrong diagnosis is worse than a vague one, because it sends whoever
-      // reads it looking in the wrong direction.
+      // `tooLarge` only when the store actually compared the numbers and came
+      // up short. Everything else is `ioError`.
       //
-      // The exception itself only goes to the local log. The peer is told that
-      // writing failed and nothing more — a path or an OS error message from
-      // this side is not something a remote device needs.
+      // This used to report every storage failure as `tooLarge`, and the
+      // sender rendered that as "not enough storage space on peer" — which a
+      // user saw for a 400 KB file when the real cause was a sandboxed app
+      // with no permission to write to its download directory. Both paths
+      // raised `FileSystemException`, so there was nothing to tell them apart
+      // until the store grew a type for the one case it can be certain about.
+      //
+      // A wrong diagnosis is worse than a vague one: it sends whoever reads it
+      // looking in the wrong direction, and they believe it because it sounds
+      // specific.
+      //
+      // The exception itself only goes to the local log. The peer is told the
+      // category and nothing more — a path or an OS error string from this
+      // side is not something a remote device needs to hear.
+      final outOfSpace = error is InsufficientSpaceError;
       _log.warn(
         'could not prepare storage for an incoming transfer',
         error: error,
@@ -143,6 +150,7 @@ final class FileTransferReceiver {
         fields: <String, Object?>{
           'transferId': offer.transferId,
           'files': offer.files.length,
+          'outOfSpace': outOfSpace,
         },
       );
       return OfferDecision(
@@ -153,7 +161,8 @@ final class FileTransferReceiver {
         ),
         abort: FileAbort(
           transferId: offer.transferId,
-          reason: FileAbortReason.ioError,
+          reason:
+              outOfSpace ? FileAbortReason.tooLarge : FileAbortReason.ioError,
         ),
       );
     }

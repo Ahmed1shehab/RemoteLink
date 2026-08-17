@@ -12,5 +12,6 @@ export 'src/device_name.dart';
 export 'src/errors.dart';
 export 'src/logging.dart';
 export 'src/mac_address.dart';
+export 'src/mime_type.dart';
 export 'src/result.dart';
 export 'src/wake_on_lan.dart';

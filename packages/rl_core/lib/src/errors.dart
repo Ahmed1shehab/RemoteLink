@@ -90,3 +90,31 @@ final class PermissionError extends RemoteLinkError {
   const PermissionError(String code, String message, {Object? cause})
       : super(code: 'permission.$code', message: message, cause: cause);
 }
+
+/// There is genuinely not enough room on disk for an incoming transfer.
+///
+/// Its own type because the alternative does not work. A store that refuses
+/// for want of space and a store that cannot write at all both raise
+/// `FileSystemException`, so a receiver catching that has no way to tell them
+/// apart — and this app has already told a user "not enough storage space" for
+/// a 400 KB file when the real problem was a missing sandbox entitlement.
+///
+/// Throw this only when the numbers were actually compared and came up short.
+/// Everything else is an I/O failure, and saying so is more useful than
+/// guessing at a cause.
+@immutable
+final class InsufficientSpaceError extends RemoteLinkError {
+  const InsufficientSpaceError({
+    required this.requiredBytes,
+    required this.availableBytes,
+    Object? cause,
+  }) : super(
+          code: 'storage.insufficient_space',
+          message: 'transfer needs $requiredBytes bytes '
+              'but only $availableBytes are free',
+          cause: cause,
+        );
+
+  final int requiredBytes;
+  final int availableBytes;
+}

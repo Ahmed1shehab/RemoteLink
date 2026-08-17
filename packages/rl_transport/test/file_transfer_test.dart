@@ -269,6 +269,26 @@ void main() {
     expect(decision.abort?.reason, isNot(FileAbortReason.tooLarge));
   });
 
+  test('a genuine shortage of disk space still reports as too large', () async {
+    // The other half of the pair above. Narrowing everything to `ioError`
+    // would have been just as wrong in the opposite direction: when the store
+    // has actually compared the numbers, "not enough space" is the true and
+    // useful answer, and the sender can say so.
+    final store = _FullDiskStore();
+    final offer = await _offer('no-space', _patternBytes(1024));
+    final receiver = FileTransferReceiver(
+      exporterSecret: exporter,
+      store: store,
+      storageNamespace: 'peer-1',
+    );
+
+    final decision =
+        await receiver.acceptOffer(offer, tier: PermissionTier.extended);
+
+    expect(decision.accept.fileTokens, isEmpty);
+    expect(decision.abort?.reason, FileAbortReason.tooLarge);
+  });
+
   test('flow control never exceeds four MiB of unacknowledged bytes', () async {
     final flow = FileTransferFlowControl();
     final releases = <Completer<void>>[];
@@ -455,6 +475,19 @@ final class _FailingStore implements IncomingTransferStore {
       throw const FileSystemException(
         'Creation failed',
         '/Users/someone/Downloads/RemoteLink',
+      );
+}
+
+/// Refuses for want of room, the way a full disk does.
+final class _FullDiskStore implements IncomingTransferStore {
+  @override
+  Future<Map<String, IncomingFile>> prepare(
+    FileOffer offer, {
+    required String namespace,
+  }) async =>
+      throw const InsufficientSpaceError(
+        requiredBytes: 1024,
+        availableBytes: 16,
       );
 }
 

@@ -22,13 +22,17 @@ import 'package:rl_transport/rl_transport.dart';
 /// exists as an interface — without it there is no way to test the send flow
 /// short of an integration test on a real device.
 final class _FakePicker implements TransferFilePicker {
-  _FakePicker({this.files = const <PickedFile>[], this.images});
+  _FakePicker({
+    this.files = const <PickedFile>[],
+    List<PickedFile>? media,
+    List<PickedFile>? images,
+  }) : media = media ?? images;
 
   final List<PickedFile> files;
-  final List<PickedFile>? images;
+  final List<PickedFile>? media;
 
   int fileCalls = 0;
-  int imageCalls = 0;
+  int mediaCalls = 0;
 
   @override
   Future<List<PickedFile>> pickFiles() async {
@@ -37,9 +41,9 @@ final class _FakePicker implements TransferFilePicker {
   }
 
   @override
-  Future<List<PickedFile>> pickImages() async {
-    imageCalls++;
-    return images ?? files;
+  Future<List<PickedFile>> pickMedia() async {
+    mediaCalls++;
+    return media ?? files;
   }
 }
 
@@ -50,7 +54,7 @@ final class _ThrowingPicker implements TransferFilePicker {
       throw StateError('no activity to handle the intent');
 
   @override
-  Future<List<PickedFile>> pickImages() async =>
+  Future<List<PickedFile>> pickMedia() async =>
       throw StateError('no activity to handle the intent');
 }
 
@@ -284,9 +288,13 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('the Photo tab asks for images, not files', (tester) async {
+    testWidgets('the Media tab asks for media (photos and videos), not files',
+        (tester) async {
       final picker = _FakePicker(
-        images: <PickedFile>[makePicked('IMG_4021.HEIC')],
+        media: <PickedFile>[
+          makePicked('IMG_4021.HEIC'),
+          makePicked('vacation_clip.mp4'),
+        ],
       );
 
       await tester.pumpWidget(
@@ -299,15 +307,16 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Photo'));
+      await tester.tap(find.text('Media'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Choose photos'));
+      await tester.tap(find.text('Choose media'));
       await tester.pumpAndSettle();
 
-      expect(picker.imageCalls, 1);
+      expect(picker.mediaCalls, 1);
       expect(picker.fileCalls, 0);
       expect(find.text('IMG_4021.HEIC'), findsOneWidget);
+      expect(find.text('vacation_clip.mp4'), findsOneWidget);
     });
   });
 
@@ -344,6 +353,36 @@ void main() {
         recorded.sentNames,
         <String>['Quarterly report.pdf', 'budget.xlsx'],
       );
+    });
+
+    testWidgets(
+        'choosing a video through the Media tab sends video to the controller',
+        (tester) async {
+      final video = makePicked('vacation_clip.mp4');
+      final picker = _FakePicker(media: <PickedFile>[video]);
+      late _RecordingController recorded;
+
+      await tester.pumpWidget(
+        harness(
+          picker: picker,
+          controller: (ref) => recorded = _RecordingController(
+            ref,
+            customTransferStore: MobileTransferStore(tempDir),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Media'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Choose media'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('vacation_clip.mp4'), findsOneWidget);
+      await tester.tap(find.text('Send 1 Item'));
+      await tester.pumpAndSettle();
+
+      expect(recorded.sentNames, <String>['vacation_clip.mp4']);
     });
 
     testWidgets('a file that vanished before Send is reported, not sent',
@@ -465,5 +504,5 @@ final class _SequencePicker implements TransferFilePicker {
   Future<List<PickedFile>> pickFiles() async => _next();
 
   @override
-  Future<List<PickedFile>> pickImages() async => _next();
+  Future<List<PickedFile>> pickMedia() async => _next();
 }
