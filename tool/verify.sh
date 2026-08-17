@@ -17,6 +17,11 @@ PURE_DART_PACKAGES=(
   packages/rl_crypto
   packages/rl_transport
   packages/rl_native
+  # The harness is a workspace member with its own suite, and leaving it out of
+  # this list once cost real time: a method added to `InputBackend` broke the
+  # fake in its tests, and nothing noticed until an unrelated change happened to
+  # run it by hand. Analysis covered it, tests did not.
+  tool/latency_harness
 )
 
 FLUTTER_PACKAGES=(
