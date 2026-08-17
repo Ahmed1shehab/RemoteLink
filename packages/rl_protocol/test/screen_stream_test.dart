@@ -1,0 +1,508 @@
+import 'dart:typed_data';
+
+import 'package:rl_core/rl_core.dart';
+import 'package:rl_protocol/rl_protocol.dart';
+import 'package:test/test.dart';
+
+Uint8List encode(Message message) {
+  final writer = ByteWriter();
+  message.writeTo(writer);
+  return writer.toBytes();
+}
+
+void main() {
+  group('ScreenCodec', () {
+    test('all known codecs resolve from wire and preserve value', () {
+      for (final codec in ScreenCodec.values) {
+        if (codec == ScreenCodec.unknown) continue;
+        expect(ScreenCodec.fromWire(codec.wireValue), codec);
+      }
+    });
+
+    test('unknown wire byte returns unknown codec without throwing', () {
+      expect(ScreenCodec.fromWire(0), ScreenCodec.unknown);
+      expect(ScreenCodec.fromWire(255), ScreenCodec.unknown);
+      expect(ScreenCodec.fromWire(127), ScreenCodec.unknown);
+    });
+  });
+
+  group('ScreenStopReason', () {
+    test('all known reasons resolve from wire', () {
+      for (final reason in ScreenStopReason.values) {
+        if (reason == ScreenStopReason.unknown) continue;
+        expect(ScreenStopReason.fromWire(reason.wireValue), reason);
+      }
+    });
+
+    test('unknown wire byte returns unknown reason without throwing', () {
+      expect(ScreenStopReason.fromWire(0), ScreenStopReason.unknown);
+      expect(ScreenStopReason.fromWire(255), ScreenStopReason.unknown);
+      expect(ScreenStopReason.fromWire(99), ScreenStopReason.unknown);
+    });
+  });
+
+  group('ScreenStreamStart', () {
+    const sample = ScreenStreamStart(
+      monitorId: 69733248,
+      codec: ScreenCodec.h264,
+      targetFps: 60,
+      targetBitrateKbps: 8000,
+      maxWidth: 1920,
+      maxHeight: 1080,
+    );
+
+    test('round-trip preserves every field', () {
+      final decoded = ScreenStreamStart.readFrom(ByteReader(encode(sample)));
+      expect(decoded.monitorId, 69733248);
+      expect(decoded.codec, ScreenCodec.h264);
+      expect(decoded.targetFps, 60);
+      expect(decoded.targetBitrateKbps, 8000);
+      expect(decoded.maxWidth, 1920);
+      expect(decoded.maxHeight, 1080);
+      expect(decoded.type, MessageType.screenStreamStart);
+    });
+
+    test('round-trip default / virtual desktop stream', () {
+      const start = ScreenStreamStart(codec: ScreenCodec.jpeg);
+      final decoded = ScreenStreamStart.readFrom(ByteReader(encode(start)));
+      expect(decoded.monitorId, kWholeVirtualDesktopMonitorId);
+      expect(decoded.codec, ScreenCodec.jpeg);
+      expect(decoded.targetFps, 60);
+      expect(decoded.targetBitrateKbps, 5000);
+      expect(decoded.maxWidth, 0);
+      expect(decoded.maxHeight, 0);
+    });
+
+    test('unknown codec byte decodes to ScreenCodec.unknown', () {
+      final writer = ByteWriter()
+        ..writeVarUint(1)
+        ..writeUint8(0xFE) // Unrecognised codec
+        ..writeVarUint(30)
+        ..writeVarUint(4000)
+        ..writeVarUint(1280)
+        ..writeVarUint(720);
+
+      final decoded = ScreenStreamStart.readFrom(ByteReader(writer.toBytes()));
+      expect(decoded.codec, ScreenCodec.unknown);
+      expect(decoded.targetFps, 30);
+      expect(decoded.maxWidth, 1280);
+    });
+
+    test('clamping nonsense FPS, bitrate, and dimensions', () {
+      final writer = ByteWriter()
+        ..writeVarUint(1)
+        ..writeUint8(ScreenCodec.h264.wireValue)
+        ..writeVarUint(0) // 0 FPS
+        ..writeVarUint(10) // 10 kbps
+        ..writeVarUint(999999999) // absurd width
+        ..writeVarUint(999999999); // absurd height
+
+      final decoded = ScreenStreamStart.readFrom(ByteReader(writer.toBytes()));
+      expect(decoded.targetFps, kMinFps);
+      expect(decoded.targetBitrateKbps, kMinBitrateKbps);
+      expect(decoded.maxWidth, kMaxMonitorExtent);
+      expect(decoded.maxHeight, kMaxMonitorExtent);
+
+      final writerOver = ByteWriter()
+        ..writeVarUint(1)
+        ..writeUint8(ScreenCodec.h264.wireValue)
+        ..writeVarUint(1000) // 1000 FPS
+        ..writeVarUint(500000000) // 500 Gbps
+        ..writeVarUint(0)
+        ..writeVarUint(0);
+
+      final decodedOver =
+          ScreenStreamStart.readFrom(ByteReader(writerOver.toBytes()));
+      expect(decodedOver.targetFps, kMaxFps);
+      expect(decodedOver.targetBitrateKbps, kMaxBitrateKbps);
+    });
+
+    test('trailing garbage is ignored', () {
+      final valid = encode(sample);
+      final padded =
+          Uint8List.fromList(<int>[...valid, 0xDE, 0xAD, 0xBE, 0xEF]);
+      final decoded = ScreenStreamStart.readFrom(ByteReader(padded));
+      expect(decoded.monitorId, 69733248);
+      expect(decoded.codec, ScreenCodec.h264);
+    });
+
+    test('truncation at every length throws ProtocolError', () {
+      final valid = encode(sample);
+      for (var i = 0; i < valid.length; i++) {
+        final truncated = Uint8List.sublistView(valid, 0, i);
+        expect(
+          () => ScreenStreamStart.readFrom(ByteReader(truncated)),
+          throwsA(isA<ProtocolError>()),
+          reason:
+              'truncation at length $i of ${valid.length} did not throw ProtocolError',
+        );
+      }
+    });
+  });
+
+  group('ScreenStreamStop', () {
+    test('round-trip default reason', () {
+      const stop = ScreenStreamStop();
+      final decoded = ScreenStreamStop.readFrom(ByteReader(encode(stop)));
+      expect(decoded.reason, ScreenStopReason.userClosed);
+      expect(decoded.type, MessageType.screenStreamStop);
+    });
+
+    test('round-trip explicit reasons', () {
+      for (final reason in ScreenStopReason.values) {
+        final stop = ScreenStreamStop(reason: reason);
+        final decoded = ScreenStreamStop.readFrom(ByteReader(encode(stop)));
+        expect(decoded.reason, reason);
+      }
+    });
+
+    test('unknown reason byte decodes to ScreenStopReason.unknown', () {
+      final writer = ByteWriter()..writeUint8(0xAB);
+      final decoded = ScreenStreamStop.readFrom(ByteReader(writer.toBytes()));
+      expect(decoded.reason, ScreenStopReason.unknown);
+    });
+
+    test('trailing garbage is ignored', () {
+      const stop = ScreenStreamStop(reason: ScreenStopReason.decoderError);
+      final valid = encode(stop);
+      final padded = Uint8List.fromList(<int>[...valid, 1, 2, 3]);
+      final decoded = ScreenStreamStop.readFrom(ByteReader(padded));
+      expect(decoded.reason, ScreenStopReason.decoderError);
+    });
+
+    test('truncation at every length throws ProtocolError', () {
+      final valid = encode(const ScreenStreamStop());
+      for (var i = 0; i < valid.length; i++) {
+        final truncated = Uint8List.sublistView(valid, 0, i);
+        expect(
+          () => ScreenStreamStop.readFrom(ByteReader(truncated)),
+          throwsA(isA<ProtocolError>()),
+          reason:
+              'truncation at length $i of ${valid.length} did not throw ProtocolError',
+        );
+      }
+    });
+  });
+
+  group('ScreenFrame', () {
+    final frameData = Uint8List.fromList(
+        <int>[0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1F]);
+    final sample = ScreenFrame(
+      sequence: 1234,
+      ptsMicros: 1700000000000,
+      isKeyframe: true,
+      width: 1920,
+      height: 1080,
+      data: frameData,
+    );
+
+    test('round-trip preserves every field', () {
+      final decoded = ScreenFrame.readFrom(ByteReader(encode(sample)));
+      expect(decoded.sequence, 1234);
+      expect(decoded.ptsMicros, 1700000000000);
+      expect(decoded.isKeyframe, isTrue);
+      expect(decoded.width, 1920);
+      expect(decoded.height, 1080);
+      expect(decoded.data, frameData);
+      expect(decoded.type, MessageType.screenFrame);
+    });
+
+    test('delta frame round-trip', () {
+      final delta = ScreenFrame(
+        sequence: 1235,
+        ptsMicros: 1700000016666,
+        isKeyframe: false,
+        width: 1920,
+        height: 1080,
+        data: Uint8List.fromList(<int>[0x00, 0x00, 0x01, 0x41]),
+      );
+      final decoded = ScreenFrame.readFrom(ByteReader(encode(delta)));
+      expect(decoded.sequence, 1235);
+      expect(decoded.isKeyframe, isFalse);
+      expect(decoded.data, <int>[0x00, 0x00, 0x01, 0x41]);
+    });
+
+    test('dimensions are clamped to kMaxMonitorExtent', () {
+      final writer = ByteWriter()
+        ..writeVarUint(1)
+        ..writeUint64(1000)
+        ..writeBool(true)
+        ..writeVarUint(999999999)
+        ..writeVarUint(999999999)
+        ..writeLengthPrefixedBytes(<int>[1, 2, 3]);
+
+      final decoded = ScreenFrame.readFrom(ByteReader(writer.toBytes()));
+      expect(decoded.width, kMaxMonitorExtent);
+      expect(decoded.height, kMaxMonitorExtent);
+    });
+
+    test('payload exceeding kMaxScreenFrameBytes is refused before allocating',
+        () {
+      final writer = ByteWriter()
+        ..writeVarUint(1)
+        ..writeUint64(1000)
+        ..writeBool(true)
+        ..writeVarUint(1920)
+        ..writeVarUint(1080)
+        // Varuint declaring 32 MiB of frame data (cap is 16 MiB).
+        ..writeVarUint(32 * 1024 * 1024);
+
+      expect(
+        () => ScreenFrame.readFrom(ByteReader(writer.toBytes())),
+        throwsA(
+          isA<ProtocolError>()
+              .having((e) => e.code, 'code', contains('length_limit')),
+        ),
+      );
+    });
+
+    test('declared payload larger than bytes present fails without allocating',
+        () {
+      final writer = ByteWriter()
+        ..writeVarUint(1)
+        ..writeUint64(1000)
+        ..writeBool(true)
+        ..writeVarUint(1920)
+        ..writeVarUint(1080)
+        // Declares 1 MiB in 3 bytes, provides 0 bytes.
+        ..writeVarUint(1024 * 1024);
+
+      expect(
+        () => ScreenFrame.readFrom(ByteReader(writer.toBytes())),
+        throwsA(
+          isA<ProtocolError>()
+              .having((e) => e.code, 'code', contains('short_read')),
+        ),
+      );
+    });
+
+    test('trailing garbage is ignored', () {
+      final valid = encode(sample);
+      final padded =
+          Uint8List.fromList(<int>[...valid, 0x11, 0x22, 0x33, 0x44]);
+      final decoded = ScreenFrame.readFrom(ByteReader(padded));
+      expect(decoded.sequence, 1234);
+      expect(decoded.data, frameData);
+    });
+
+    test('truncation at every length throws ProtocolError', () {
+      final valid = encode(sample);
+      for (var i = 0; i < valid.length; i++) {
+        final truncated = Uint8List.sublistView(valid, 0, i);
+        expect(
+          () => ScreenFrame.readFrom(ByteReader(truncated)),
+          throwsA(isA<ProtocolError>()),
+          reason:
+              'truncation at length $i of ${valid.length} did not throw ProtocolError',
+        );
+      }
+    });
+
+    test('data is defensively copied', () {
+      final mutableList = Uint8List.fromList(<int>[1, 2, 3, 4]);
+      final frame = ScreenFrame(
+        sequence: 1,
+        ptsMicros: 0,
+        isKeyframe: true,
+        width: 100,
+        height: 100,
+        data: mutableList,
+      );
+      mutableList[0] = 99;
+      expect(frame.data[0], 1);
+    });
+  });
+
+  group('ScreenConfigure', () {
+    const full = ScreenConfigure(
+      targetFps: 30,
+      targetBitrateKbps: 2500,
+      maxWidth: 1280,
+      maxHeight: 720,
+      monitorId: 2,
+    );
+
+    test('round-trip with all fields present', () {
+      final decoded = ScreenConfigure.readFrom(ByteReader(encode(full)));
+      expect(decoded.targetFps, 30);
+      expect(decoded.targetBitrateKbps, 2500);
+      expect(decoded.maxWidth, 1280);
+      expect(decoded.maxHeight, 720);
+      expect(decoded.monitorId, 2);
+      expect(decoded.type, MessageType.screenConfigure);
+    });
+
+    test('round-trip with all fields absent', () {
+      const empty = ScreenConfigure();
+      final decoded = ScreenConfigure.readFrom(ByteReader(encode(empty)));
+      expect(decoded.targetFps, isNull);
+      expect(decoded.targetBitrateKbps, isNull);
+      expect(decoded.maxWidth, isNull);
+      expect(decoded.maxHeight, isNull);
+      expect(decoded.monitorId, isNull);
+    });
+
+    test('round-trip with partial fields', () {
+      const partial = ScreenConfigure(targetBitrateKbps: 3000);
+      final decoded = ScreenConfigure.readFrom(ByteReader(encode(partial)));
+      expect(decoded.targetFps, isNull);
+      expect(decoded.targetBitrateKbps, 3000);
+      expect(decoded.maxWidth, isNull);
+      expect(decoded.maxHeight, isNull);
+      expect(decoded.monitorId, isNull);
+    });
+
+    test('clamping on present fields', () {
+      final writer = ByteWriter()
+        ..writeBool(true)
+        ..writeVarUint(0) // 0 FPS -> clamps to kMinFps
+        ..writeBool(true)
+        ..writeVarUint(10) // 10 kbps -> clamps to kMinBitrateKbps
+        ..writeBool(true)
+        ..writeVarUint(999999999) // clamps to kMaxMonitorExtent
+        ..writeBool(true)
+        ..writeVarUint(999999999) // clamps to kMaxMonitorExtent
+        ..writeBool(false);
+
+      final decoded = ScreenConfigure.readFrom(ByteReader(writer.toBytes()));
+      expect(decoded.targetFps, kMinFps);
+      expect(decoded.targetBitrateKbps, kMinBitrateKbps);
+      expect(decoded.maxWidth, kMaxMonitorExtent);
+      expect(decoded.maxHeight, kMaxMonitorExtent);
+      expect(decoded.monitorId, isNull);
+    });
+
+    test('trailing garbage is ignored', () {
+      final valid = encode(full);
+      final padded = Uint8List.fromList(<int>[...valid, 9, 8, 7]);
+      final decoded = ScreenConfigure.readFrom(ByteReader(padded));
+      expect(decoded.targetFps, 30);
+      expect(decoded.targetBitrateKbps, 2500);
+    });
+
+    test('truncation at every length throws ProtocolError for full config', () {
+      final valid = encode(full);
+      for (var i = 0; i < valid.length; i++) {
+        final truncated = Uint8List.sublistView(valid, 0, i);
+        expect(
+          () => ScreenConfigure.readFrom(ByteReader(truncated)),
+          throwsA(isA<ProtocolError>()),
+          reason:
+              'truncation at length $i of ${valid.length} did not throw ProtocolError',
+        );
+      }
+    });
+
+    test('truncation at every length throws ProtocolError for empty config',
+        () {
+      final valid = encode(const ScreenConfigure());
+      for (var i = 0; i < valid.length; i++) {
+        final truncated = Uint8List.sublistView(valid, 0, i);
+        expect(
+          () => ScreenConfigure.readFrom(ByteReader(truncated)),
+          throwsA(isA<ProtocolError>()),
+          reason:
+              'truncation at length $i of ${valid.length} did not throw ProtocolError',
+        );
+      }
+    });
+  });
+
+  group('frozen wire compatibility', () {
+    // FROZEN WIRE BYTES — DO NOT REGENERATE.
+    // These hard-coded byte arrays represent the exact wire encoding of each
+    // screen streaming message as shipped. If an encoder modification changes
+    // field order or encoding, these tests fail to ensure forward and backward
+    // compatibility across versions.
+
+    test('ScreenStreamStart frozen wire bytes decode correctly', () {
+      // ScreenStreamStart(
+      //   monitorId: 69733248,
+      //   codec: ScreenCodec.h264 (1),
+      //   targetFps: 60,
+      //   targetBitrateKbps: 5000,
+      //   maxWidth: 1920,
+      //   maxHeight: 1080,
+      // )
+      final frozenBytes = Uint8List.fromList(<int>[
+        0x80, 0x97, 0xa0, 0x21, // monitorId: 69733248 (varuint)
+        0x01, // codec: h264 (uint8)
+        0x3c, // targetFps: 60 (varuint)
+        0x88, 0x27, // targetBitrateKbps: 5000 (varuint)
+        0x80, 0x0f, // maxWidth: 1920 (varuint)
+        0xb8, 0x08, // maxHeight: 1080 (varuint)
+      ]);
+
+      final decoded = ScreenStreamStart.readFrom(ByteReader(frozenBytes));
+      expect(decoded.monitorId, 69733248);
+      expect(decoded.codec, ScreenCodec.h264);
+      expect(decoded.targetFps, 60);
+      expect(decoded.targetBitrateKbps, 5000);
+      expect(decoded.maxWidth, 1920);
+      expect(decoded.maxHeight, 1080);
+    });
+
+    test('ScreenStreamStop frozen wire bytes decode correctly', () {
+      // ScreenStreamStop(reason: ScreenStopReason.decoderError (2))
+      final frozenBytes = Uint8List.fromList(<int>[
+        0x02, // reason: decoderError (uint8)
+      ]);
+
+      final decoded = ScreenStreamStop.readFrom(ByteReader(frozenBytes));
+      expect(decoded.reason, ScreenStopReason.decoderError);
+    });
+
+    test('ScreenFrame frozen wire bytes decode correctly', () {
+      // ScreenFrame(
+      //   sequence: 42,
+      //   ptsMicros: 1000000, // 0x00000000000F4240
+      //   isKeyframe: true,
+      //   width: 1920,
+      //   height: 1080,
+      //   data: [0x00, 0x00, 0x00, 0x01],
+      // )
+      final frozenBytes = Uint8List.fromList(<int>[
+        0x2a, // sequence: 42 (varuint)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x42,
+        0x40, // ptsMicros: 1000000 (uint64)
+        0x01, // isKeyframe: true (bool)
+        0x80, 0x0f, // width: 1920 (varuint)
+        0xb8, 0x08, // height: 1080 (varuint)
+        0x04, // data length: 4 (varuint)
+        0x00, 0x00, 0x00, 0x01, // data bytes
+      ]);
+
+      final decoded = ScreenFrame.readFrom(ByteReader(frozenBytes));
+      expect(decoded.sequence, 42);
+      expect(decoded.ptsMicros, 1000000);
+      expect(decoded.isKeyframe, isTrue);
+      expect(decoded.width, 1920);
+      expect(decoded.height, 1080);
+      expect(decoded.data, <int>[0x00, 0x00, 0x00, 0x01]);
+    });
+
+    test('ScreenConfigure frozen wire bytes decode correctly', () {
+      // ScreenConfigure(
+      //   targetFps: 30,
+      //   targetBitrateKbps: 2500,
+      //   maxWidth: null,
+      //   maxHeight: null,
+      //   monitorId: 1,
+      // )
+      final frozenBytes = Uint8List.fromList(<int>[
+        0x01, 0x1e, // hasFps: true, targetFps: 30 (varuint)
+        0x01, 0xc4, 0x13, // hasBitrate: true, targetBitrateKbps: 2500 (varuint)
+        0x00, // hasMaxWidth: false
+        0x00, // hasMaxHeight: false
+        0x01, 0x01, // hasMonitorId: true, monitorId: 1 (varuint)
+      ]);
+
+      final decoded = ScreenConfigure.readFrom(ByteReader(frozenBytes));
+      expect(decoded.targetFps, 30);
+      expect(decoded.targetBitrateKbps, 2500);
+      expect(decoded.maxWidth, isNull);
+      expect(decoded.maxHeight, isNull);
+      expect(decoded.monitorId, 1);
+    });
+  });
+}

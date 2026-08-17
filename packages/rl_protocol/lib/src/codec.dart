@@ -179,6 +179,10 @@ final class MessageCodec {
         MessageType.systemStatus => SystemStatus.readFrom(reader),
 
         // Screen.
+        MessageType.screenStreamStart => ScreenStreamStart.readFrom(reader),
+        MessageType.screenStreamStop => ScreenStreamStop.readFrom(reader),
+        MessageType.screenFrame => ScreenFrame.readFrom(reader),
+        MessageType.screenConfigure => ScreenConfigure.readFrom(reader),
         MessageType.screenTopology => ScreenTopology.readFrom(reader),
 
         // Device management.
@@ -190,10 +194,6 @@ final class MessageCodec {
         // Declared in the wire format but implemented in a later milestone.
         // They decode as opaque so a newer peer can send them without breaking
         // this build, and so a capture still shows the correct type name.
-        MessageType.screenStreamStart ||
-        MessageType.screenStreamStop ||
-        MessageType.screenFrame ||
-        MessageType.screenConfigure ||
         MessageType.slideCommand ||
         MessageType.laserPointer ||
         MessageType.presentationBlank ||

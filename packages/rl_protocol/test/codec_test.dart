@@ -289,6 +289,57 @@ void main() {
       );
       expect(pong.originalSenderMicros, 999);
     });
+
+    test('ScreenStreamStart round trips through codec', () {
+      final decoded = _roundTrip(
+        codec,
+        const ScreenStreamStart(
+          monitorId: 1,
+          codec: ScreenCodec.h264,
+          targetFps: 60,
+          targetBitrateKbps: 4000,
+          maxWidth: 1920,
+          maxHeight: 1080,
+        ),
+      );
+      expect(decoded.monitorId, 1);
+      expect(decoded.codec, ScreenCodec.h264);
+      expect(decoded.targetFps, 60);
+    });
+
+    test('ScreenStreamStop round trips through codec', () {
+      final decoded = _roundTrip(
+        codec,
+        const ScreenStreamStop(reason: ScreenStopReason.decoderError),
+      );
+      expect(decoded.reason, ScreenStopReason.decoderError);
+    });
+
+    test('ScreenFrame round trips through codec', () {
+      final decoded = _roundTrip(
+        codec,
+        ScreenFrame(
+          sequence: 1,
+          ptsMicros: 100,
+          isKeyframe: true,
+          width: 1280,
+          height: 720,
+          data: Uint8List.fromList(<int>[1, 2, 3, 4]),
+        ),
+      );
+      expect(decoded.sequence, 1);
+      expect(decoded.isKeyframe, isTrue);
+      expect(decoded.data, <int>[1, 2, 3, 4]);
+    });
+
+    test('ScreenConfigure round trips through codec', () {
+      final decoded = _roundTrip(
+        codec,
+        const ScreenConfigure(targetBitrateKbps: 3500),
+      );
+      expect(decoded.targetBitrateKbps, 3500);
+      expect(decoded.targetFps, isNull);
+    });
   });
 
   group('forward compatibility', () {
