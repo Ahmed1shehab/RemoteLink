@@ -144,6 +144,15 @@ final class RemoteLinkClient {
 
   Session? get session => _session;
 
+  /// The tier this device was last granted, or null before any grant arrives.
+  ///
+  /// Retained so a screen built after the grant can still find out. A UI that
+  /// only watches [messages] sees nothing until the *next* grant, which for a
+  /// device whose tier never changes is never.
+  PermissionTier? get grantedTier => _grantedTier;
+
+  PermissionTier? _grantedTier;
+
   bool get isConnected => _state == ClientState.connected;
 
   /// Connects to [target] and keeps the connection alive until [disconnect].
@@ -291,6 +300,13 @@ final class RemoteLinkClient {
 
     _messageSubscription = session.messages.listen(
       (message) {
+        // Recorded here, on the way past, rather than left to whoever happens
+        // to be listening. `_messages` is a broadcast stream, so anything sent
+        // before a subscriber exists is gone — and the desktop sends the tier
+        // grant the instant a trusted session is established, long before any
+        // screen is built to receive it. Every UI that asked "what tier am I?"
+        // therefore got null and kept it forever.
+        if (message case PermissionGrant(:final tier)) _grantedTier = tier;
         if (message case ErrorMessage(:final code) when !code.isRetryable) {
           _failureCode = code;
           _stopRequested = true;

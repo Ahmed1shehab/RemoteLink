@@ -448,7 +448,14 @@ final desktopMessagesProvider = StreamProvider<Message>((ref) async* {
 final currentPermissionTierProvider =
     StreamProvider<PermissionTier?>((ref) async* {
   final client = await ref.watch(clientProvider.future);
-  yield null;
+  // The grant the client already saw comes first, then any later ones. Without
+  // the seed this only ever reported a tier for a device whose tier *changed*
+  // while a screen happened to be watching: the desktop sends the grant as
+  // soon as a trusted session is established, `messages` is a broadcast
+  // stream, and nothing is subscribed that early. So this yielded null and
+  // stayed there, and the screen-share button — which checks the tier before
+  // offering itself — never appeared on any normally connected phone.
+  yield client.grantedTier;
   await for (final message in client.messages) {
     if (message is PermissionGrant) {
       yield message.tier;

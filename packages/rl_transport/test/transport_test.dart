@@ -606,6 +606,50 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 500));
       expect(server.sessionCount, 1, reason: 'the old session must be evicted');
     });
+
+    test('the granted tier is readable by something that subscribed late',
+        () async {
+      // The desktop sends the grant the moment a trusted session is
+      // established, and `messages` is a broadcast stream — so a screen built
+      // a moment later sees nothing at all. Every UI asking "what tier am I?"
+      // got null and kept it, because a device whose tier never changes never
+      // receives a second grant. The phone's screen-share button checks the
+      // tier before offering itself, so it never appeared.
+      //
+      // Deliberately subscribing *after* the connection is up: subscribing
+      // first is the case that already worked.
+      await trustStore.upsert(
+        TrustedPeer(
+          id: phoneIdentity.id,
+          publicKey: phoneIdentity.publicKey,
+          name: 'Test Phone',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: PermissionTier.admin.wireValue,
+        ),
+      );
+
+      expect(client.grantedTier, isNull, reason: 'nothing granted yet');
+
+      final accepted = server.accepted.first;
+      await client.connect(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: server.boundPort,
+          deviceId: desktopIdentity.id,
+          serverPublicKey: desktopIdentity.publicKey,
+        ),
+      );
+      final session = await accepted.timeout(const Duration(seconds: 10));
+      await client.waitUntilConnected();
+
+      await session.session.send(
+        const PermissionGrant(tier: PermissionTier.admin),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+
+      expect(client.grantedTier, PermissionTier.admin);
+    });
   });
 
   group('FramedConnection framing', () {
