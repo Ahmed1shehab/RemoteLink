@@ -7,9 +7,11 @@ import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
+import '../input/pointer_controller.dart';
 import 'remote_cursor.dart';
 import 'screen_coordinate_mapping.dart';
 import 'screen_stream_request.dart';
+import 'streamed_view_gestures.dart';
 
 /// Screen frames pushed from the desktop.
 final screenFrameProvider =
@@ -149,6 +151,8 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
     final canSendInput =
         ref.watch(currentPermissionTierProvider).valueOrNull?.canSendInput ??
             false;
+    final pointerSettings = ref.watch(pointerSettingsProvider);
+    final gesturesAvailable = capabilities?.has(Capabilities.gestures) ?? false;
 
     // Landscape gives the frame everything: no app bar, no floating button,
     // no padding. The controls are not deleted, they move into a compact
@@ -171,6 +175,8 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
                 monitorId: widget.monitorId,
                 canSendInput: canSendInput,
                 onSend: _unawaitedSend,
+                pointerSettings: pointerSettings,
+                gesturesAvailable: gesturesAvailable,
               )
             else
               const Center(
@@ -263,6 +269,8 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
                 // keeps the one place that decides in one place.
                 canSendInput: canSendInput,
                 onSend: _unawaitedSend,
+                pointerSettings: pointerSettings,
+                gesturesAvailable: gesturesAvailable,
               )
             : const Column(
                 mainAxisSize: MainAxisSize.min,
@@ -310,6 +318,8 @@ class _ControllableFrame extends StatefulWidget {
     required this.monitorId,
     required this.canSendInput,
     required this.onSend,
+    required this.pointerSettings,
+    required this.gesturesAvailable,
   });
 
   final ScreenFrame frame;
@@ -317,37 +327,29 @@ class _ControllableFrame extends StatefulWidget {
   final bool canSendInput;
   final void Function(Message) onSend;
 
+  /// The user's own pointer preferences, so scrolling here behaves the way it
+  /// does on the touchpad — natural scrolling in particular, which is
+  /// backwards from the wrong setting and immediately obvious.
+  final PointerSettings pointerSettings;
+
+  /// Whether the desk takes part in pinch and rotate. Passed rather than read
+  /// here so the one place that inspects capabilities stays the one place.
+  final bool gesturesAvailable;
+
   @override
   State<_ControllableFrame> createState() => _ControllableFrameState();
 }
 
 class _ControllableFrameState extends State<_ControllableFrame> {
-  /// Where the finger went down, to tell a tap from a drag on the way up.
-  Offset? _downAt;
-  double _travelled = 0;
+  StreamedViewGestures? _gestures;
 
-  void _moveTo(Offset local, Size containerSize) {
-    final normalised = mapTouchToNormalisedCoordinates(
-      touchPosition: local,
-      containerSize: containerSize,
-      imageSize: Size(
-        widget.frame.width.toDouble(),
-        widget.frame.height.toDouble(),
-      ),
-    );
-    // Null means the touch landed in a letterbox bar. Dropping it is right:
-    // the bars are not part of the desk, and clamping would pile every edge
-    // touch onto the same row of pixels.
-    if (normalised == null) return;
-
-    widget.onSend(
-      MouseMoveAbsolute(
-        x: normalised.dx,
-        y: normalised.dy,
-        monitorId: widget.monitorId,
-      ),
-    );
-  }
+  /// The size of the widget the picture was last laid out in.
+  ///
+  /// Held as state because the gesture recogniser maps a touch against the
+  /// drawn rectangle, and the drawn rectangle depends on both the frame and
+  /// the widget. Recomputing it per event from a stale value is how a pointer
+  /// ends up correct in portrait and wrong the instant the phone turns.
+  Size _containerSize = Size.zero;
 
   Size get _imageSize => Size(
         widget.frame.width.toDouble(),
@@ -361,6 +363,23 @@ class _ControllableFrameState extends State<_ControllableFrame> {
     if (x == null || y == null) return null;
     return Offset(x, y);
   }
+
+  StreamedViewGestures _recogniser(PointerSettings settings) =>
+      _gestures ??= StreamedViewGestures(
+        send: widget.onSend,
+        monitorId: widget.monitorId,
+        gesturesAvailable: widget.gesturesAvailable,
+        settings: settings,
+        // A closure over the *current* size and frame rather than values
+        // captured once: both change while the gesture recogniser lives, and a
+        // recogniser holding the size it was built with aims at the picture as
+        // it used to be.
+        toNormalised: (local) => mapTouchToNormalisedCoordinates(
+          touchPosition: local,
+          containerSize: _containerSize,
+          imageSize: _imageSize,
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -376,47 +395,38 @@ class _ControllableFrameState extends State<_ControllableFrame> {
     // else is pointing is the whole value of a view-only stream.
     if (!widget.canSendInput) return _withCursor(image);
 
+    final gestures = _recogniser(widget.pointerSettings)
+      ..settings = widget.pointerSettings;
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        final containerSize = Size(constraints.maxWidth, constraints.maxHeight);
-        return Listener(
-          // Keyed so a test can assert its absence. `findsNothing` on the
-          // bare type is meaningless — Flutter's own scaffolding is full of
-          // Listeners, and the assertion would pass whatever this widget did.
-          key: const ValueKey<String>('screen-viewer-pointer-surface'),
-          onPointerDown: (event) {
-            _downAt = event.localPosition;
-            _travelled = 0;
-            _moveTo(event.localPosition, containerSize);
-          },
-          onPointerMove: (event) {
-            _travelled += event.delta.distance;
-            _moveTo(event.localPosition, containerSize);
-          },
-          onPointerUp: (event) {
-            final down = _downAt;
-            _downAt = null;
-            // A tap, not the end of a drag. The threshold is in logical
-            // pixels and generous, because a finger on glass never holds
-            // still and a two-pixel wobble is not a drag.
-            if (down == null || _travelled > 12) return;
-            widget.onSend(
-              const MouseButtonEvent(button: MouseButton.left, pressed: true),
-            );
-            widget.onSend(
-              const MouseButtonEvent(button: MouseButton.left, pressed: false),
-            );
-          },
-          child: Stack(
-            fit: StackFit.expand,
-            children: <Widget>[
-              image,
-              RemoteCursor(
-                normalised: _cursor,
-                containerSize: containerSize,
-                imageSize: _imageSize,
-              ),
-            ],
+        _containerSize = Size(constraints.maxWidth, constraints.maxHeight);
+        return GestureDetector(
+          // Long press is the only thing here that needs a recogniser rather
+          // than raw pointers, because it is the only one defined by time
+          // standing still rather than by movement.
+          onLongPress: gestures.onLongPress,
+          behavior: HitTestBehavior.opaque,
+          child: Listener(
+            // Keyed so a test can assert its absence. `findsNothing` on the
+            // bare type is meaningless — Flutter's own scaffolding is full of
+            // Listeners, and the assertion would pass whatever this widget did.
+            key: const ValueKey<String>('screen-viewer-pointer-surface'),
+            onPointerDown: gestures.onPointerDown,
+            onPointerMove: gestures.onPointerMove,
+            onPointerUp: gestures.onPointerUp,
+            onPointerCancel: gestures.onPointerCancel,
+            child: Stack(
+              fit: StackFit.expand,
+              children: <Widget>[
+                image,
+                RemoteCursor(
+                  normalised: _cursor,
+                  containerSize: _containerSize,
+                  imageSize: _imageSize,
+                ),
+              ],
+            ),
           ),
         );
       },
