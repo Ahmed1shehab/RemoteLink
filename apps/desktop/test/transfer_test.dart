@@ -156,6 +156,132 @@ void main() {
       }
     });
 
+    testWidgets('survives the selected device disconnecting', (tester) async {
+      // The crash this exists for: `DropdownButtonFormField` asserts when its
+      // value names no item, and the selected id was only ever set when it was
+      // null — so a phone that dropped off the network left a dangling
+      // selection. The assert took out the entire send card, and with it the
+      // transfers list and clipboard panel below it, so the report was "the
+      // desktop is broken" rather than "the dropdown is stale".
+      late RemoteLinkServer serverA;
+      late RemoteLinkClient clientA;
+      late ConnectedDevice deviceA;
+      late RemoteLinkServer serverB;
+      late RemoteLinkClient clientB;
+      late ConnectedDevice deviceB;
+
+      final devices = StreamController<List<ConnectedDevice>>.broadcast();
+      addTearDown(devices.close);
+
+      // Two genuinely different peers, because that is the case that breaks:
+      // the same device reconnecting keeps the id valid, so a test that reuses
+      // one passes against the bug. The report showed a dropdown holding
+      // 889ECP… while the only connected device was R6J8T….
+      await tester.runAsync(() async {
+        final pairA = await _createRealServerClientPair();
+        serverA = pairA.server;
+        clientA = pairA.client;
+        deviceA = ConnectedDevice(
+          serverSession: pairA.session,
+          tier: PermissionTier.extended,
+          name: 'Pixel 8 Pro',
+        );
+
+        final pairB = await _createRealServerClientPair();
+        serverB = pairB.server;
+        clientB = pairB.client;
+        deviceB = ConnectedDevice(
+          serverSession: pairB.session,
+          tier: PermissionTier.extended,
+          name: 'iPhone 17',
+        );
+      });
+
+      try {
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: <Override>[
+              ...desktopHomeOverrides,
+              connectedDevicesProvider.overrideWith((ref) => devices.stream),
+            ],
+            child: const MaterialApp(home: HomeScreen()),
+          ),
+        );
+
+        // A pump before the first event: the provider subscribes to the stream
+        // asynchronously, and a broadcast controller drops anything added
+        // before that happens.
+        // A pump before the first event: the provider subscribes to the stream
+        // asynchronously, and a broadcast controller drops anything added
+        // before that happens.
+        await tester.pump();
+        devices.add(<ConnectedDevice>[deviceA]);
+        await tester.pump();
+        await tester.pump();
+        expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
+
+        // The first phone goes away and a different one takes its place, in a
+        // single update — no empty list in between to reset the selection.
+        devices.add(<ConnectedDevice>[deviceB]);
+        await tester.pump();
+        await tester.pump();
+
+        expect(tester.takeException(), isNull);
+        expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
+        expect(find.text('Send File'), findsOneWidget);
+
+        // And the list emptying entirely still leaves a usable card.
+        devices.add(const <ConnectedDevice>[]);
+        await tester.pump();
+        await tester.pump();
+
+        expect(tester.takeException(), isNull);
+        expect(
+          find.text('Connect a device to send files or text.'),
+          findsOneWidget,
+        );
+      } finally {
+        await tester.runAsync(() async {
+          await clientA.disconnect();
+          await serverA.stop();
+          await clientB.disconnect();
+          await serverB.stop();
+        });
+      }
+    });
+
+    testWidgets('offers a way to grant Screen Recording when it is missing',
+        (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            ...desktopHomeOverrides,
+            screenCaptureAvailabilityProvider.overrideWith(
+              (ref) => Stream<({bool available, String? reason})>.value(
+                (
+                  available: false,
+                  reason: 'Screen Recording permission is not granted',
+                ),
+              ),
+            ),
+          ],
+          child: const MaterialApp(home: HomeScreen()),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump();
+
+      // Without this the only trace of a missing grant was a log line, and the
+      // phone's screen-share button silently never appeared.
+      expect(
+        find.text('Screen Recording permission is not granted'),
+        findsOneWidget,
+      );
+      expect(find.text('Open Settings'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets(
         'renders active and recent transfers list with progress and controls',
         (tester) async {

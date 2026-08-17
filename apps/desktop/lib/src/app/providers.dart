@@ -323,6 +323,24 @@ final inputAvailabilityProvider =
   }
 });
 
+/// Whether the host can capture its screen, and why not when it cannot.
+final screenCaptureAvailabilityProvider =
+    StreamProvider<({bool available, String? reason})>((ref) async* {
+  final service = await ref.watch(desktopServiceProvider.future);
+
+  yield (
+    available: service.screenCaptureAvailable,
+    reason: service.screenCaptureUnavailableReason,
+  );
+
+  await for (final _ in service.screenCaptureAvailabilityChanges) {
+    yield (
+      available: service.screenCaptureAvailable,
+      reason: service.screenCaptureUnavailableReason,
+    );
+  }
+});
+
 /// Which platform this build is on, for UI copy that differs by OS.
 final platformProvider = Provider<PlatformKind>(
   (ref) => NativeBackends.currentPlatform,

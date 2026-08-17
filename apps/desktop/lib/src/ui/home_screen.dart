@@ -94,6 +94,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // is worse than merely confusing.
     final screenViewers =
         ref.watch(screenViewersProvider).valueOrNull ?? const <String>[];
+    final screenCapture =
+        ref.watch(screenCaptureAvailabilityProvider).valueOrNull;
 
     return FocusTraversalGroup(
       policy: OrderedTraversalPolicy(),
@@ -117,6 +119,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: _PermissionBanner(
                 reason: input.reason!,
                 onOpenSettings: _openAccessibilitySettings,
+              ),
+            ),
+          // Screen Recording is a separate grant in a separate pane, and
+          // without a banner of its own there was nothing anywhere in the app
+          // saying why screen sharing did not appear on the phone. The button
+          // simply never showed up and the reason lived only in a log line.
+          if (screenCapture != null && !screenCapture.available)
+            FocusTraversalOrder(
+              order: const NumericFocusOrder(1),
+              child: _PermissionBanner(
+                reason: screenCapture.reason ??
+                    'RemoteLink needs Screen Recording permission before it '
+                        'can share this screen.',
+                onOpenSettings: _openScreenRecordingSettings,
+                severity: _BannerSeverity.advisory,
               ),
             ),
           FocusTraversalOrder(
@@ -185,6 +202,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Future<void> _openAccessibilitySettings() async {
     final service = await ref.read(desktopServiceProvider.future);
     await service.openAccessibilitySettings();
+  }
+
+  Future<void> _openScreenRecordingSettings() async {
+    final service = await ref.read(desktopServiceProvider.future);
+    await service.openScreenRecordingSettings();
   }
 
   Future<void> _stopAllScreenStreams() async {
@@ -356,8 +378,17 @@ class _SendCardState extends ConsumerState<_SendCard> {
     final scheme = Theme.of(context).colorScheme;
     final availableDevices = widget.devices;
 
-    if (_selectedDeviceId == null && availableDevices.isNotEmpty) {
-      _selectedDeviceId = availableDevices.first.id.value;
+    // Re-checked against the current list every build, not just filled in when
+    // null. A phone that disconnects leaves its id selected here, and
+    // `DropdownButtonFormField` asserts when its value names no item — which
+    // takes down this whole card, and with it the send controls, the transfer
+    // list, and the clipboard panel below. Holding a stale id is the normal
+    // course of events: devices come and go while this window stays open.
+    final selectedStillPresent =
+        availableDevices.any((d) => d.id.value == _selectedDeviceId);
+    if (!selectedStillPresent) {
+      _selectedDeviceId =
+          availableDevices.isEmpty ? null : availableDevices.first.id.value;
     }
 
     return Card(
@@ -1237,27 +1268,54 @@ class _ScreenSharingBanner extends StatelessWidget {
   }
 }
 
+/// How loudly a [_PermissionBanner] should present itself.
+///
+/// Accessibility is [blocking]: without it the app's whole reason for existing
+/// does not work, and the phone's touchpad does nothing. Screen Recording is
+/// [advisory] — everything else still works, one optional feature does not —
+/// and painting both in error red would train the user to ignore the colour
+/// that matters.
+enum _BannerSeverity { blocking, advisory }
+
 class _PermissionBanner extends StatelessWidget {
-  const _PermissionBanner({required this.reason, required this.onOpenSettings});
+  const _PermissionBanner({
+    required this.reason,
+    required this.onOpenSettings,
+    this.severity = _BannerSeverity.blocking,
+  });
 
   final String reason;
   final Future<void> Function() onOpenSettings;
+  final _BannerSeverity severity;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final (background, foreground, icon) = switch (severity) {
+      _BannerSeverity.blocking => (
+          scheme.errorContainer,
+          scheme.onErrorContainer,
+          Icons.warning_amber_rounded,
+        ),
+      _BannerSeverity.advisory => (
+          scheme.secondaryContainer,
+          scheme.onSecondaryContainer,
+          Icons.info_outline,
+        ),
+    };
+
     return Card(
-      color: scheme.errorContainer,
+      color: background,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
           children: <Widget>[
-            Icon(Icons.warning_amber_rounded, color: scheme.onErrorContainer),
+            Icon(icon, color: foreground),
             const SizedBox(width: 16),
             Expanded(
               child: Text(
                 reason,
-                style: TextStyle(color: scheme.onErrorContainer),
+                style: TextStyle(color: foreground),
               ),
             ),
             const SizedBox(width: 16),

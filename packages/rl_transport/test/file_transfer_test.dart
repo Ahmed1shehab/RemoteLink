@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:rl_core/rl_core.dart';
@@ -245,6 +246,29 @@ void main() {
     expect(store.prepareCalls, 0);
   });
 
+  test('a storage failure is reported as an I/O error, not as disk space',
+      () async {
+    // This mapping was wrong in a way that cost real debugging time: every
+    // failure to prepare storage was reported as `tooLarge`, so a sandboxed
+    // desktop that simply lacked permission to write to ~/Downloads told the
+    // sending phone "Not enough storage space on peer" about a 400 KB file.
+    // Whoever reads that goes looking at disks.
+    final store = _FailingStore();
+    final offer = await _offer('io-failure', _patternBytes(1024));
+    final receiver = FileTransferReceiver(
+      exporterSecret: exporter,
+      store: store,
+      storageNamespace: 'peer-1',
+    );
+
+    final decision =
+        await receiver.acceptOffer(offer, tier: PermissionTier.extended);
+
+    expect(decision.accept.fileTokens, isEmpty);
+    expect(decision.abort?.reason, FileAbortReason.ioError);
+    expect(decision.abort?.reason, isNot(FileAbortReason.tooLarge));
+  });
+
   test('flow control never exceeds four MiB of unacknowledged bytes', () async {
     final flow = FileTransferFlowControl();
     final releases = <Completer<void>>[];
@@ -419,6 +443,19 @@ final class _MemoryStore implements IncomingTransferStore {
         )..verifyOffer(file),
     };
   }
+}
+
+/// Fails to prepare, the way a directory the app may not write to does.
+final class _FailingStore implements IncomingTransferStore {
+  @override
+  Future<Map<String, IncomingFile>> prepare(
+    FileOffer offer, {
+    required String namespace,
+  }) async =>
+      throw const FileSystemException(
+        'Creation failed',
+        '/Users/someone/Downloads/RemoteLink',
+      );
 }
 
 final class _MemoryIncomingFile implements IncomingFile {

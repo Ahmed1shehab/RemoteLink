@@ -60,6 +60,8 @@ final class FileTransferReceiver {
   final int maximumChunkSize;
   final String storageNamespace;
 
+  final Log _log = Log.scoped('transfer.receiver');
+
   final Map<String, Uint8List> _keys = <String, Uint8List>{};
   final Map<String, String> _sessionIds = <String, String>{};
   final Map<String, Map<String, _ReceivingFile>> _files =
@@ -122,7 +124,27 @@ final class FileTransferReceiver {
     final Map<String, IncomingFile> targets;
     try {
       targets = await _store.prepare(offer, namespace: storageNamespace);
-    } on Object {
+    } on Object catch (error, stackTrace) {
+      // `ioError`, not `tooLarge`. Every failure here used to be reported as
+      // "not enough storage space", which is one specific cause among many and
+      // was almost never the real one: a destination the app is not permitted
+      // to write to fails in exactly the same place, and the sender was told a
+      // story about disk space while the actual problem was an entitlement.
+      // A wrong diagnosis is worse than a vague one, because it sends whoever
+      // reads it looking in the wrong direction.
+      //
+      // The exception itself only goes to the local log. The peer is told that
+      // writing failed and nothing more — a path or an OS error message from
+      // this side is not something a remote device needs.
+      _log.warn(
+        'could not prepare storage for an incoming transfer',
+        error: error,
+        stackTrace: stackTrace,
+        fields: <String, Object?>{
+          'transferId': offer.transferId,
+          'files': offer.files.length,
+        },
+      );
       return OfferDecision(
         accept: FileAccept(
           transferId: offer.transferId,
@@ -131,7 +153,7 @@ final class FileTransferReceiver {
         ),
         abort: FileAbort(
           transferId: offer.transferId,
-          reason: FileAbortReason.tooLarge,
+          reason: FileAbortReason.ioError,
         ),
       );
     }

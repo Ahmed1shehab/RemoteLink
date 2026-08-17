@@ -80,12 +80,17 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     }
 
     final targets = targetMap.values.toList();
-    if (_selectedTargetId == null && targets.isNotEmpty) {
-      if (connectedPeer != null) {
-        _selectedTargetId = connectedPeer.id.value;
-      } else {
-        _selectedTargetId = targets.first.id.value;
-      }
+    // Re-checked against the current list every build rather than filled in
+    // once. `DropdownButtonFormField` asserts when its value names no item, and
+    // this list changes underneath it constantly: a computer drops off the
+    // network, discovery reshuffles, a peer is forgotten in settings. Holding
+    // an id that has gone would take down the whole Send tab.
+    if (!targets.any((t) => t.id.value == _selectedTargetId)) {
+      _selectedTargetId = switch ((connectedPeer, targets.isEmpty)) {
+        (final peer?, _) => peer.id.value,
+        (null, false) => targets.first.id.value,
+        (null, true) => null,
+      };
     }
 
     // Show incoming dialog if pending

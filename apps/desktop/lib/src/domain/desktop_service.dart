@@ -430,6 +430,17 @@ final class DesktopService {
   final StreamController<bool> _inputAvailability =
       StreamController<bool>.broadcast();
 
+  /// Emits whenever Screen Recording permission flips.
+  ///
+  /// Its own stream rather than a flag on the input one: the two are separate
+  /// grants in separate panes of System Settings, and a user who has given one
+  /// has said nothing about the other. Polled on the same timer.
+  Stream<bool> get screenCaptureAvailabilityChanges =>
+      _screenCaptureAvailability.stream;
+
+  final StreamController<bool> _screenCaptureAvailability =
+      StreamController<bool>.broadcast();
+
   Timer? _permissionWatch;
   bool? _lastInputAvailable;
   bool? _lastScreenCaptureAvailable;
@@ -648,6 +659,7 @@ final class DesktopService {
         return;
       }
       final inputChanged = inputAvailable != _lastInputAvailable;
+      final captureChanged = captureAvailable != _lastScreenCaptureAvailable;
       _lastInputAvailable = inputAvailable;
       _lastScreenCaptureAvailable = captureAvailable;
 
@@ -669,6 +681,9 @@ final class DesktopService {
       );
       if (inputChanged && !_inputAvailability.isClosed) {
         _inputAvailability.add(inputAvailable);
+      }
+      if (captureChanged && !_screenCaptureAvailability.isClosed) {
+        _screenCaptureAvailability.add(captureAvailable);
       }
     });
   }
@@ -2188,6 +2203,30 @@ final class DesktopService {
     }
   }
 
+  /// Opens the Screen Recording pane, and asks the OS to prompt first.
+  ///
+  /// A separate grant from Accessibility, in a separate pane, and it fails in
+  /// its own particular way: a capture without it does not error, it returns
+  /// the desktop wallpaper with every window missing. So there is no point at
+  /// which the user finds out by trying.
+  ///
+  /// `requestPermission` first because macOS only shows its own prompt once per
+  /// app, and when it does it is far more direct than a settings pane the user
+  /// has to navigate. Opening the pane afterwards covers the case where the
+  /// prompt has already been dismissed at some point in the past.
+  Future<void> openScreenRecordingSettings() async {
+    if (NativeBackends.currentPlatform != PlatformKind.macos) return;
+    _screenCapture.requestPermission();
+    try {
+      await Process.run('open', <String>[
+        'x-apple.systempreferences:com.apple.preference.security'
+            '?Privacy_ScreenCapture',
+      ]);
+    } on ProcessException catch (e) {
+      _log.warn('could not open settings', error: e);
+    }
+  }
+
   Future<void> stop() async {
     _permissionWatch?.cancel();
     _permissionWatch = null;
@@ -2196,6 +2235,7 @@ final class DesktopService {
     _systemWatch?.cancel();
     _systemWatch = null;
     await _inputAvailability.close();
+    await _screenCaptureAvailability.close();
 
     await _acceptedSubscription?.cancel();
     await _endedSubscription?.cancel();

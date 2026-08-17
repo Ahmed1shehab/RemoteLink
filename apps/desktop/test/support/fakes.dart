@@ -135,6 +135,16 @@ final List<Override> desktopHomeOverrides = <Override>[
       (available: true, reason: null),
     ),
   ),
+  // Available, so the advisory banner stays out of the way of tests that are
+  // about something else. The banner has its own test.
+  screenCaptureAvailabilityProvider.overrideWith(
+    (ref) => Stream<({bool available, String? reason})>.value(
+      (available: true, reason: null),
+    ),
+  ),
+  screenViewersProvider.overrideWith(
+    (ref) => Stream<List<String>>.value(const <String>[]),
+  ),
   pairingRequestProvider.overrideWith(
     (ref) => const Stream<PendingPairing>.empty(),
   ),
