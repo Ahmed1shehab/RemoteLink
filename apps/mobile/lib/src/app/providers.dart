@@ -16,6 +16,23 @@ import '../features/devices/bonjour_discovery.dart';
 import '../features/input/pointer_controller.dart';
 
 /// What this phone can do, advertised during the handshake.
+/// What this phone advertises in its hello.
+///
+/// A capability here means "I take part in this feature", not "I provide it".
+/// The handshake keeps the *intersection* of the two sides' sets, so a feature
+/// is only live when both ends name it — `mouse` means the phone can send
+/// pointer events and the desktop can inject them, and neither half is any use
+/// alone.
+///
+/// The consequence is easy to miss and has bitten twice: a bit the phone
+/// forgets to list is absent from the intersection, so the desktop can be
+/// perfectly capable and the phone still hides the feature, with nothing
+/// logged and nothing failing. `screenCapture` and `brightness` were both
+/// gated in the phone's UI while missing from this list, so the screen viewer
+/// and the brightness slider could not appear on any connection at all.
+///
+/// If you gate UI on a capability, it belongs in this list. There is a test
+/// that checks exactly that.
 const Capabilities kMobileCapabilities = Capabilities(
   Capabilities.mouse |
       Capabilities.keyboard |
@@ -26,7 +43,12 @@ const Capabilities kMobileCapabilities = Capabilities(
       Capabilities.gamepad |
       Capabilities.compression |
       Capabilities.sessionResumption |
-      Capabilities.gestures,
+      Capabilities.gestures |
+      // Consumer sides of two desktop-provided features: the phone displays a
+      // screen stream and asks for a brightness change, it does not capture or
+      // dim anything of its own.
+      Capabilities.screenCapture |
+      Capabilities.brightness,
 );
 
 const String _identityKey = 'remotelink.identity.private';
