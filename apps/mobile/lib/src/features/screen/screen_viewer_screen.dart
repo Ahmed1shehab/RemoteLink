@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
+import 'screen_coordinate_mapping.dart';
 
 /// Screen frames pushed from the desktop.
 final screenFrameProvider =
@@ -19,7 +21,18 @@ final screenFrameProvider =
 
 /// Live screen viewer screen showing desktop frames and controls.
 class ScreenViewerScreen extends ConsumerStatefulWidget {
-  const ScreenViewerScreen({super.key});
+  const ScreenViewerScreen({
+    super.key,
+    this.monitorId = kWholeVirtualDesktopMonitorId,
+  });
+
+  /// Which display is being watched, and therefore which one a tap addresses.
+  ///
+  /// Carried through to `MouseMoveAbsolute` rather than left at zero: zero
+  /// means the whole virtual desktop, so on a two-monitor desk every tap on
+  /// the picture of one screen would be resolved against the bounding box of
+  /// both.
+  final int monitorId;
 
   @override
   ConsumerState<ScreenViewerScreen> createState() => _ScreenViewerScreenState();
@@ -32,9 +45,31 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
   @override
   void initState() {
     super.initState();
+    // The rest of this app is portrait-locked. A desk is a landscape
+    // rectangle, so a portrait phone spends most of its screen on bars —
+    // turning it sideways is the difference between a thumbnail and something
+    // you can work in.
+    unawaited(
+      SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startStream();
     });
+  }
+
+  /// Sends without awaiting, for the input path.
+  ///
+  /// Pointer events arrive faster than a round trip and must never queue
+  /// behind one another: awaiting here would turn a fast drag into a backlog
+  /// of stale positions arriving after the finger has stopped moving.
+  void _unawaitedSend(Message message) {
+    final client = _client ?? ref.read(clientProvider).valueOrNull;
+    if (client == null || !client.isConnected) return;
+    unawaited(client.send(message));
   }
 
   Future<void> _startStream() async {
@@ -48,7 +83,8 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
 
     setState(() => _isStreaming = true);
     await client.send(
-      const ScreenStreamStart(
+      ScreenStreamStart(
+        monitorId: widget.monitorId,
         targetFps: 30,
         codec: ScreenCodec.jpeg,
         maxWidth: 1920,
@@ -81,6 +117,14 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
         ),
       );
     }
+    // Put the lock back. Leaving it open means the *next* screen the user
+    // opens can rotate, which reads as a bug on a screen that has nothing to
+    // do with streaming and gives no hint where it came from.
+    unawaited(
+      SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
+        DeviceOrientation.portraitUp,
+      ]),
+    );
     super.dispose();
   }
 
@@ -103,6 +147,79 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
 
     final frameAsync = ref.watch(screenFrameProvider);
     final frame = frameAsync.valueOrNull;
+    final canSendInput =
+        ref.watch(currentPermissionTierProvider).valueOrNull?.canSendInput ??
+            false;
+
+    // Landscape gives the frame everything: no app bar, no floating button,
+    // no padding. The controls are not deleted, they move into a compact
+    // overlay — the stop button in particular must never become unreachable,
+    // because it is the only way to end a stream from this side.
+    //
+    // No auto-hide timer. One was tried and it is a live `Timer` sitting in
+    // the widget tree, which is a hazard in a test and buys very little: the
+    // overlay is a small translucent strip in a corner, not a bar across the
+    // picture.
+    if (MediaQuery.orientationOf(context) == Orientation.landscape) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          fit: StackFit.expand,
+          children: <Widget>[
+            if (frame != null)
+              _ControllableFrame(
+                frame: frame,
+                monitorId: widget.monitorId,
+                canSendInput: canSendInput,
+                onSend: _unawaitedSend,
+              )
+            else
+              const Center(
+                child: Text(
+                  'Waiting for screen frames…',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topRight,
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        if (frame != null)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            child: Text(
+                              '${frame.width}×${frame.height}',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        IconButton(
+                          icon: const Icon(Icons.stop_circle_outlined,
+                              color: Colors.white),
+                          tooltip: 'Stop Streaming',
+                          onPressed: () => _stopStream(pop: true),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -138,10 +255,15 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
       ),
       body: Center(
         child: frame != null
-            ? Image.memory(
-                frame.data,
-                gaplessPlayback: true,
-                fit: BoxFit.contain,
+            ? _ControllableFrame(
+                frame: frame,
+                monitorId: widget.monitorId,
+                // Input is a separate grant from watching, and the desktop
+                // refuses out-of-tier messages in silence by design. Passing
+                // the answer down rather than letting the frame widget guess
+                // keeps the one place that decides in one place.
+                canSendInput: canSendInput,
+                onSend: _unawaitedSend,
               )
             : const Column(
                 mainAxisSize: MainAxisSize.min,
@@ -174,6 +296,107 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
               icon: const Icon(Icons.play_arrow),
               label: const Text('Start Stream'),
             ),
+    );
+  }
+}
+
+/// The streamed picture, with touches on it driving the desk's pointer.
+///
+/// Stateless apart from the gesture bookkeeping, and given the frame rather
+/// than reading it from a provider, so the whole of the touch-to-coordinate
+/// path can be exercised without a session behind it.
+class _ControllableFrame extends StatefulWidget {
+  const _ControllableFrame({
+    required this.frame,
+    required this.monitorId,
+    required this.canSendInput,
+    required this.onSend,
+  });
+
+  final ScreenFrame frame;
+  final int monitorId;
+  final bool canSendInput;
+  final void Function(Message) onSend;
+
+  @override
+  State<_ControllableFrame> createState() => _ControllableFrameState();
+}
+
+class _ControllableFrameState extends State<_ControllableFrame> {
+  /// Where the finger went down, to tell a tap from a drag on the way up.
+  Offset? _downAt;
+  double _travelled = 0;
+
+  void _moveTo(Offset local, Size containerSize) {
+    final normalised = mapTouchToNormalisedCoordinates(
+      touchPosition: local,
+      containerSize: containerSize,
+      imageSize: Size(
+        widget.frame.width.toDouble(),
+        widget.frame.height.toDouble(),
+      ),
+    );
+    // Null means the touch landed in a letterbox bar. Dropping it is right:
+    // the bars are not part of the desk, and clamping would pile every edge
+    // touch onto the same row of pixels.
+    if (normalised == null) return;
+
+    widget.onSend(
+      MouseMoveAbsolute(
+        x: normalised.dx,
+        y: normalised.dy,
+        monitorId: widget.monitorId,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final image = Image.memory(
+      widget.frame.data,
+      gaplessPlayback: true,
+      fit: BoxFit.contain,
+    );
+
+    // Without the tier for input this is a picture, and deliberately just a
+    // picture — no listener, so nothing is sent that the desktop would refuse
+    // without saying so.
+    if (!widget.canSendInput) return image;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final containerSize = Size(constraints.maxWidth, constraints.maxHeight);
+        return Listener(
+          // Keyed so a test can assert its absence. `findsNothing` on the
+          // bare type is meaningless — Flutter's own scaffolding is full of
+          // Listeners, and the assertion would pass whatever this widget did.
+          key: const ValueKey<String>('screen-viewer-pointer-surface'),
+          onPointerDown: (event) {
+            _downAt = event.localPosition;
+            _travelled = 0;
+            _moveTo(event.localPosition, containerSize);
+          },
+          onPointerMove: (event) {
+            _travelled += event.delta.distance;
+            _moveTo(event.localPosition, containerSize);
+          },
+          onPointerUp: (event) {
+            final down = _downAt;
+            _downAt = null;
+            // A tap, not the end of a drag. The threshold is in logical
+            // pixels and generous, because a finger on glass never holds
+            // still and a two-pixel wobble is not a drag.
+            if (down == null || _travelled > 12) return;
+            widget.onSend(
+              const MouseButtonEvent(button: MouseButton.left, pressed: true),
+            );
+            widget.onSend(
+              const MouseButtonEvent(button: MouseButton.left, pressed: false),
+            );
+          },
+          child: image,
+        );
+      },
     );
   }
 }
