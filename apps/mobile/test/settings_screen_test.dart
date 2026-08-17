@@ -71,7 +71,7 @@ void main() {
       // Section 2: PAIRED COMPUTERS
       expect(find.text('Paired Computers'), findsOneWidget);
       expect(find.text('Living Room PC'), findsOneWidget);
-      expect(find.text('Last seen: 192.168.1.50'), findsOneWidget);
+      expect(find.textContaining('Last seen: 192.168.1.50'), findsOneWidget);
 
       // Section 3: TOUCHPAD
       expect(find.text('Touchpad'), findsOneWidget);
@@ -422,6 +422,81 @@ void main() {
 
       expect(find.text('Settings'), findsOneWidget);
       expect(find.text('This Phone'), findsOneWidget);
+    });
+
+    testWidgets(
+        'permission elevation dialog displays current tier and explanation of requested tier',
+        (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final identity = await DeviceIdentity.generate();
+      final trustStore = InMemoryTrustStore();
+      await trustStore.upsert(
+        TrustedPeer(
+          id: const DeviceId('0123456789ABCDEFGHJKMNPQRS'),
+          publicKey: Uint8List(32),
+          name: 'Living Room PC',
+          platform: PlatformKind.windows,
+          pairedAt: DateTime.now(),
+          permissionTier: PermissionTier.standard.wireValue,
+          lastAddress: '192.168.1.50',
+        ),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: mobileSettingsOverrides(
+            identity: identity,
+            trustStore: trustStore,
+            deviceName: 'My Test Phone',
+          ),
+          child: const MaterialApp(home: SettingsScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      // Find permission button for Living Room PC
+      final permButton = find.byTooltip('Permissions for Living Room PC');
+      expect(permButton, findsOneWidget);
+
+      await tester.tap(permButton);
+      await tester.pumpAndSettle();
+
+      // Dialog is displayed
+      expect(find.text('Permissions · Living Room PC'), findsOneWidget);
+      expect(find.text('Current Permission Tier'), findsOneWidget);
+      expect(find.text('Standard'), findsOneWidget);
+      expect(
+        find.text(
+          'Allows sending keyboard and mouse input, synchronizing clipboard, and controlling media.',
+        ),
+        findsOneWidget,
+      );
+
+      // What requested tier allows box
+      expect(find.text('What Extended allows:'), findsOneWidget);
+      expect(
+        find.text(
+          'Allows transferring files, launching applications, and running pre-registered commands.',
+        ),
+        findsOneWidget,
+      );
+
+      // Justification field
+      expect(
+        find.widgetWithText(TextField, 'Reason / Justification (optional)'),
+        findsOneWidget,
+      );
+
+      // Cancel closes the dialog
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Permissions · Living Room PC'), findsNothing);
     });
   });
 }

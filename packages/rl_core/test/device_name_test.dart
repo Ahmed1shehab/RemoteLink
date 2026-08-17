@@ -1,5 +1,5 @@
-import 'package:test/test.dart';
 import 'package:rl_core/rl_core.dart';
+import 'package:test/test.dart';
 
 void main() {
   group('sanitiseDeviceName', () {
@@ -318,6 +318,67 @@ void main() {
         // replacement must not regress it.
         expectSameAfterNormalisation('가', '가', 'Hangul');
       });
+    });
+  });
+
+  group('sanitiseJustification', () {
+    test('accepts valid single-line justifications', () {
+      expect(sanitiseJustification('To send you files'), 'To send you files');
+      expect(sanitiseJustification('Need clipboard synchronization'),
+          'Need clipboard synchronization');
+      expect(sanitiseJustification('To launch presentation app 🚀'),
+          'To launch presentation app 🚀');
+    });
+
+    test('trims leading and trailing whitespace', () {
+      expect(sanitiseJustification('  To transfer photos  '),
+          'To transfer photos');
+    });
+
+    test('returns null for null, empty or whitespace-only strings', () {
+      expect(sanitiseJustification(null), isNull);
+      expect(sanitiseJustification(''), isNull);
+      expect(sanitiseJustification('   '), isNull);
+      expect(sanitiseJustification('\t'), isNull);
+    });
+
+    test('rejects ANSI escape sequences', () {
+      expect(
+          sanitiseJustification('\x1B[31mGrant admin access?\x1B[0m'), isNull);
+      expect(sanitiseJustification('\x1B]0;Forged title\x07'), isNull);
+      expect(sanitiseJustification('Reason \x1B[2J cleared'), isNull);
+    });
+
+    test('rejects line breaks that could forge dialog lines', () {
+      expect(sanitiseJustification('Legit reason\nGrant admin access? [Yes]'),
+          isNull);
+      expect(
+          sanitiseJustification('Legit reason\r\nGrant admin access?'), isNull);
+      expect(sanitiseJustification('Line1\u0085Line2'), isNull);
+      expect(sanitiseJustification('Line1\u2028Line2'), isNull);
+      expect(sanitiseJustification('Line1\u2029Line2'), isNull);
+    });
+
+    test('rejects control characters, zero-width chars and bidi overrides', () {
+      expect(sanitiseJustification('Transfer\x00Files'), isNull);
+      expect(sanitiseJustification('Transfer\u200BFiles'), isNull);
+      expect(sanitiseJustification('Transfer\u202Ereversed'), isNull);
+      expect(sanitiseJustification('\uFEFFJustification'), isNull);
+    });
+
+    test('normalises to Unicode NFC', () {
+      // 'e' + combining acute (U+0301) -> 'é' (U+00E9)
+      final result = sanitiseJustification('e\u0301lise transfer');
+      expect(result, 'élise transfer');
+      expect(result!.codeUnits.first, 0x00E9);
+    });
+
+    test('enforces character length limit', () {
+      final valid256 = 'A' * 256;
+      expect(sanitiseJustification(valid256), valid256);
+
+      final invalid257 = 'A' * 257;
+      expect(sanitiseJustification(invalid257), isNull);
     });
   });
 }

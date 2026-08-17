@@ -41,6 +41,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if (request != null) _showIncomingTransferDialog(request);
     });
 
+    // Permission elevation requests also require explicit user confirmation.
+    ref.listen(permissionRequestProvider, (previous, next) {
+      final request = next.valueOrNull;
+      if (request != null) _showPermissionRequestDialog(request);
+    });
+
     final status = ref.watch(desktopStatusProvider);
 
     return Scaffold(
@@ -257,6 +263,38 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       await service.approveIncomingTransfer(request);
     } else {
       await service.declineIncomingTransfer(request);
+    }
+  }
+
+  bool _isPermissionRequestShowing = false;
+
+  Future<void> _showPermissionRequestDialog(
+    PendingPermissionRequest request,
+  ) async {
+    if (_isPermissionRequestShowing) return;
+    _isPermissionRequestShowing = true;
+
+    final approved = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => PermissionRequestDialog(
+        peerName: request.peerName,
+        requestedTier: request.requestedTier,
+        currentTier: request.currentTier,
+        justification: request.justification,
+      ),
+    );
+
+    _isPermissionRequestShowing = false;
+    if (!mounted) return;
+
+    final service = ref.read(desktopServiceProvider).valueOrNull;
+    if (service == null) return;
+
+    if (approved ?? false) {
+      await service.approvePermissionRequest(request);
+    } else {
+      await service.declinePermissionRequest(request);
     }
   }
 }
@@ -827,6 +865,164 @@ class _IncomingTransferDialog extends StatelessWidget {
           ),
         ],
       );
+}
+
+class PermissionRequestDialog extends StatelessWidget {
+  const PermissionRequestDialog({
+    required this.peerName,
+    required this.requestedTier,
+    required this.currentTier,
+    this.justification,
+    super.key,
+  });
+
+  final String peerName;
+  final PermissionTier requestedTier;
+  final PermissionTier currentTier;
+  final String? justification;
+
+  static String _tierTitle(PermissionTier tier) => switch (tier) {
+        PermissionTier.readOnly => 'View Only',
+        PermissionTier.standard => 'Control',
+        PermissionTier.extended => 'Control + File Transfer',
+        PermissionTier.admin => 'Administrator (Full Access)',
+      };
+
+  static String _tierExplanation(PermissionTier tier) => switch (tier) {
+        PermissionTier.readOnly =>
+          'Allows viewing system status, media state, and screen stream.',
+        PermissionTier.standard =>
+          'Allows sending keyboard and mouse input, synchronizing clipboard, and controlling media.',
+        PermissionTier.extended =>
+          'Allows transferring files, launching applications, and running pre-registered commands.',
+        PermissionTier.admin =>
+          'Allows controlling power (shutdown, restart, sleep, lock) and managing paired devices.',
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return AlertDialog(
+      title: const Text('Permission elevation request'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text.rich(
+              TextSpan(
+                style: theme.textTheme.bodyMedium,
+                children: <TextSpan>[
+                  TextSpan(
+                    text: peerName,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const TextSpan(text: ' is requesting '),
+                  TextSpan(
+                    text: _tierTitle(requestedTier),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: requestedTier == PermissionTier.admin
+                          ? colorScheme.error
+                          : colorScheme.primary,
+                    ),
+                  ),
+                  const TextSpan(text: ' access to this computer.'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'What this allows:',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _tierExplanation(requestedTier),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            if (justification != null && justification!.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 16),
+              Text(
+                'Message from device:',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerLow,
+                  border: Border.all(color: colorScheme.outlineVariant),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '“$justification”',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+            ],
+            if (requestedTier == PermissionTier.admin) ...<Widget>[
+              const SizedBox(height: 16),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    color: colorScheme.error,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Admin access allows restarting or shutting down your machine and discarding unsaved work.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.error,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        // Deny holds initial focus so pressing Enter/Space denies by default.
+        TextButton(
+          autofocus: true,
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Deny'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Approve'),
+        ),
+      ],
+    );
+  }
 }
 
 class _StatusCard extends StatelessWidget {

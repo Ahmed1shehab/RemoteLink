@@ -30,6 +30,7 @@ final class CommandDispatcher {
     required this.onBrightnessCommand,
     required this.onDeviceRename,
     required this.onFileTransferMessage,
+    required this.onPermissionRequest,
   }) : _input = input;
 
   final InputBackend _input;
@@ -49,6 +50,7 @@ final class CommandDispatcher {
   final void Function(BrightnessCommand command) onBrightnessCommand;
   final void Function(DeviceRename command) onDeviceRename;
   final void Function(Message message) onFileTransferMessage;
+  final void Function(PermissionRequest command) onPermissionRequest;
 
   final Log _log = Log.scoped('desktop.dispatcher');
 
@@ -176,6 +178,28 @@ final class CommandDispatcher {
           return false;
         }
         onDeviceRename(DeviceRename(sanitised));
+
+      case PermissionRequest():
+        final sanitised = message.justification == null
+            ? null
+            : sanitiseJustification(message.justification);
+        if (message.justification != null && sanitised == null) {
+          // Deliberately not the string itself. It was refused precisely
+          // because it may carry escapes or line breaks, and a log is another
+          // place those render — writing it here would move the injection from
+          // the dialog into the log rather than preventing it.
+          _log.warn(
+            'refusing invalid permission request justification',
+            fields: <String, Object?>{
+              'length': message.justification!.length,
+            },
+          );
+          return false;
+        }
+        onPermissionRequest(PermissionRequest(
+          tier: message.tier,
+          justification: sanitised,
+        ));
 
       case FileOffer() ||
             FileAccept() ||

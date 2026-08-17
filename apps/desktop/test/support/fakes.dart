@@ -138,6 +138,9 @@ final List<Override> desktopHomeOverrides = <Override>[
   pairingRequestProvider.overrideWith(
     (ref) => const Stream<PendingPairing>.empty(),
   ),
+  permissionRequestProvider.overrideWith(
+    (ref) => const Stream<PendingPermissionRequest>.empty(),
+  ),
   incomingTransferRequestProvider.overrideWith(
     (ref) => const Stream<PendingIncomingTransfer>.empty(),
   ),
@@ -171,6 +174,7 @@ CommandDispatcher createTestDispatcher({
   void Function(BrightnessCommand)? onBrightnessCommand,
   void Function(DeviceRename)? onDeviceRename,
   void Function(Message)? onFileTransferMessage,
+  void Function(PermissionRequest)? onPermissionRequest,
 }) =>
     CommandDispatcher(
       input: input ?? const UnsupportedInputBackend('test'),
@@ -186,4 +190,5 @@ CommandDispatcher createTestDispatcher({
       onBrightnessCommand: onBrightnessCommand ?? (_) {},
       onDeviceRename: onDeviceRename ?? (_) {},
       onFileTransferMessage: onFileTransferMessage ?? (_) {},
+      onPermissionRequest: onPermissionRequest ?? (_) {},
     );

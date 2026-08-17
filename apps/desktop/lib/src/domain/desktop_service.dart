@@ -106,6 +106,57 @@ final class PendingPairing {
   final DateTime requestedAt;
 }
 
+/// A permission elevation request waiting on the user.
+final class PendingPermissionRequest {
+  PendingPermissionRequest({
+    required this.session,
+    required this.peerId,
+    required this.peerName,
+    required this.requestedTier,
+    required this.currentTier,
+    this.justification,
+    required this.requestedAt,
+  });
+
+  final ServerSession session;
+  final DeviceId peerId;
+  final String peerName;
+  final PermissionTier requestedTier;
+  final PermissionTier currentTier;
+  final String? justification;
+  final DateTime requestedAt;
+}
+
+/// Throttles permission elevation requests to one per device per minute.
+final class PermissionRateLimiter {
+  PermissionRateLimiter({
+    required Clock clock,
+    this.window = const Duration(minutes: 1),
+  }) : _clock = clock;
+
+  final Clock _clock;
+  final Duration window;
+  final Map<String, DateTime> _lastRequests = <String, DateTime>{};
+
+  /// Whether [peerKey] may request permission elevation now.
+  bool isAllowed(String peerKey) {
+    final last = _lastRequests[peerKey];
+    if (last == null) return true;
+    final elapsed = _clock.now().difference(last);
+    return elapsed >= window;
+  }
+
+  /// Records an allowed request timestamp.
+  void recordRequest(String peerKey) {
+    _lastRequests[peerKey] = _clock.now();
+  }
+
+  /// Clears request record for [peerKey].
+  void reset(String peerKey) {
+    _lastRequests.remove(peerKey);
+  }
+}
+
 /// Orchestrates the desktop side: listener, discovery beacon, input, clipboard.
 ///
 /// Deliberately free of Flutter imports. The service is the whole product; the
@@ -166,6 +217,9 @@ final class DesktopService {
     clock: _clock,
   );
 
+  late final PermissionRateLimiter _permissionRateLimiter =
+      PermissionRateLimiter(clock: _clock);
+
   late final ClipboardSyncService clipboard = ClipboardSyncService(
     clipboard: _clipboardBackend,
     localDeviceId: identity.id,
@@ -187,6 +241,7 @@ final class DesktopService {
     onBrightnessCommand: _onBrightnessCommand,
     onDeviceRename: _onDeviceRename,
     onFileTransferMessage: _onFileTransferMessage,
+    onPermissionRequest: _onPermissionRequest,
   );
 
   RemoteLinkServer? _server;
@@ -194,6 +249,7 @@ final class DesktopService {
   BonjourAdvertiser? _bonjour;
 
   final Map<String, ConnectedDevice> _devices = <String, ConnectedDevice>{};
+  final Map<String, int> _grantExpiryGenerations = <String, int>{};
   final Map<String, PeerClipboardConfig> _peerClipboardSettings =
       <String, PeerClipboardConfig>{};
   final Map<String, StreamSubscription<Message>> _messageSubscriptions =
@@ -217,6 +273,8 @@ final class DesktopService {
       StreamController<List<ConnectedDevice>>.broadcast();
   final StreamController<PendingPairing> _pairingRequests =
       StreamController<PendingPairing>.broadcast();
+  final StreamController<PendingPermissionRequest> _permissionRequests =
+      StreamController<PendingPermissionRequest>.broadcast();
   final StreamController<PendingIncomingTransfer> _incomingTransferRequests =
       StreamController<PendingIncomingTransfer>.broadcast();
   final StreamController<List<TransferRecord>> _transferChanges =
@@ -231,6 +289,10 @@ final class DesktopService {
 
   /// Pairing requests awaiting the user's confirmation.
   Stream<PendingPairing> get pairingRequests => _pairingRequests.stream;
+
+  /// Permission elevation requests awaiting user approval.
+  Stream<PendingPermissionRequest> get permissionRequests =>
+      _permissionRequests.stream;
 
   /// Incoming transfer requests awaiting explicit user approval.
   Stream<PendingIncomingTransfer> get incomingTransferRequests =>
@@ -689,6 +751,8 @@ final class DesktopService {
   }
 
   Future<void> _onEnded(ServerSession session) async {
+    _grantExpiryGenerations[session.peerId.value] =
+        (_grantExpiryGenerations[session.peerId.value] ?? 0) + 1;
     await _messageSubscriptions.remove(session.peerId.value)?.cancel();
     _devices.remove(session.peerId.value);
     await _transferReceivers.remove(session.peerId.value)?.dispose();
@@ -776,13 +840,22 @@ final class DesktopService {
   }
 
   /// Changes a connected device's permission tier and tells it.
-  Future<void> setTier(DeviceId peerId, PermissionTier tier) async {
+  Future<void> setTier(
+    DeviceId peerId,
+    PermissionTier tier, {
+    int? expiresInSeconds,
+  }) async {
     final device = _devices[peerId.value];
     if (device == null) return;
 
-    final peer = await trustStore.findById(peerId);
-    if (peer != null) {
-      await trustStore.upsert(peer.copyWith(permissionTier: tier.wireValue));
+    _grantExpiryGenerations[peerId.value] =
+        (_grantExpiryGenerations[peerId.value] ?? 0) + 1;
+
+    if (expiresInSeconds == null) {
+      final peer = await trustStore.findById(peerId);
+      if (peer != null) {
+        await trustStore.upsert(peer.copyWith(permissionTier: tier.wireValue));
+      }
     }
 
     _devices[peerId.value] = ConnectedDevice(
@@ -793,7 +866,125 @@ final class DesktopService {
     );
     _publishDevices();
 
-    await device.serverSession.session.send(PermissionGrant(tier: tier));
+    await device.serverSession.session.send(
+      PermissionGrant(tier: tier, expiresInSeconds: expiresInSeconds),
+    );
+
+    if (expiresInSeconds != null && expiresInSeconds > 0) {
+      _scheduleGrantExpiry(device.serverSession, peerId, expiresInSeconds);
+    }
+
+    _log.info(
+      'permission tier set',
+      fields: <String, Object?>{
+        'peer': peerId.value,
+        'tier': tier.name,
+        'expiresInSeconds': expiresInSeconds,
+      },
+    );
+  }
+
+  void _scheduleGrantExpiry(
+    ServerSession session,
+    DeviceId peerId,
+    int expiresInSeconds,
+  ) {
+    final generation = _grantExpiryGenerations[peerId.value] ?? 0;
+
+    unawaited(() async {
+      await _clock.delay(Duration(seconds: expiresInSeconds));
+
+      if (_grantExpiryGenerations[peerId.value] != generation) return;
+      final device = _devices[peerId.value];
+      if (device == null || device.serverSession != session) return;
+      if (!device.serverSession.session.isEstablished) return;
+
+      _log.info(
+        'temporary permission grant expired; reverting to readOnly',
+        fields: <String, Object?>{'peer': peerId.value},
+      );
+
+      _devices[peerId.value] = ConnectedDevice(
+        serverSession: device.serverSession,
+        tier: PermissionTier.readOnly,
+        name: device.name,
+        clipboardSyncEnabled: device.clipboardSyncEnabled,
+      );
+      _publishDevices();
+
+      try {
+        await device.serverSession.session.send(
+          const PermissionGrant(tier: PermissionTier.readOnly),
+        );
+      } on TransportError {
+        // Session is tearing down; its watcher handles cleanup.
+      }
+    }());
+  }
+
+  void _onPermissionRequest(PermissionRequest request) {
+    final peerId = _activeSessionPeerId;
+    if (peerId == null) return;
+    unawaited(_handlePermissionRequest(peerId, request));
+  }
+
+  Future<void> _handlePermissionRequest(
+    DeviceId peerId,
+    PermissionRequest request,
+  ) async {
+    final device = _devices[peerId.value];
+    if (device == null) return;
+
+    if (!_permissionRateLimiter.isAllowed(peerId.value)) {
+      _log.warn(
+        'permission request refused by rate limit',
+        fields: <String, Object?>{
+          'peer': peerId.value,
+          'requestedTier': request.tier.name,
+        },
+      );
+      return;
+    }
+    _permissionRateLimiter.recordRequest(peerId.value);
+
+    final pending = PendingPermissionRequest(
+      session: device.serverSession,
+      peerId: peerId,
+      peerName: device.name,
+      requestedTier: request.tier,
+      currentTier: device.tier,
+      justification: request.justification,
+      requestedAt: _clock.now(),
+    );
+
+    if (!_permissionRequests.isClosed) {
+      _permissionRequests.add(pending);
+    }
+  }
+
+  /// Approves a pending permission request.
+  Future<void> approvePermissionRequest(
+    PendingPermissionRequest request, {
+    int? expiresInSeconds,
+  }) async {
+    await setTier(
+      request.peerId,
+      request.requestedTier,
+      expiresInSeconds: expiresInSeconds,
+    );
+  }
+
+  /// Declines a pending permission request.
+  Future<void> declinePermissionRequest(
+    PendingPermissionRequest request,
+  ) async {
+    _log.info(
+      'permission request declined',
+      fields: <String, Object?>{
+        'peer': request.peerId.value,
+        'requestedTier': request.requestedTier.name,
+      },
+    );
   }
 
   /// Renames a paired device locally from the desktop UI.
@@ -1961,6 +2152,7 @@ final class DesktopService {
     _devices.clear();
     await _deviceChanges.close();
     await _pairingRequests.close();
+    await _permissionRequests.close();
     await _incomingTransferRequests.close();
     await _transferChanges.close();
 
