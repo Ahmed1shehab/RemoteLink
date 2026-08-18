@@ -15,6 +15,7 @@ import '../domain/clipboard_history_store.dart';
 import '../domain/desktop_preferences.dart';
 import '../domain/desktop_service.dart';
 import '../domain/file_transfer_store.dart';
+import '../domain/instance_lock.dart';
 import '../domain/transfer_model.dart';
 
 /// Riverpod, not Bloc.
@@ -259,6 +260,7 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
     deviceName: name,
     appVersion: '0.1.0',
     clock: ref.watch(clockProvider),
+    instanceLock: InstanceLock(File('${directory.path}/instance.lock')),
     incomingTransferStore: transferStore,
     peerClipboardSettingsFile: File('${directory.path}/clipboard_peers.json'),
     clipboardHistory: history,

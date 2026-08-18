@@ -14,6 +14,7 @@ import 'bonjour_advertiser.dart';
 import 'clipboard_sync.dart';
 import 'command_dispatcher.dart';
 import 'file_transfer_store.dart';
+import 'instance_lock.dart';
 import 'transfer_model.dart';
 
 /// Everything the desktop advertises it can do.
@@ -217,6 +218,7 @@ final class DesktopService {
     required this.appVersion,
     required Clock clock,
     this.servicePort = kDefaultServicePort,
+    this.instanceLock,
     InputBackend? input,
     ClipboardBackend? clipboardBackend,
     MediaBackend? media,
@@ -244,6 +246,13 @@ final class DesktopService {
   final String deviceName;
   final String appVersion;
   final int servicePort;
+
+  /// Guards against a second copy starting beside this one.
+  ///
+  /// Nullable because most tests want several services in one process on
+  /// purpose, and a lock would be the thing under test rather than a detail of
+  /// it.
+  final InstanceLock? instanceLock;
   final IncomingTransferStore? incomingTransferStore;
   final File? peerClipboardSettingsFile;
 
@@ -589,6 +598,18 @@ final class DesktopService {
   Future<void> start() async {
     if (_server != null) return;
 
+    // Before anything binds, listens or advertises. Half-starting and then
+    // unwinding would leave a Bonjour record and a beacon behind for as long as
+    // the teardown took, which is exactly the confusion this prevents.
+    final other = await instanceLock?.otherInstance();
+    if (other != null) {
+      throw const TransportError(
+        'already_running',
+        'Remote Link is already running on this computer',
+        retryable: false,
+      );
+    }
+
     final server = RemoteLinkServer(
       identity: identity,
       capabilities: currentCapabilities,
@@ -599,6 +620,7 @@ final class DesktopService {
     await _loadPeerClipboardSettings();
     await server.start();
     _server = server;
+    await instanceLock?.claim(port: server.boundPort);
 
     _acceptedSubscription =
         server.accepted.listen((session) => unawaited(_onAccepted(session)));
@@ -2289,6 +2311,9 @@ final class DesktopService {
     await _bonjour?.stop();
     await _beacon?.stop();
     await _server?.stop();
+    // After the socket is closed, so the next launch cannot read the lock,
+    // probe a port this process still holds, and conclude it is still running.
+    await instanceLock?.release();
     await clipboard.dispose();
     await _pairing.dispose();
 

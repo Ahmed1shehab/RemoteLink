@@ -51,6 +51,7 @@ final class RemoteLinkServer {
     required Clock clock,
     this.port = 47811,
     this.maxSessions = kMaxSessions,
+    this.allowPortFallback = true,
   }) : _clock = clock;
 
   final DeviceIdentity identity;
@@ -67,6 +68,15 @@ final class RemoteLinkServer {
   final TrustStore trustStore;
   final int port;
   final int maxSessions;
+
+  /// Whether to bind any free port when [port] is unavailable.
+  ///
+  /// On by default, because a companion that will not start is useless and the
+  /// port number is an implementation detail every client learns from
+  /// discovery. Tests that are *about* the preferred port turn it off, so a
+  /// deliberate collision fails loudly instead of quietly succeeding somewhere
+  /// else.
+  final bool allowPortFallback;
 
   final Clock _clock;
   final Log _log = Log.scoped('transport.server');
@@ -116,11 +126,50 @@ final class RemoteLinkServer {
         shared: false,
       );
     } on SocketException catch (e) {
-      throw TransportError(
-        'bind_failed',
-        'could not listen on port $port',
-        cause: e,
-        retryable: false,
+      if (!allowPortFallback) {
+        throw TransportError(
+          'bind_failed',
+          'could not listen on port $port',
+          cause: e,
+          retryable: false,
+        );
+      }
+
+      // The preferred port is taken, so take any port instead.
+      //
+      // Nothing depends on the number: every phone learns it from the Bonjour
+      // record or the UDP beacon, both of which carry [boundPort]. Refusing to
+      // start was strictly worse — the desktop showed "could not listen on port
+      // 47811", which names the one thing the user cannot do anything about,
+      // and the service that a phone was waiting for simply did not exist.
+      //
+      // Retried rather than matched on an error code, because "address in use"
+      // is 48 on macOS, 98 on Linux and 10048 on Windows, and getting that
+      // triple wrong fails in exactly the situation it exists to handle. If the
+      // second bind fails too, the original failure is the one worth reporting:
+      // it is the one that names the port the user configured.
+      try {
+        _socket = await ServerSocket.bind(
+          InternetAddress.anyIPv4,
+          0,
+          shared: false,
+        );
+      } on SocketException {
+        throw TransportError(
+          'bind_failed',
+          'could not listen on port $port',
+          cause: e,
+          retryable: false,
+        );
+      }
+
+      _log.warn(
+        'preferred port unavailable, listening on another',
+        fields: <String, Object?>{
+          'preferred': port,
+          'bound': _socket!.port,
+        },
+        error: e,
       );
     }
 

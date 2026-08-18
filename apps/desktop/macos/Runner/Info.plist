@@ -26,6 +26,14 @@
 	<false/>
 	<key>NSHumanReadableCopyright</key>
 	<string>$(PRODUCT_COPYRIGHT)</string>
+	<!-- Shown when macOS asks about the Downloads folder. Needed now that the
+	     app is not sandboxed: inside a sandbox the entitlement covered this, and
+	     outside one it is TCC's question instead. Without a string here the
+	     prompt is generic, and on recent macOS an app that cannot explain itself
+	     is simply refused — which would surface on the sending phone as a
+	     transfer that aborts for no stated reason. -->
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Remote Link saves the files your phone sends into your Downloads folder.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Remote Link lets your phone find and control this computer over your local network.</string>
 	<key>NSMainNibFile</key>

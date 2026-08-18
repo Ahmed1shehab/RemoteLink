@@ -1,4 +1,4 @@
-# RemoteLink — missing features and implementation backlog
+# Remote Link — missing features and implementation backlog
 
 This document is the gap inventory: everything the product is *supposed* to do
 and does not yet do, written as executable tasks rather than aspirations.
@@ -1462,6 +1462,26 @@ startup is exactly what security tooling flags.
 **Acceptance.** A downloaded build installs and runs on a clean machine with no
 Gatekeeper or SmartScreen warning, and the macOS Accessibility grant persists
 across an update.
+
+**Status — mostly done, see `docs/PACKAGING.md`.** `tool/package/macos.sh`
+builds, signs, notarises, staples and produces a `.dmg`; it has been run
+end-to-end unsigned and produces a working image. `tool/package/windows.ps1`
+plus `tool/package/remotelink.iss` sign the binaries and build a per-user Inno
+Setup installer that writes the `Run` key and the private-profile firewall rule.
+
+Two things this task still owes:
+
+- **The Windows half has never been executed.** It was written on macOS from the
+  documented behaviour of `signtool`, `ISCC` and `netsh`.
+- **No update check**, deliberately. A background check would make every
+  installation phone a server on a schedule, which contradicts the one promise
+  the product makes. The conservative version is a manual "check for updates"
+  button and a paragraph in `SECURITY.md`; neither is written.
+
+The App Sandbox was removed as part of this work. It redirected `~/Library` into
+a container, so the LaunchAgent implementing start-at-login was written where
+`launchd` never reads — the feature logged success and had never worked. The
+reasoning is in `Release.entitlements`.
 
 ---
 

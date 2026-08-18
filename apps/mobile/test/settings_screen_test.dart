@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:remotelink_mobile/src/app/brand.dart';
 import 'package:remotelink_mobile/src/app/providers.dart';
 import 'package:remotelink_mobile/src/features/control/control_screen.dart';
 import 'package:remotelink_mobile/src/features/devices/device_list_screen.dart';
@@ -98,7 +99,7 @@ void main() {
       // Section 6: ABOUT
       expect(find.text('About'), findsOneWidget);
       expect(find.text('Remote Link'), findsOneWidget);
-      expect(find.text('Version 0.1.0'), findsOneWidget);
+      expect(find.text('Version $kAppVersion'), findsOneWidget);
       expect(find.text('Licenses'), findsOneWidget);
 
       expect(tester.takeException(), isNull);

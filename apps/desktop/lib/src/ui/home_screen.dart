@@ -1909,11 +1909,70 @@ class _StartupError extends StatelessWidget {
 
   final Object error;
 
+  /// True when the only thing wrong is that the user already has it open.
+  ///
+  /// Worth its own screen rather than a line of error text, because it is not
+  /// a failure — the computer *is* reachable from the phone, by the copy that
+  /// is already running — and because the useful reply is "here is where it is",
+  /// not a code and a port number.
+  bool get _alreadyRunning =>
+      error is RemoteLinkError &&
+      // The prefix is added by `TransportError`, which namespaces every code it
+      // carries. Matching the bare name here would silently never fire.
+      (error as RemoteLinkError).code == 'transport.already_running';
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final message = error is RemoteLinkError
         ? (error as RemoteLinkError).message
         : error.toString();
+
+    if (_alreadyRunning) {
+      final where = Platform.isMacOS
+          ? 'the menu bar at the top of the screen'
+          : 'the notification area beside the clock';
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const BrandMark(size: 72),
+                const SizedBox(height: 20),
+                Text(
+                  '$kProductName is already running',
+                  style: theme.textTheme.titleMedium,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Your phone can already reach this computer. Open the copy '
+                  "that is running from its icon in $where — you don't need "
+                  'this second one.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                // A way out of the window, which is what the old screen was
+                // missing: it stated a port number and left the user with
+                // Activity Monitor as the only remaining option.
+                FilledButton.icon(
+                  onPressed: () => exit(0),
+                  icon: const Icon(Icons.close),
+                  label: const Text('Close this window'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -1923,8 +1982,8 @@ class _StartupError extends StatelessWidget {
             const Icon(Icons.error_outline, size: 48),
             const SizedBox(height: 16),
             Text(
-              'Remote Link could not start',
-              style: Theme.of(context).textTheme.titleMedium,
+              '$kProductName could not start',
+              style: theme.textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
             Text(message, textAlign: TextAlign.center),

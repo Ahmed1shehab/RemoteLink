@@ -2,21 +2,34 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>com.apple.security.app-sandbox</key>
-	<true/>
-	<!-- Writing received files to ~/Downloads/RemoteLink. Without it the
-	     directory cannot even be created, and the failure surfaces on the
-	     sender's phone as an abort — for a long time as "not enough storage
-	     space", which was the receiver mapping every storage failure to one
-	     cause. The container's Downloads is a symlink to the real folder, so
-	     the path resolves and reads fine; only the write is refused. -->
-	<key>com.apple.security.files.downloads.read-write</key>
-	<true/>
-	<!-- Reading a file the user chose in the open dialog, or dropped on the
-	     window. The app is sandboxed, so without this the dialog still opens and
-	     the selection still comes back — and every read of it fails. -->
-	<key>com.apple.security.files.user-selected.read-only</key>
-	<true/>
+	<!-- No App Sandbox, deliberately.
+	
+	     This is the entitlement decision the whole product depends on, so it is
+	     written down rather than left as an absence.
+	
+	     The sandbox redirects `~/Library` into a per-app container. `AutoStart`
+	     writes a LaunchAgent to `~/Library/LaunchAgents`, so under the sandbox it
+	     wrote to
+	     `~/Library/Containers/<bundle>/Data/Library/LaunchAgents/` — a path
+	     launchd never reads. The call succeeded, the log said "registered to
+	     start at login", and nothing started at login. It had never worked.
+	
+	     The deeper reason is what this app is. It posts keyboard and mouse events
+	     into other applications and captures the screen; driving other apps is
+	     the category of thing the sandbox exists to prevent, and Apple does not
+	     accept such apps on the Mac App Store, which is the only distribution
+	     channel the sandbox is required for. Keeping it bought no security the
+	     Accessibility and Screen Recording grants do not already gate, and cost a
+	     feature outright.
+	
+	     What replaces it: Developer ID signing, the hardened runtime, and
+	     notarisation — see `docs/PACKAGING.md`. The user still has to grant
+	     Accessibility and Screen Recording by hand, and those grants are bound to
+	     the code signature.
+	
+	     One migration consequence: application support moves out of the container
+	     to `~/Library/Application Support/RemoteLink`, so an installation that
+	     ran a sandboxed build has to pair its phones once more. -->
 	<key>com.apple.security.network.client</key>
 	<true/>
 	<key>com.apple.security.network.server</key>
