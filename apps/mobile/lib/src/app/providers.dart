@@ -9,6 +9,7 @@ import 'package:meta/meta.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
+import 'package:rl_native/rl_native.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
@@ -356,12 +357,37 @@ final discoveredDevicesProvider =
   yield* backend.devices;
 });
 
+/// Whether this phone can be watched and driven from a computer.
+///
+/// Nothing can today — see [PhoneControlBackend] for why, per platform — but
+/// the answer is asked for rather than assumed so that the day one platform
+/// can, the capability starts being advertised without another edit here.
+final phoneControlBackendProvider = Provider<PhoneControlBackend>(
+  (ref) => NativeBackends.createPhoneControl(),
+);
+
+/// What this phone tells a desktop it takes part in.
+///
+/// A capability bit means "I take part in this feature", and the session uses
+/// the *intersection* of the two sides. So advertising [Capabilities.phoneControl]
+/// on a device that cannot be captured would not enable anything — it would
+/// make the desktop offer a control that goes nowhere, which is worse than the
+/// feature simply being absent.
+///
+/// A pure function of the backend, so the rule can be tested without standing
+/// up a provider container, a keystore, and a socket.
+@visibleForTesting
+Capabilities mobileCapabilities(PhoneControlBackend phoneControl) =>
+    phoneControl.isAvailable
+        ? kMobileCapabilities.plus(Capabilities.phoneControl)
+        : kMobileCapabilities;
+
 /// The connection supervisor. One per app; it handles reconnection itself.
 final clientProvider = FutureProvider<RemoteLinkClient>((ref) async {
   final identity = await ref.watch(identityProvider.future);
   final client = RemoteLinkClient(
     identity: identity,
-    capabilities: kMobileCapabilities,
+    capabilities: mobileCapabilities(ref.watch(phoneControlBackendProvider)),
     clock: ref.watch(clockProvider),
   );
   ref.onDispose(client.dispose);

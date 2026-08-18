@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:meta/meta.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
@@ -358,6 +359,27 @@ final memoryLogSinkProvider = Provider<MemoryLogSink>((ref) {
   return MemoryLogSink();
 });
 
+/// Projects a live connection into what the diagnostics screen renders.
+///
+/// A named function rather than an expression inside the provider so that it
+/// can be tested against a real [ConnectedDevice]. A widget test that overrides
+/// the whole provider proves the *screen* draws what it is handed and says
+/// nothing at all about whether anything hands it the right thing — which is
+/// where a field quietly stops being populated.
+@visibleForTesting
+DeviceDiagnostic deviceDiagnosticFor(ConnectedDevice device) =>
+    DeviceDiagnostic(
+      id: device.id.value,
+      name: device.name,
+      address: device.address,
+      tier: device.tier,
+      roundTripMillis: device.quality.roundTripMillis,
+      qualityBars: device.quality.bars,
+      awaitingPairing: device.awaitingPairing,
+      clipboardSyncEnabled: device.clipboardSyncEnabled,
+      phoneControlBlocked: phoneControlBlockedReason(device),
+    );
+
 /// Diagnostic snapshot provider for the diagnostics panel.
 ///
 /// Keeping this projection separate from [desktopServiceProvider] lets the UI
@@ -397,17 +419,7 @@ final desktopDiagnosticsProvider =
           ),
         ),
         devices: <DeviceDiagnostic>[
-          for (final device in service.devices)
-            DeviceDiagnostic(
-              id: device.id.value,
-              name: device.name,
-              address: device.address,
-              tier: device.tier,
-              roundTripMillis: device.quality.roundTripMillis,
-              qualityBars: device.quality.bars,
-              awaitingPairing: device.awaitingPairing,
-              clipboardSyncEnabled: device.clipboardSyncEnabled,
-            ),
+          for (final device in service.devices) deviceDiagnosticFor(device),
         ],
       );
 
@@ -497,6 +509,7 @@ final class DeviceDiagnostic {
     required this.qualityBars,
     this.awaitingPairing = false,
     this.clipboardSyncEnabled = true,
+    this.phoneControlBlocked,
   });
 
   final String id;
@@ -507,4 +520,13 @@ final class DeviceDiagnostic {
   final int qualityBars;
   final bool awaitingPairing;
   final bool clipboardSyncEnabled;
+
+  /// Why this computer cannot drive this phone, or `null` if it can.
+  ///
+  /// Carried on the diagnostics view rather than shown on the home screen. It
+  /// is a standing fact about the pair rather than an action, and it is true of
+  /// every device today — a line of explanation on every tile of the main
+  /// screen would be permanent clutter for a feature that does not exist. The
+  /// diagnostics screen is where someone goes to ask why something is missing.
+  final String? phoneControlBlocked;
 }

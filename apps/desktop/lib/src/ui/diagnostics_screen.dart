@@ -706,6 +706,32 @@ class _ConnectedDevicesCard extends StatelessWidget {
                   color: colorScheme.onSurfaceVariant,
                 ),
               ),
+              // Named and explained rather than simply absent. Driving the
+              // phone from here is a thing people ask for, and a feature that
+              // is missing with no explanation is indistinguishable from one
+              // that is broken.
+              if (device.phoneControlBlocked != null) ...<Widget>[
+                const SizedBox(height: 4),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Icon(
+                      Icons.phonelink_off_outlined,
+                      size: 14,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        device.phoneControlBlocked!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),

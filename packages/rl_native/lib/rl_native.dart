@@ -25,6 +25,7 @@ import 'src/macos/macos_screen_capture.dart';
 import 'src/macos/macos_system_info.dart';
 import 'src/media_backend.dart';
 import 'src/network_adapter_backend.dart';
+import 'src/phone_control_backend.dart';
 import 'src/screen_capture_backend.dart';
 import 'src/system_info_backend.dart';
 import 'src/windows/win32_brightness.dart';
@@ -47,6 +48,7 @@ export 'src/macos/macos_system_info.dart';
 export 'src/media_backend.dart';
 export 'src/monitor_topology.dart';
 export 'src/network_adapter_backend.dart';
+export 'src/phone_control_backend.dart';
 export 'src/screen_capture_backend.dart';
 export 'src/system_info_backend.dart';
 export 'src/windows/win32_brightness.dart';
@@ -64,6 +66,31 @@ export 'src/windows/win32_system_info.dart';
 /// macOS developer's machine, which is exactly the failure mode conditional
 /// imports produce.
 abstract final class NativeBackends {
+  /// Builds the phone-control backend.
+  ///
+  /// Every branch returns the unsupported one today. It is still a factory
+  /// rather than a constant because the reason differs per platform and the
+  /// reason is the whole product: "not available" with no explanation reads as
+  /// a bug, and on iOS this is not a bug and never will be fixed.
+  static PhoneControlBackend createPhoneControl() {
+    if (Platform.isIOS) {
+      return const UnsupportedPhoneControlBackend(
+        unavailableReason: 'iPhones cannot be controlled remotely. iOS has no '
+            'public way for one app to capture the screen or tap for another, '
+            'so this is not a permission that can be granted.',
+      );
+    }
+    if (Platform.isAndroid) {
+      return const UnsupportedPhoneControlBackend(
+        unavailableReason: 'Controlling an Android phone needs an '
+            'accessibility service, which this build does not include yet.',
+      );
+    }
+    return const UnsupportedPhoneControlBackend(
+      unavailableReason: 'Only phones can be controlled this way.',
+    );
+  }
+
   /// Builds the input backend, or an unsupported stub with a reason.
   static InputBackend createInput() {
     final log = Log.scoped('native.factory');

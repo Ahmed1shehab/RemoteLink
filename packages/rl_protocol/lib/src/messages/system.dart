@@ -448,6 +448,18 @@ enum PermissionTier {
             MessageType.runCommand => canRunCommands,
             _ => true,
           },
+        0x0C => switch (type) {
+            MessageType.phoneControlStart ||
+            MessageType.phoneControlStop ||
+            MessageType.phoneControlFrame =>
+              canViewScreen,
+            MessageType.phoneControlPointer ||
+            MessageType.phoneControlScroll ||
+            MessageType.phoneControlNavigation ||
+            MessageType.phoneControlTextInput =>
+              canSendInput,
+            _ => true,
+          },
         _ => false,
       };
 }

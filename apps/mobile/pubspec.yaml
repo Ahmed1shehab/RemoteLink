@@ -38,6 +38,10 @@ dependencies:
   path_provider: ^2.1.4
   rl_core: ^0.1.0
   rl_crypto: ^0.1.0
+  # Not desktop-only despite the name: the phone asks it whether this device
+  # can be watched and driven from a computer, so that the capability is only
+  # advertised where it is real.
+  rl_native: ^0.1.0
   rl_protocol: ^0.1.0
   rl_transport: ^0.1.0
 

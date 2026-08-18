@@ -14,6 +14,7 @@ import 'messages/keyboard.dart';
 import 'messages/media.dart';
 import 'messages/message.dart';
 import 'messages/pairing.dart';
+import 'messages/phone_control.dart';
 import 'messages/screen.dart';
 import 'messages/system.dart';
 
@@ -190,6 +191,17 @@ final class MessageCodec {
         MessageType.deviceRename => DeviceRename.readFrom(reader),
         MessageType.permissionGrant => PermissionGrant.readFrom(reader),
         MessageType.permissionRequest => PermissionRequest.readFrom(reader),
+
+        // Phone control.
+        MessageType.phoneControlStart => PhoneControlStart.readFrom(reader),
+        MessageType.phoneControlStop => PhoneControlStop.readFrom(reader),
+        MessageType.phoneControlFrame => PhoneControlFrame.readFrom(reader),
+        MessageType.phoneControlPointer => PhoneControlPointer.readFrom(reader),
+        MessageType.phoneControlScroll => PhoneControlScroll.readFrom(reader),
+        MessageType.phoneControlNavigation =>
+          PhoneControlNavigation.readFrom(reader),
+        MessageType.phoneControlTextInput =>
+          PhoneControlTextInput.readFrom(reader),
 
         // Declared in the wire format but implemented in a later milestone.
         // They decode as opaque so a newer peer can send them without breaking

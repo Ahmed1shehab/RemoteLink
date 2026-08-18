@@ -71,6 +71,35 @@ Capabilities buildCapabilities({
   return capabilities;
 }
 
+/// Why this computer cannot drive [device]'s phone, or `null` if it can.
+///
+/// The reverse of screen sharing, and it does not work — from either end. The
+/// phone cannot be captured (see `PhoneControlBackend` for the per-platform
+/// reasons) and this computer has nothing to display a phone's frames in, so
+/// [buildCapabilities] does not claim the bit either. The negotiated set is the
+/// intersection of both sides, so one missing side is enough and checking it
+/// covers both.
+///
+/// That coupling is deliberate: whoever builds the viewer has to add the
+/// capability in [buildCapabilities] to switch this on, so there is no way to
+/// reach an enabled control with nothing behind it.
+///
+/// A reason rather than a boolean because the user asked for this feature and
+/// deserves to know why it is greyed out. "Not available" with no explanation
+/// reads as a bug, and on an iPhone this is not a bug and will not be fixed.
+String? phoneControlBlockedReason(ConnectedDevice device) {
+  if (!device.serverSession.handshake.capabilities
+      .has(Capabilities.phoneControl)) {
+    return 'Controlling a phone from this computer is not available. iPhones '
+        'offer no way to allow it at all, Android needs a service this build '
+        'does not include, and there is no viewer here yet.';
+  }
+  if (!device.tier.canViewScreen) {
+    return 'Raise this device above read-only to control it.';
+  }
+  return null;
+}
+
 /// A live connection as the desktop UI sees it.
 final class ConnectedDevice {
   ConnectedDevice({

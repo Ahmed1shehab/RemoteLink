@@ -38,6 +38,12 @@ extension type const Capabilities(int bits) {
   /// no slider, which is better than a slider that moves and changes nothing.
   static const int brightness = 1 << 18;
 
+  /// Desktop controlling the phone.
+  ///
+  /// Advertised by the phone if its backend supports it, and by the desktop
+  /// to indicate it has the UI to inject inputs.
+  static const int phoneControl = 1 << 19;
+
   /// Pinch, rotate, and multi-finger swipe.
   ///
   /// Advertised only where the host can express them as real gestures. Windows

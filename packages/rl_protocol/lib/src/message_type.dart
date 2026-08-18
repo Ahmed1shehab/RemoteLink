@@ -216,6 +216,28 @@ enum MessageType {
   /// Gyroscope and accelerometer readings for motion control.
   motionState(0x0B02),
 
+  // ── 0x0Cxx phone control ──────────────────────────────────────────────────
+  /// Desktop → phone. Requests to start streaming the phone's screen.
+  phoneControlStart(0x0C01),
+
+  /// Desktop → phone. Requests to stop an active screen stream.
+  phoneControlStop(0x0C02),
+
+  /// Phone → desktop. One encoded video frame from the phone's screen.
+  phoneControlFrame(0x0C03),
+
+  /// Desktop → phone. Tap/touch at normalised coordinates.
+  phoneControlPointer(0x0C04),
+
+  /// Desktop → phone. Swipe/scroll event.
+  phoneControlScroll(0x0C05),
+
+  /// Desktop → phone. Back/home navigation action.
+  phoneControlNavigation(0x0C06),
+
+  /// Desktop → phone. Text input.
+  phoneControlTextInput(0x0C07),
+
   // ── fallback ──────────────────────────────────────────────────────────────
   /// Any code this build does not recognise.
   ///
@@ -270,7 +292,10 @@ enum MessageType {
         MessageType.screenFrame ||
         MessageType.gamepadState ||
         MessageType.motionState ||
-        MessageType.laserPointer =>
+        MessageType.laserPointer ||
+        MessageType.phoneControlFrame ||
+        MessageType.phoneControlPointer ||
+        MessageType.phoneControlScroll =>
           true,
         _ => false,
       };

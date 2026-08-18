@@ -122,6 +122,7 @@ on the high byte.
 | `0x09xx` | device management |
 | `0x0Axx` | presentation |
 | `0x0Bxx` | gamepad |
+| `0x0Cxx` | phone control (desktop drives the phone) |
 
 **Codes are append-only and never reused.** A value that shipped keeps its
 meaning forever; a retired message becomes reserved rather than being recycled.
