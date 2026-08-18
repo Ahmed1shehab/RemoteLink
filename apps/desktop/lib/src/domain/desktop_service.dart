@@ -2370,7 +2370,7 @@ final class DesktopService {
   }
 
   void _scheduleNextCapture(_ActiveScreenStream stream) {
-    final interval = Duration(milliseconds: (1000 / stream.targetFps).round());
+    final interval = stream.captureInterval;
     final elapsed = stream.sinceTickStart;
     // Never zero: a frame that took longer than its budget must still yield to
     // the event loop before the next one, or the capture loop starves
@@ -2416,6 +2416,17 @@ final class DesktopService {
     }
   }
 
+  /// Stops the automatic capture loop without ending the stream.
+  ///
+  /// For tests that drive [screenCaptureTick] themselves. The loop reschedules
+  /// itself in real time, so with it running the ticks a test issues interleave
+  /// with ticks the timer issues, and every frame count the test asserts is
+  /// really a count of both — which is how a deduplication test came to pass
+  /// against a build with the deduplication removed.
+  @visibleForTesting
+  void pauseScreenCaptureLoop(DeviceId peerId) =>
+      _screenStreams[peerId.value]?.cancel();
+
   /// Whether a screen capture stream is actively running for [peerId].
   bool isStreamingScreen(DeviceId peerId) =>
       _screenStreams.containsKey(peerId.value);
@@ -2423,6 +2434,14 @@ final class DesktopService {
   /// Total frames skipped for [peerId] due to backpressure.
   int screenStreamSkippedCount(DeviceId peerId) =>
       _screenStreams[peerId.value]?.skippedFrames ?? 0;
+
+  /// Total frames not sent for [peerId] because the desk had not changed.
+  ///
+  /// Counted apart from [screenStreamSkippedCount] deliberately: a skipped
+  /// frame means the link could not keep up and is a problem, an unchanged one
+  /// means there was nothing to say and is the system working.
+  int screenStreamUnchangedCount(DeviceId peerId) =>
+      _screenStreams[peerId.value]?.unchangedFrames ?? 0;
 
   /// Total frames successfully captured and transmitted for [peerId].
   int screenStreamCapturedCount(DeviceId peerId) =>
@@ -2462,6 +2481,19 @@ final class DesktopService {
       );
       if (frame == null) return;
       if (!_screenStreams.containsKey(peerId.value)) return;
+
+      // Nothing on the desk has changed since the last frame the phone got.
+      // Sending it again costs the same bandwidth as a frame that means
+      // something, and a desk is still far more often than it is moving —
+      // someone reading, thinking, or looking at a slide. Skipping is worth
+      // roughly a megabyte a second of nothing, and the comparison itself is
+      // too cheap to measure.
+      if (stream.isUnchanged(frame)) {
+        stream.unchangedFrames++;
+        stream.idleRun++;
+        return;
+      }
+      stream.remember(frame);
 
       final ptsMicros = _clock.now().microsecondsSinceEpoch;
       final screenFrame = ScreenFrame(
@@ -2523,8 +2555,95 @@ final class _ActiveScreenStream {
   int sequence = 0;
   int skippedFrames = 0;
   int capturedFrames = 0;
+  int unchangedFrames = 0;
   bool isFrameInFlight = false;
   Timer? timer;
+
+  /// The last frame actually sent, for telling "nothing changed" from "the
+  /// desk moved".
+  ///
+  /// The encoded bytes rather than a hash of them. A hash would be smaller and
+  /// a collision would silently drop a frame that mattered, which shows up as
+  /// the screen freezing on a picture that is subtly wrong — the worst kind of
+  /// bug to be told about second-hand. A couple of hundred kilobytes per
+  /// viewer is not worth that.
+  Uint8List? _lastSentData;
+  double? _lastSentCursorX;
+  double? _lastSentCursorY;
+
+  /// How many captures in a row have found nothing new.
+  int idleRun = 0;
+
+  /// How long to wait before the next capture.
+  ///
+  /// Deduplication saves the bandwidth of a still desk but not the work: the
+  /// frame is still grabbed, scaled and encoded before anything can tell it is
+  /// unchanged, which on this machine is around thirty milliseconds of a core
+  /// every time. Held at the full rate that is a core spinning continuously on
+  /// a laptop to discover, thirty times a second, that nothing happened.
+  ///
+  /// So an idle stream polls more slowly, up to [_maxIdleBackoff] times its
+  /// normal interval. The cost is latency on the *first* frame after the desk
+  /// starts moving again; [remember] resets the run on any change, so the
+  /// second frame onwards is back at full speed. Waking up slightly late once
+  /// is a far better trade than never sleeping.
+  Duration get captureInterval {
+    final base = (1000 / targetFps).round();
+    final slowdown = 1 + (idleRun ~/ _idleFramesPerStep);
+    final capped = slowdown > _maxIdleBackoff ? _maxIdleBackoff : slowdown;
+    return Duration(milliseconds: base * capped);
+  }
+
+  /// Unchanged captures before the interval lengthens another step.
+  static const int _idleFramesPerStep = 15;
+
+  /// Slowest the idle poll may get, as a multiple of the normal interval.
+  ///
+  /// Four, so a 30 fps stream idles at around 7 Hz. Past that the delay before
+  /// the picture starts moving again becomes noticeable as a stutter when the
+  /// user begins to work.
+  static const int _maxIdleBackoff = 4;
+
+  /// Whether [frame] would tell the phone anything it does not already know.
+  ///
+  /// The cursor is part of the comparison even though it is not part of the
+  /// picture. It travels as its own fields on `ScreenFrame`, so a pointer
+  /// moving across a still desktop produces byte-identical image data — and
+  /// comparing only the image would freeze the drawn cursor exactly when the
+  /// user is moving it. That is the one motion on screen they are guaranteed
+  /// to be watching.
+  bool isUnchanged(CapturedFrame frame) {
+    final previous = _lastSentData;
+    if (previous == null) return false;
+    if (frame.cursorX != _lastSentCursorX) return false;
+    if (frame.cursorY != _lastSentCursorY) return false;
+    if (previous.length != frame.data.length) return false;
+
+    for (var i = 0; i < previous.length; i++) {
+      if (previous[i] != frame.data[i]) return false;
+    }
+    return true;
+  }
+
+  void remember(CapturedFrame frame) {
+    _lastSentData = frame.data;
+    _lastSentCursorX = frame.cursorX;
+    _lastSentCursorY = frame.cursorY;
+    idleRun = 0;
+  }
+
+  /// Forgets the last frame, so the next capture is always sent.
+  ///
+  /// Called when the stream's shape changes. After a reconfigure the phone is
+  /// expecting a different size or a different display, and a frame withheld
+  /// because it matched the *old* one would leave it showing the previous
+  /// monitor until something on that monitor happened to move.
+  void forgetLastFrame() {
+    _lastSentData = null;
+    _lastSentCursorX = null;
+    _lastSentCursorY = null;
+    idleRun = 0;
+  }
 
   /// Wall time the current tick began, for pacing the next one.
   ///
@@ -2543,6 +2662,7 @@ final class _ActiveScreenStream {
   }
 
   void configure(ScreenConfigure update) {
+    forgetLastFrame();
     if (update.monitorId != null) monitorId = update.monitorId!;
     if (update.maxWidth != null) maxWidth = update.maxWidth!;
     if (update.maxHeight != null) maxHeight = update.maxHeight!;

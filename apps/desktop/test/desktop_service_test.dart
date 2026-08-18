@@ -25,6 +25,10 @@ final class ControllableScreenCaptureBackend implements ScreenCaptureBackend {
   Completer<CapturedFrame?>? pendingFrame;
   int captureCallCount = 0;
 
+  /// Frames to hand out in order, for tests that care what changes between
+  /// one capture and the next. The last entry repeats once exhausted.
+  List<CapturedFrame>? script;
+
   /// What the service actually asked for on the most recent capture.
   ///
   /// Recorded rather than ignored because the stream's parameters reaching the
@@ -57,10 +61,21 @@ final class ControllableScreenCaptureBackend implements ScreenCaptureBackend {
     if (pendingFrame != null) {
       return pendingFrame!.future;
     }
+    final scripted = script;
+    if (scripted != null && scripted.isNotEmpty) {
+      final index = captureCallCount - 1;
+      return scripted[index < scripted.length ? index : scripted.length - 1];
+    }
+    // Distinct bytes per capture by default, standing in for a desk where
+    // something is happening. Identical frames are now withheld, so a fake
+    // that returned a constant would silently turn every test that counts
+    // sent frames into a test of the deduplicator.
     return CapturedFrame(
       width: 1920,
       height: 1080,
-      data: Uint8List.fromList(<int>[0xFF, 0xD8, 0xFF, 0xD9]),
+      data: Uint8List.fromList(
+        <int>[0xFF, 0xD8, captureCallCount & 0xFF, 0xFF, 0xD9],
+      ),
     );
   }
 
@@ -422,6 +437,7 @@ void main() {
       );
 
       expect(service.isStreamingScreen(pair.session.peerId), isTrue);
+      service.pauseScreenCaptureLoop(pair.session.peerId);
 
       // Frame 1: simulate in-flight capture using pending completer
       final completer1 = Completer<CapturedFrame?>();
@@ -597,6 +613,187 @@ void main() {
         completes,
       );
       expect(service.screenViewers, isEmpty);
+
+      await pair.client.disconnect();
+      await pair.server.stop();
+      await service.stop();
+    });
+  });
+  group('a desk that is not moving', () {
+    /// Builds a service already streaming to a connected peer.
+    Future<
+        (
+          DesktopService,
+          ({
+            RemoteLinkServer server,
+            RemoteLinkClient client,
+            ServerSession session,
+            DeviceIdentity clientIdentity,
+          }),
+          ControllableScreenCaptureBackend,
+        )> streamingService({required List<CapturedFrame> frames}) async {
+      final captureBackend = ControllableScreenCaptureBackend(isAvailable: true)
+        ..script = frames;
+      final pair = await _createTestServerClientPair();
+
+      final trustStore = InMemoryTrustStore();
+      await trustStore.upsert(
+        TrustedPeer(
+          id: pair.clientIdentity.id,
+          publicKey: pair.clientIdentity.publicKey,
+          name: 'Pixel 8 Pro',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: PermissionTier.standard.wireValue,
+        ),
+      );
+
+      final service = DesktopService(
+        identity: await DeviceIdentity.generate(),
+        trustStore: trustStore,
+        deviceName: 'Test Computer',
+        appVersion: '0.1.0',
+        clock: SystemClock(),
+        input: const UnsupportedInputBackend('test'),
+        clipboardBackend: const UnsupportedClipboardBackend(),
+        media: const UnsupportedMediaBackend(),
+        brightness: const UnsupportedBrightnessBackend('test'),
+        systemInfo: const UnsupportedSystemInfoBackend('test'),
+        networkAdapters: const UnsupportedNetworkAdapterBackend('test'),
+        screenCapture: captureBackend,
+      );
+
+      await service.registerSessionForTesting(pair.session);
+      await service.handleMessageForTesting(
+        pair.session,
+        const ScreenStreamStart(
+          targetFps: 30,
+          codec: ScreenCodec.jpeg,
+          maxWidth: 1280,
+          maxHeight: 720,
+        ),
+      );
+      // Silence the automatic loop: these tests count frames, and a loop
+      // rescheduling itself in real time would contribute ticks of its own to
+      // every count below.
+      service.pauseScreenCaptureLoop(pair.session.peerId);
+
+      return (service, pair, captureBackend);
+    }
+
+    CapturedFrame frame(List<int> bytes, {double? cursorX, double? cursorY}) =>
+        CapturedFrame(
+          width: 1280,
+          height: 720,
+          data: Uint8List.fromList(bytes),
+          cursorX: cursorX,
+          cursorY: cursorY,
+        );
+
+    test('is not sent over and over', () async {
+      // A still desk used to cost exactly as much bandwidth as a moving one:
+      // a fresh full JPEG, thirty times a second, saying nothing.
+      final still = <int>[0xFF, 0xD8, 0x01, 0xFF, 0xD9];
+      final (service, pair, _) = await streamingService(
+        frames: <CapturedFrame>[frame(still), frame(still), frame(still)],
+      );
+      final peerId = pair.session.peerId;
+
+      for (var i = 0; i < 3; i++) {
+        await service.screenCaptureTick(peerId);
+      }
+
+      expect(
+        service.screenStreamCapturedCount(peerId),
+        1,
+        reason: 'the same picture was sent more than once',
+      );
+      expect(service.screenStreamUnchangedCount(peerId), 2);
+
+      await pair.client.disconnect();
+      await pair.server.stop();
+      await service.stop();
+    });
+
+    test('sends again the moment anything changes', () async {
+      final (service, pair, _) = await streamingService(
+        frames: <CapturedFrame>[
+          frame(<int>[0xFF, 0xD8, 0x01, 0xFF, 0xD9]),
+          frame(<int>[0xFF, 0xD8, 0x01, 0xFF, 0xD9]),
+          frame(<int>[0xFF, 0xD8, 0x02, 0xFF, 0xD9]),
+        ],
+      );
+      final peerId = pair.session.peerId;
+
+      for (var i = 0; i < 3; i++) {
+        await service.screenCaptureTick(peerId);
+      }
+
+      expect(service.screenStreamCapturedCount(peerId), 2);
+      expect(service.screenStreamUnchangedCount(peerId), 1);
+
+      await pair.client.disconnect();
+      await pair.server.stop();
+      await service.stop();
+    });
+
+    test('still sends when only the cursor moved', () async {
+      // The trap. The cursor is not in the picture — it travels as its own
+      // fields — so a pointer crossing a still desktop produces byte-identical
+      // image data. Comparing only the image freezes the drawn cursor exactly
+      // while the user is moving it, which is the one thing on screen they are
+      // certain to be watching.
+      const identicalPixels = <int>[0xFF, 0xD8, 0x01, 0xFF, 0xD9];
+      final (service, pair, _) = await streamingService(
+        frames: <CapturedFrame>[
+          frame(identicalPixels, cursorX: 0.10, cursorY: 0.10),
+          frame(identicalPixels, cursorX: 0.50, cursorY: 0.40),
+          frame(identicalPixels, cursorX: 0.90, cursorY: 0.70),
+        ],
+      );
+      final peerId = pair.session.peerId;
+
+      for (var i = 0; i < 3; i++) {
+        await service.screenCaptureTick(peerId);
+      }
+
+      expect(
+        service.screenStreamCapturedCount(peerId),
+        3,
+        reason: 'the pointer moved and the phone was not told',
+      );
+      expect(service.screenStreamUnchangedCount(peerId), 0);
+
+      await pair.client.disconnect();
+      await pair.server.stop();
+      await service.stop();
+    });
+
+    test('sends the first frame after the stream is reconfigured', () async {
+      // After a reconfigure the phone expects a different size or a different
+      // display. A frame withheld for matching the *old* one would leave it on
+      // the previous monitor until something there happened to move.
+      const same = <int>[0xFF, 0xD8, 0x01, 0xFF, 0xD9];
+      final (service, pair, _) = await streamingService(
+        frames: <CapturedFrame>[frame(same), frame(same), frame(same)],
+      );
+      final peerId = pair.session.peerId;
+
+      await service.screenCaptureTick(peerId);
+      await service.screenCaptureTick(peerId);
+      expect(service.screenStreamCapturedCount(peerId), 1);
+
+      await service.handleMessageForTesting(
+        pair.session,
+        const ScreenConfigure(monitorId: 3),
+      );
+      await service.screenCaptureTick(peerId);
+
+      expect(
+        service.screenStreamCapturedCount(peerId),
+        2,
+        reason: 'the phone switched displays and was sent nothing',
+      );
 
       await pair.client.disconnect();
       await pair.server.stop();
