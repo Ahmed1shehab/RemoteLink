@@ -97,7 +97,7 @@ void main() {
 
       // Section 6: ABOUT
       expect(find.text('About'), findsOneWidget);
-      expect(find.text('RemoteLink Mobile'), findsOneWidget);
+      expect(find.text('Remote Link'), findsOneWidget);
       expect(find.text('Version 0.1.0'), findsOneWidget);
       expect(find.text('Licenses'), findsOneWidget);
 

@@ -28,7 +28,7 @@ const fakeDiagnostics = DiagnosticsInfo(
       name: 'Input injection',
       isAvailable: false,
       unavailableReason:
-          'RemoteLink needs Accessibility permission. Enable it in System Settings.',
+          'Remote Link needs Accessibility permission. Enable it in System Settings.',
     ),
     clipboard: BackendDiagnostic(
       name: 'Clipboard sync',

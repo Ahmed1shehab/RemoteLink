@@ -74,9 +74,9 @@ final class MacosInputBackend implements InputBackend {
       // app commonly keeps seeing `false` after the toggle is switched on —
       // and without saying so, the user flips it, sees no change, and
       // reasonably concludes the app is broken.
-      return 'RemoteLink needs Accessibility permission. Enable it in System '
+      return 'Remote Link needs Accessibility permission. Enable it in System '
           'Settings › Privacy & Security › Accessibility, then quit and '
-          'reopen RemoteLink — macOS only re-checks at launch.';
+          'reopen Remote Link — macOS only re-checks at launch.';
     }
     return null;
   }

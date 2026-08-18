@@ -239,7 +239,8 @@ Uint8List _chunk(String type, Uint8List data) {
     out[4 + i] = type.codeUnitAt(i);
   }
   out.setRange(8, 8 + data.length, data);
-  view.setUint32(8 + data.length, crc32(Uint8List.sublistView(out, 4, 8 + data.length)));
+  view.setUint32(
+      8 + data.length, crc32(Uint8List.sublistView(out, 4, 8 + data.length)));
   return out;
 }
 

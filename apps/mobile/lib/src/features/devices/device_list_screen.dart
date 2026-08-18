@@ -8,6 +8,7 @@ import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/brand.dart';
 import '../../app/providers.dart';
 import '../control/control_screen.dart';
 import '../pairing/pairing_screen.dart';
@@ -180,6 +181,13 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        // The mark rather than a back arrow: this is the first screen, so the
+        // leading slot is empty, and it is the only place in the phone app that
+        // says which app you are in once the launch screen has gone.
+        leading: const Padding(
+          padding: EdgeInsets.only(left: 12),
+          child: Center(child: BrandMark(size: 28)),
+        ),
         title: const Text('Computers'),
         actions: <Widget>[
           IconButton(

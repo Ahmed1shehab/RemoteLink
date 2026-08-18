@@ -21,11 +21,20 @@ final class DesktopPreferences {
   /// A damaged file is treated as an absent one rather than as a failure to
   /// start: a corrupt settings file must never be the reason a service the user
   /// depends on refuses to come up. It is logged, and the defaults apply.
-  static Future<DesktopPreferences> open(File file) async {
+  ///
+  /// Synchronous, unlike the write. The document is a few dozen bytes read once
+  /// during startup, so the await buys nothing measurable — and it costs
+  /// something real: awaited file I/O inside a widget test deadlocks, because
+  /// `flutter_test` runs on a fake clock that never advances the real event
+  /// loop. A settings screen that cannot be tested is worse than a startup that
+  /// blocks for a microsecond.
+  static DesktopPreferences open(File file) {
     final log = Log.scoped('desktop.preferences');
-    if (!file.existsSync()) return DesktopPreferences._(file, <String, Object?>{});
+    if (!file.existsSync()) {
+      return DesktopPreferences._(file, <String, Object?>{});
+    }
     try {
-      final decoded = jsonDecode(await file.readAsString());
+      final decoded = jsonDecode(file.readAsStringSync());
       if (decoded is! Map<String, Object?>) {
         throw const FormatException('settings file is not an object');
       }

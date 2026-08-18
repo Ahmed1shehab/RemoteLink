@@ -300,7 +300,7 @@ void main() {
 
     expect(find.text('Keep history on this phone'), findsOneWidget);
     expect(
-      find.textContaining('disappears when you close RemoteLink'),
+      find.textContaining('disappears when you close Remote Link'),
       findsOneWidget,
       reason: 'the user must be able to tell where this list lives',
     );

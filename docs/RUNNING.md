@@ -1,4 +1,4 @@
-# Running and testing RemoteLink
+# Running and testing Remote Link
 
 Read the first section before you spend time on simulators. The order matters.
 
@@ -233,3 +233,31 @@ copied from a password manager is deliberately not mirrored.
 Isolation blocks synthetic input from an unelevated process into an elevated
 one. This is Windows working correctly and cannot be worked around from user
 space.
+
+---
+
+## Regenerating the icons
+
+Every app icon, the menu-bar and notification-area icons, the Android and iOS
+launch screens, and the logo bundled into both apps are generated from one file:
+`assets/brand/logo.png`.
+
+```bash
+dart run tool/brand/bin/brand.dart
+```
+
+That writes forty-four files across four platforms. Do not edit any of them by
+hand — replace the master artwork and run the generator, or the next person to
+run it silently reverts your change.
+
+The rules the generator applies, and why, are in
+[`tool/brand/bin/brand.dart`](../tool/brand/bin/brand.dart): iOS and Android get
+a full-bleed crop because they mask their own corners, macOS keeps the tile's
+shape and its Dock margin, and the macOS menu bar gets an alpha mask because a
+template image ignores colour entirely.
+
+To check the menu-bar mask without a Mac, print it as text:
+
+```bash
+dart run tool/brand/tool/preview_tray.dart
+```

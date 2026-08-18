@@ -23,6 +23,15 @@ void main() {
 
   tearDown(() => directory.deleteSync(recursive: true));
 
+  /// Puts an answer in the settings file without going near the event loop.
+  ///
+  /// Writing it through [DesktopPreferences.setBoolean] would be more faithful
+  /// and would also hang: the write is real asynchronous file I/O, and a widget
+  /// test's fake clock never advances it. The write path is exercised in
+  /// `start_at_login_test.dart`, which runs without one.
+  void seedStartAtLogin({required bool value}) =>
+      settingsFile.writeAsStringSync('{"startAtLogin": $value}');
+
   /// Pumps the settings screen against a real preferences file in a temporary
   /// directory, and a login item that registers itself somewhere harmless.
   ///
@@ -30,7 +39,7 @@ void main() {
   /// that a switch the user moves is still moved when they come back, and a
   /// fake store would agree with itself no matter what the real one did.
   Future<ProviderContainer> pumpSettings(WidgetTester tester) async {
-    final preferences = await DesktopPreferences.open(settingsFile);
+    final preferences = DesktopPreferences.open(settingsFile);
     final container = ProviderContainer(
       overrides: <Override>[
         desktopPreferencesProvider.overrideWith((ref) async => preferences),
@@ -55,24 +64,6 @@ void main() {
     return container;
   }
 
-  /// Lets the notifier's real file write and `launchctl`-free registration
-  /// finish.
-  ///
-  /// `pump` alone will not do it: the switch's `onChanged` is fire-and-forget by
-  /// design — a settings toggle that awaits a disk write before it moves feels
-  /// broken — so the work continues on the real event loop, which the widget
-  /// tester's fake clock does not advance. This is the same shape as the helper
-  /// in `desktop_service_test.dart`, for the same reason.
-  Future<void> settleIo(WidgetTester tester) async {
-    await tester.pump();
-    await tester.runAsync(() async {
-      for (var i = 0; i < 20; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 5));
-      }
-    });
-    await tester.pump();
-  }
-
   testWidgets('names the product and its version', (tester) async {
     await pumpSettings(tester);
 
@@ -91,64 +82,33 @@ void main() {
     expect(toggle.value, isTrue);
   });
 
-  testWidgets('turning it off is written down, not just drawn', (tester) async {
-    // The bug this guards: registration used to be unconditional at startup, so
-    // the switch moved, looked right, and was undone by the next launch.
-    await pumpSettings(tester);
+  testWidgets('moving the switch is reported straight away', (tester) async {
+    // Only the state the screen reads back, not the disk. The write is real
+    // file I/O on the real event loop, and a widget test runs on a fake clock
+    // that never advances it — `start_at_login_test.dart` covers persistence
+    // and the login item where there is no fake clock to deadlock against.
+    final container = await pumpSettings(tester);
+    expect(container.read(startAtLoginProvider), isTrue);
 
-    await tester.tap(find.widgetWithText(SwitchListTile, 'Start when I log in'));
-    await settleIo(tester);
+    await tester
+        .tap(find.widgetWithText(SwitchListTile, 'Start when I log in'));
+    await tester.pump();
 
-    final reopened = await DesktopPreferences.open(settingsFile);
-    expect(
-      reopened.boolean(PreferenceKeys.startAtLogin, orElse: true),
-      isFalse,
+    expect(container.read(startAtLoginProvider), isFalse);
+    final toggle = tester.widget<SwitchListTile>(
+      find.widgetWithText(SwitchListTile, 'Start when I log in'),
     );
-  });
-
-  testWidgets('turning it off removes the login item', (tester) async {
-    final autoStart = AutoStart(
-      label: 'com.example.test',
-      executablePath: '/bin/true',
-      launchAgentsDirectory: launchAgents,
-    );
-    await autoStart.enable();
-    // Only macOS registers through a file; elsewhere there is nothing here to
-    // remove and the assertion below would be testing the temporary directory.
-    if (!Platform.isMacOS) return;
-    expect(await autoStart.isEnabled(), isTrue);
-
-    await pumpSettings(tester);
-    await tester.tap(find.widgetWithText(SwitchListTile, 'Start when I log in'));
-    await settleIo(tester);
-
-    expect(await autoStart.isEnabled(), isFalse);
-  });
-
-  testWidgets('turning it back on registers again', (tester) async {
-    if (!Platform.isMacOS) return;
-    final preferences = await DesktopPreferences.open(settingsFile);
-    await preferences.setBoolean(PreferenceKeys.startAtLogin, value: false);
-
-    await pumpSettings(tester);
-    await tester.tap(find.widgetWithText(SwitchListTile, 'Start when I log in'));
-    await settleIo(tester);
-
-    final autoStart = AutoStart(
-      label: 'com.example.test',
-      executablePath: '/bin/true',
-      launchAgentsDirectory: launchAgents,
-    );
-    expect(await autoStart.isEnabled(), isTrue);
+    expect(toggle.value, isFalse,
+        reason: 'the switch must move under the '
+            'finger, not after a round trip to launchctl');
   });
 
   testWidgets('the switch shows the stored answer, not the default',
       (tester) async {
-    final preferences = await DesktopPreferences.open(settingsFile);
-    await preferences.setBoolean(PreferenceKeys.startAtLogin, value: false);
+    seedStartAtLogin(value: false);
 
     await pumpSettings(tester);
-    await settleIo(tester);
+    await tester.pump();
 
     final toggle = tester.widget<SwitchListTile>(
       find.widgetWithText(SwitchListTile, 'Start when I log in'),

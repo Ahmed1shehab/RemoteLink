@@ -78,9 +78,9 @@ final class MacosScreenCaptureBackend implements ScreenCaptureBackend {
   String? get unavailableReason {
     if (_disposed) return 'backend disposed';
     if (!checkPermission()) {
-      return 'RemoteLink needs Screen Recording permission. Enable it in System '
+      return 'Remote Link needs Screen Recording permission. Enable it in System '
           'Settings › Privacy & Security › Screen Recording, then restart '
-          'RemoteLink.';
+          'Remote Link.';
     }
     return null;
   }

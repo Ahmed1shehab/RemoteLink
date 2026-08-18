@@ -8,7 +8,8 @@ import 'package:brand/brand.dart';
 /// shows nothing at all, which makes "did the mask come out right" impossible
 /// to answer by looking at the file. This answers it.
 void main(List<String> arguments) {
-  final path = arguments.isEmpty ? 'apps/desktop/assets/tray/icon.png' : arguments.first;
+  final path =
+      arguments.isEmpty ? 'apps/desktop/assets/tray/icon.png' : arguments.first;
   final icon = decodePng(File(path).readAsBytesSync());
   final buffer = StringBuffer();
   for (var y = 0; y < icon.height; y++) {

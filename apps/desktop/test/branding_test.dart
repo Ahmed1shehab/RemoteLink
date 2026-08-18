@@ -91,8 +91,7 @@ void main() {
     test('exist for every size the asset catalogue names', () {
       // The catalogue is what Xcode reads; a missing file is a build failure
       // on a machine that is not this one, which is the worst place to find it.
-      const directory =
-          'macos/Runner/Assets.xcassets/AppIcon.appiconset';
+      const directory = 'macos/Runner/Assets.xcassets/AppIcon.appiconset';
       for (final size in <int>[16, 32, 64, 128, 256, 512, 1024]) {
         final file = File('$directory/app_icon_$size.png');
         expect(file.existsSync(), isTrue, reason: file.path);

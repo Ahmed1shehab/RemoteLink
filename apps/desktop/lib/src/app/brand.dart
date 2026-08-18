@@ -8,14 +8,13 @@ import 'package:flutter/material.dart';
 /// shipping side by side.
 const String kProductName = 'Remote Link';
 
-
 /// The version shown in Settings.
 ///
 /// A constant rather than `package_info_plus`, which is a plugin, a platform
 /// channel and a `MissingPluginException` risk in exchange for a string that is
 /// known at compile time. It can drift from `pubspec.yaml`, so a test asserts
 /// the two agree — which is the cheap half of what the plugin was buying.
-const String kAppVersion = '0.1.0';
+const String kAppVersion = '1.0.0';
 
 /// Where the artwork lives in the bundle.
 const String kLogoAsset = 'assets/brand/logo.png';

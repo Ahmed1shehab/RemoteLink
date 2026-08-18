@@ -113,8 +113,7 @@ void main() {
     });
 
     test('leaves the colours alone', () {
-      final rounded =
-          Raster.filled(8, 8, 10, 20, 30, 255).withRoundedCorners();
+      final rounded = Raster.filled(8, 8, 10, 20, 30, 255).withRoundedCorners();
       expect(rounded.pixelAt(4, 4), (10, 20, 30, 255));
     });
   });
@@ -143,8 +142,8 @@ void main() {
       // What the menu bar needs: macOS throws the colours away and paints the
       // alpha itself. Handing it the tile as it stands paints a rectangle,
       // which is exactly what shipped.
-      final mask = _tileOnWhitePage(side: 40, margin: 0, markInset: 14)
-          .asTemplateMask();
+      final mask =
+          _tileOnWhitePage(side: 40, margin: 0, markInset: 14).asTemplateMask();
 
       expect(mask.pixelAt(20, 20).$4, 255, reason: 'the mark');
       expect(mask.pixelAt(2, 2).$4, 0, reason: 'the tile behind it');

@@ -72,7 +72,7 @@ const bool kReleaseBuild = bool.fromEnvironment('dart.vm.product');
 Future<void> _configureAutoLaunch() async {
   final directory = await desktopAppDirectory();
   final preferences =
-      await DesktopPreferences.open(File('${directory.path}/settings.json'));
+      DesktopPreferences.open(File('${directory.path}/settings.json'));
   final autoStart = AutoStart(
     label: kAutoStartLabel,
     executablePath: Platform.resolvedExecutable,

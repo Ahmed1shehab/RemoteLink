@@ -163,8 +163,7 @@ void main(List<String> arguments) {
   write(
     'apps/desktop/assets/tray/icon.ico',
     encodeIco(<Raster>[
-      for (final size in <int>[16, 20, 24, 32])
-        trayArtwork.resized(size, size),
+      for (final size in <int>[16, 20, 24, 32]) trayArtwork.resized(size, size),
     ]),
   );
 

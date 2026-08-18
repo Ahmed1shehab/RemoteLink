@@ -1,4 +1,8 @@
-# RemoteLink
+# Remote Link
+
+<sub>Written `RemoteLink` in identifiers, package names and the on-disk storage
+directory — those are names the OS and existing installations already hold, and
+renaming them would orphan every paired device's trust store.</sub>
 
 Control a Windows or macOS computer from an Android or iOS phone over local
 Wi-Fi. No cloud, no account, no internet, no typing in IP addresses.

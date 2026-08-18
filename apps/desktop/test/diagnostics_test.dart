@@ -51,7 +51,7 @@ void main() {
     expect(find.text('Media control'), findsOneWidget);
     expect(
       find.text(
-        'RemoteLink needs Accessibility permission. Enable it in System Settings.',
+        'Remote Link needs Accessibility permission. Enable it in System Settings.',
       ),
       findsOneWidget,
     );
@@ -104,7 +104,7 @@ void main() {
     expect(find.text('192.168.1.100:41234'), findsOneWidget);
     expect(
       find.text(
-        'RemoteLink needs Accessibility permission. Enable it in System Settings.',
+        'Remote Link needs Accessibility permission. Enable it in System Settings.',
       ),
       findsOneWidget,
     );

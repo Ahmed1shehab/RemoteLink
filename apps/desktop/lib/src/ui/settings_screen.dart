@@ -95,9 +95,8 @@ class _StartupSection extends ConsumerWidget {
                     '$kProductName yourself.',
           ),
           secondary: const Icon(Icons.play_circle_outline),
-          onChanged: (value) => ref
-              .read(startAtLoginProvider.notifier)
-              .set(enabled: value),
+          onChanged: (value) =>
+              ref.read(startAtLoginProvider.notifier).set(enabled: value),
         ),
       ],
     );
@@ -159,7 +158,8 @@ class _ThisComputerSection extends ConsumerWidget {
     );
   }
 
-  Future<void> _rename(BuildContext context, WidgetRef ref, String current) async {
+  Future<void> _rename(
+      BuildContext context, WidgetRef ref, String current) async {
     final chosen = await showDialog<String>(
       context: context,
       builder: (context) => _RenameComputerDialog(current: current),
