@@ -131,7 +131,7 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
     final buffer = StringBuffer();
     final now = DateTime.now().toUtc().toIso8601String();
 
-    buffer.writeln('=== RemoteLink Desktop Diagnostics ===');
+    buffer.writeln('=== Remote Link Desktop Diagnostics ===');
     buffer.writeln('Generated: $now');
     buffer.writeln();
 

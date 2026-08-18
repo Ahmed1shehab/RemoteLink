@@ -8,6 +8,7 @@ import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/brand.dart';
 import '../../app/providers.dart';
 import '../devices/bonjour_discovery.dart';
 
@@ -16,8 +17,6 @@ import '../devices/bonjour_discovery.dart';
 /// viewing app licenses.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
-
-  static const String appVersion = '0.1.0';
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -904,7 +903,7 @@ class _ClipboardSection extends ConsumerWidget {
                       'Why is phone-to-computer manual on iOS?\n'
                       'Reading the pasteboard on iOS shows a system “pasted from” '
                       'banner every time an app reads your clipboard. To prevent '
-                      'constant banner alerts, RemoteLink does not poll continuously '
+                      'constant banner alerts, Remote Link does not poll continuously '
                       '— it only reads the clipboard when you switch to the app '
                       'or press the Send button.',
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -989,7 +988,7 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
             .toList();
 
     final buffer = StringBuffer()
-      ..writeln('=== RemoteLink Mobile Diagnostics Logs ===')
+      ..writeln('=== Remote Link Mobile Diagnostics Logs ===')
       ..writeln('Generated: ${DateTime.now().toUtc().toIso8601String()}')
       ..writeln('Total records: ${filtered.length}')
       ..writeln();
@@ -1196,13 +1195,14 @@ class _AboutSection extends StatelessWidget {
             const SizedBox(height: 12),
             ListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('RemoteLink Mobile'),
-              subtitle: const Text('Version ${SettingsScreen.appVersion}'),
+              leading: const BrandMark(size: 40),
+              title: const Text(kProductName),
+              subtitle: const Text('Version $kAppVersion'),
               trailing: OutlinedButton(
                 onPressed: () => showLicensePage(
                   context: context,
-                  applicationName: 'RemoteLink',
-                  applicationVersion: SettingsScreen.appVersion,
+                  applicationName: kProductName,
+                  applicationVersion: kAppVersion,
                 ),
                 child: const Text('Licenses'),
               ),

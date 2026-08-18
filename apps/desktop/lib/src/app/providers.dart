@@ -10,7 +10,9 @@ import 'package:rl_native/rl_native.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../domain/auto_start.dart';
 import '../domain/clipboard_history_store.dart';
+import '../domain/desktop_preferences.dart';
 import '../domain/desktop_service.dart';
 import '../domain/file_transfer_store.dart';
 import '../domain/transfer_model.dart';
@@ -27,14 +29,86 @@ import '../domain/transfer_model.dart';
 /// tested without any state-management library at all.
 
 /// Where identity, trust, and settings are stored.
-final appDirectoryProvider = FutureProvider<Directory>((ref) async {
+final appDirectoryProvider =
+    FutureProvider<Directory>((ref) => desktopAppDirectory());
+
+/// The same directory, reachable before there is a [ProviderScope].
+///
+/// `main` has to settle the login item before the first frame — a service that
+/// waits for someone to open a settings screen before deciding whether it
+/// starts at login has already missed the only moment that matters. It is the
+/// literal `RemoteLink` and not the product's new spelling because it is a path
+/// on disk: renaming it would leave every existing installation's identity key,
+/// trust store and clipboard history behind in a folder nothing reads.
+Future<Directory> desktopAppDirectory() async {
   final base = await getApplicationSupportDirectory();
   final directory = Directory('${base.path}/RemoteLink');
   if (!directory.existsSync()) {
     await directory.create(recursive: true);
   }
   return directory;
+}
+
+/// The user's own choices about the app: start at login, and whatever follows.
+final desktopPreferencesProvider =
+    FutureProvider<DesktopPreferences>((ref) async {
+  final directory = await ref.watch(appDirectoryProvider.future);
+  return DesktopPreferences.open(File('${directory.path}/settings.json'));
 });
+
+/// The login-item registration, as one object the UI and tests share.
+///
+/// A provider rather than a constructor call inside the notifier so a widget
+/// test can exercise the switch without registering a real login item on the
+/// machine running the suite.
+final autoStartProvider = Provider<AutoStart>(
+  (ref) => AutoStart(
+    label: kAutoStartLabel,
+    executablePath: Platform.resolvedExecutable,
+  ),
+);
+
+/// Whether the companion is registered to start when the user logs in.
+///
+/// The state is the user's stored answer rather than a live reading of the
+/// login item, and the two are reconciled at launch. Reading the OS on every
+/// build would be a `launchctl` call or a registry query per frame, and would
+/// also make the switch flick back on its own if a managed device quietly
+/// refused the registration — which is a thing to report, not to model as the
+/// user having changed their mind.
+final startAtLoginProvider =
+    StateNotifierProvider<StartAtLoginNotifier, bool>(StartAtLoginNotifier.new);
+
+final class StartAtLoginNotifier extends StateNotifier<bool> {
+  StartAtLoginNotifier(this._ref) : super(true) {
+    unawaited(_load());
+  }
+
+  final Ref _ref;
+
+  Future<void> _load() async {
+    final preferences = await _ref.read(desktopPreferencesProvider.future);
+    if (!mounted) return;
+    state = preferences.boolean(PreferenceKeys.startAtLogin, orElse: true);
+  }
+
+  Future<void> set({required bool enabled}) async {
+    // Optimistic, so the switch moves under the finger rather than after a
+    // round trip to `launchctl`.
+    state = enabled;
+    final preferences = await _ref.read(desktopPreferencesProvider.future);
+    await preferences.setBoolean(
+      PreferenceKeys.startAtLogin,
+      value: enabled,
+    );
+    final autoStart = _ref.read(autoStartProvider);
+    if (enabled) {
+      await autoStart.enable();
+    } else {
+      await autoStart.disable();
+    }
+  }
+}
 
 /// This computer's long-term identity, generated once and reused forever.
 ///

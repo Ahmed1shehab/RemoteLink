@@ -109,7 +109,7 @@ class _PersistenceRow extends ConsumerWidget {
               isPersistent
                   ? 'Kept on this computer, encrypted. Content marked '
                       'confidential by a password manager is never recorded.'
-                  : 'Kept in memory only — this list is gone when RemoteLink '
+                  : 'Kept in memory only — this list is gone when Remote Link '
                       'quits. Nothing is written to disk.',
               style: theme.textTheme.bodySmall,
             ),

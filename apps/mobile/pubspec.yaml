@@ -52,3 +52,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    # Listing the directory picks up the 2.0x and 3.0x variants beside it.
+    - assets/brand/

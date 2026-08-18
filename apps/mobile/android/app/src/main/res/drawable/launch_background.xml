@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
+<!-- The first frame of the app, drawn by Android before the Flutter engine has
+     started. Without the mark it is a blank page for as long as a cold start
+     takes, which on a mid-range phone is long enough to look like nothing
+     happened. This copy is the pre-Lollipop fallback, which cannot read the theme background, so the colour is named outright. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@android:color/white" />
 
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
+    <item>
         <bitmap
             android:gravity="center"
             android:src="@mipmap/launch_image" />
-    </item> -->
+    </item>
 </layer-list>

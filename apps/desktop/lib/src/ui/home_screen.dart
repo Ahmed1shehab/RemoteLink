@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
+import '../app/brand.dart';
 import '../app/desktop_ui.dart';
 import '../app/motion.dart';
 import '../app/providers.dart';
@@ -17,6 +18,7 @@ import '../domain/transfer_model.dart';
 import 'clipboard_history_panel.dart';
 import 'diagnostics_screen.dart';
 import 'pairing_code.dart';
+import 'settings_screen.dart';
 
 /// The desktop's only window: status, connected devices, pairing, and file transfers.
 class HomeScreen extends ConsumerStatefulWidget {
@@ -69,7 +71,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     return Scaffold(
       body: status.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const BrandSplash(),
         error: (error, stack) => _StartupError(error: error),
         data: _buildBody,
       ),
@@ -149,7 +151,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     order: const NumericFocusOrder(1),
                     child: _PermissionBanner(
                       reason: screenCapture.reason ??
-                          'RemoteLink needs Screen Recording permission before it '
+                          'Remote Link needs Screen Recording permission before it '
                               'can share this screen.',
                       onOpenSettings: _openScreenRecordingSettings,
                       severity: _BannerSeverity.advisory,
@@ -194,7 +196,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     data: (list) => list.isEmpty
                         ? const _EmptyState(
                             message:
-                                'No devices connected. Open RemoteLink on your '
+                                'No devices connected. Open Remote Link on your '
                                 'phone — it should find this computer automatically.',
                           )
                         : Column(
@@ -248,7 +250,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         if (constraints.maxWidth < 800) {
           return Column(
             children: <Widget>[
-              DesktopCompactHeader(onDiagnostics: _openDiagnostics),
+              DesktopCompactHeader(
+                onDiagnostics: _openDiagnostics,
+                onSettings: _openSettings,
+              ),
               Expanded(child: content),
             ],
           );
@@ -283,6 +288,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   icon: Icons.monitor_heart_outlined,
                   label: 'Diagnostics',
                 ),
+                DesktopNavDestination(
+                  icon: Icons.settings_outlined,
+                  label: 'Settings',
+                ),
               ],
               onSelected: _selectSidebarDestination,
               statusLabel:
@@ -298,8 +307,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _selectSidebarDestination(int index) {
+    // The last two open a screen of their own rather than scrolling this one,
+    // so they deliberately leave the selected index alone: coming back from
+    // Settings should land where the user was, not on Settings' own section
+    // that does not exist.
     if (index == 5) {
       _openDiagnostics();
+      return;
+    }
+    if (index == 6) {
+      _openSettings();
       return;
     }
 
@@ -319,6 +336,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         duration: context.motion(const Duration(milliseconds: 300)),
         curve: Curves.easeOutCubic,
         alignment: 0.06,
+      ),
+    );
+  }
+
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => const SettingsScreen(),
       ),
     );
   }
@@ -1898,7 +1923,7 @@ class _StartupError extends StatelessWidget {
             const Icon(Icons.error_outline, size: 48),
             const SizedBox(height: 16),
             Text(
-              'RemoteLink could not start',
+              'Remote Link could not start',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),

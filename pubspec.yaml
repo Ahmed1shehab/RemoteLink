@@ -17,6 +17,7 @@ workspace:
   - packages/rl_native
   - apps/desktop
   - apps/mobile
+  - tool/brand
   - tool/latency_harness
 
 # Deliberately no dev_dependencies. Melos is used for its script runner only

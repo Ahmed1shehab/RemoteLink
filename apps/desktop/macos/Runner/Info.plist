@@ -27,7 +27,7 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>RemoteLink lets your phone find and control this computer over your local network.</string>
+	<string>Remote Link lets your phone find and control this computer over your local network.</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>

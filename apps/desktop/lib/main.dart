@@ -7,9 +7,11 @@ import 'package:rl_core/rl_core.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'src/app/brand.dart';
 import 'src/app/providers.dart';
 import 'src/app/theme.dart';
 import 'src/domain/auto_start.dart';
+import 'src/domain/desktop_preferences.dart';
 import 'src/ui/home_screen.dart';
 
 /// Entry point for the desktop companion.
@@ -34,7 +36,7 @@ Future<void> main() async {
       size: Size(1040, 720),
       minimumSize: Size(720, 540),
       center: true,
-      title: 'RemoteLink',
+      title: kProductName,
       titleBarStyle: TitleBarStyle.normal,
     ),
     () async {
@@ -68,10 +70,18 @@ const bool kReleaseBuild = bool.fromEnvironment('dart.vm.product');
 /// Starting minimised is the point: the user installed a service, and a window
 /// appearing at every login is the thing that makes people disable autostart.
 Future<void> _configureAutoLaunch() async {
-  await AutoStart(
-    label: 'com.example.remotelinkDesktop',
+  final directory = await desktopAppDirectory();
+  final preferences =
+      await DesktopPreferences.open(File('${directory.path}/settings.json'));
+  final autoStart = AutoStart(
+    label: kAutoStartLabel,
     executablePath: Platform.resolvedExecutable,
-  ).enable();
+  );
+  await reconcileAutoStart(
+    preferences: preferences,
+    enable: autoStart.enable,
+    disable: autoStart.disable,
+  );
 }
 
 /// True when launched by the login item rather than by the user.
@@ -89,7 +99,7 @@ class RemoteLinkDesktopApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'RemoteLink',
+        title: kProductName,
         debugShowCheckedModeBanner: false,
         theme: remoteLinkTheme(Brightness.light),
         darkTheme: remoteLinkTheme(Brightness.dark),
@@ -154,6 +164,7 @@ class _TrayHostState extends ConsumerState<_TrayHost> with WindowListener {
   /// simply does nothing when clicked.
   @override
   void onWindowClose() {
+    Log.scoped('desktop.window').info('close intercepted');
     unawaited(windowManager.hide());
   }
 
@@ -209,7 +220,7 @@ class TrayController with TrayListener {
       // icon inverts correctly in dark mode instead of staying black.
       isTemplate: Platform.isMacOS,
     );
-    await trayManager.setToolTip('RemoteLink');
+    await trayManager.setToolTip(kProductName);
     await rebuild(connectedCount: connectedCount);
     trayManager.addListener(this);
   }
@@ -227,14 +238,14 @@ class TrayController with TrayListener {
             disabled: true,
           ),
           MenuItem.separator(),
-          MenuItem(key: _keyShow, label: 'Open RemoteLink'),
+          MenuItem(key: _keyShow, label: 'Open $kProductName'),
           MenuItem.checkbox(
             key: _keyPairing,
             label: 'Allow new devices to pair',
             checked: _pairingEnabled,
           ),
           MenuItem.separator(),
-          MenuItem(key: _keyQuit, label: 'Quit RemoteLink'),
+          MenuItem(key: _keyQuit, label: 'Quit $kProductName'),
         ],
       ),
     );

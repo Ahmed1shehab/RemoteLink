@@ -59,3 +59,6 @@ flutter:
     # The tray icon is loaded by path at runtime, so it must be bundled. A
     # missing asset here is a launch-time crash, not a compile error.
     - assets/tray/
+    # Listing the directory picks up the 2.0x and 3.0x variants beside it, so a
+    # Retina desk gets the pixels it can show.
+    - assets/brand/

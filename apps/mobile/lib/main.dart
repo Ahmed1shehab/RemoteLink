@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 
+import 'src/app/brand.dart';
 import 'src/app/theme.dart';
 import 'src/features/devices/auto_connect.dart';
 import 'src/features/devices/device_list_screen.dart';
@@ -36,7 +37,7 @@ class RemoteLinkApp extends ConsumerWidget {
     ref.watch(connectionRetargetProvider);
 
     return MaterialApp(
-      title: 'RemoteLink',
+      title: kProductName,
       debugShowCheckedModeBanner: false,
       theme: remoteLinkTheme(Brightness.light),
       darkTheme: remoteLinkTheme(Brightness.dark),

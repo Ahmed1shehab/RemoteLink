@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
+import 'brand.dart';
 import 'motion.dart';
 
 @immutable
@@ -62,33 +63,14 @@ class DesktopSidebar extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Row(
                   children: <Widget>[
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: <Color>[
-                            scheme.primary,
-                            scheme.tertiary,
-                          ],
-                        ),
-                        borderRadius: BorderRadius.circular(13),
-                      ),
-                      child: const Icon(
-                        Icons.link_rounded,
-                        color: Colors.white,
-                        size: 22,
-                      ),
-                    ),
+                    const BrandMark(size: 40),
                     const SizedBox(width: 11),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           Text(
-                            'RemoteLink',
+                            kProductName,
                             style: Theme.of(context)
                                 .textTheme
                                 .titleMedium
@@ -228,10 +210,12 @@ class _DesktopNavButton extends StatelessWidget {
 class DesktopCompactHeader extends StatelessWidget {
   const DesktopCompactHeader({
     required this.onDiagnostics,
+    required this.onSettings,
     super.key,
   });
 
   final VoidCallback onDiagnostics;
+  final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -249,23 +233,19 @@ class DesktopCompactHeader extends StatelessWidget {
       ),
       child: Row(
         children: <Widget>[
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: scheme.primary,
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child:
-                const Icon(Icons.link_rounded, color: Colors.white, size: 19),
-          ),
+          const BrandMark(size: 34),
           const SizedBox(width: 10),
-          Text('RemoteLink', style: Theme.of(context).textTheme.titleMedium),
+          Text(kProductName, style: Theme.of(context).textTheme.titleMedium),
           const Spacer(),
           IconButton(
             onPressed: onDiagnostics,
             icon: const Icon(Icons.monitor_heart_outlined),
             tooltip: 'Diagnostics',
+          ),
+          IconButton(
+            onPressed: onSettings,
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
           ),
         ],
       ),

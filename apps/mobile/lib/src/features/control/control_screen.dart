@@ -384,7 +384,7 @@ class ClipboardHistoryList extends ConsumerWidget {
               snapshot.isPersistent
                   ? 'Encrypted and saved securely on this device.'
                   : 'Off — the list is kept in memory and disappears when you '
-                      'close RemoteLink.',
+                      'close Remote Link.',
             ),
             secondary: const Icon(Icons.lock_outline_rounded),
           ),

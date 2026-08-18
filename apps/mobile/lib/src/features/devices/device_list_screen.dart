@@ -570,7 +570,7 @@ class _ManualAddressDialogState extends State<_ManualAddressDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'RemoteLink on your computer shows its address under '
+              'Remote Link on your computer shows its address under '
               '“Discoverable on this network”.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
@@ -777,7 +777,7 @@ class _WakeDialog extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             'A sleeping computer cannot confirm it heard the packet, so '
-            'RemoteLink cannot tell you whether this worked.',
+            'Remote Link cannot tell you whether this worked.',
             style: textTheme.bodySmall,
           ),
         ],
@@ -963,13 +963,13 @@ class _Searching extends StatelessWidget {
                 'entirely.\n\nTap \u201cConnect by address\u201d and enter the '
                 'address shown on your computer. Everything else works exactly '
                 'the same.',
-            (true, true) => 'Make sure RemoteLink is running on your computer '
+            (true, true) => 'Make sure Remote Link is running on your computer '
                 'and both devices are on the same Wi-Fi network.',
             // Said plainly, because after this long the honest answer is that
             // searching is not going to work here and the user needs the other
             // route. Leaving the spinner up implies waiting will help.
             (true, false) =>
-              'Check that RemoteLink is running on your computer and that both '
+              'Check that Remote Link is running on your computer and that both '
                   'devices are on the same Wi-Fi.\n\nSome networks — guest '
                   'Wi-Fi in particular — block the traffic that finds '
                   'computers automatically. If yours does, tap \u201cConnect by '

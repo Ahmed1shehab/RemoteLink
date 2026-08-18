@@ -22,6 +22,9 @@ PURE_DART_PACKAGES=(
   # fake in its tests, and nothing noticed until an unrelated change happened to
   # run it by hand. Analysis covered it, tests did not.
   tool/latency_harness
+  # Same reasoning: the icon pipeline is a PNG codec, and a PNG codec that is
+  # never run against a test is a PNG codec that silently writes garbage.
+  tool/brand
 )
 
 FLUTTER_PACKAGES=(
