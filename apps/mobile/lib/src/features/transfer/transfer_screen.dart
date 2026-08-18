@@ -7,13 +7,15 @@ import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/modern_ui.dart';
+import '../../app/motion.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
 import 'file_picker.dart';
 import 'transfer_controller.dart';
 import 'transfer_model.dart';
 
-/// Send & receive file and text transfer tab for mobile.
+/// Send and receive media and file transfers on mobile.
 class TransferScreen extends ConsumerStatefulWidget {
   const TransferScreen({super.key});
 
@@ -22,9 +24,7 @@ class TransferScreen extends ConsumerStatefulWidget {
 }
 
 class _TransferScreenState extends ConsumerState<TransferScreen> {
-  int _selectedType = 0; // 0 = Text/URL, 1 = File, 2 = Media
-  final TextEditingController _textController = TextEditingController();
-  final TextEditingController _customNameController = TextEditingController();
+  int _selectedType = 0; // 0 = Media, 1 = File
 
   /// What the user chose in the picker, in the order they chose it.
   final List<PickedFile> _picked = <PickedFile>[];
@@ -34,13 +34,6 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
 
   String? _selectedTargetId;
   String? _statusError;
-
-  @override
-  void dispose() {
-    _textController.dispose();
-    _customNameController.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -101,8 +94,10 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
       });
     }
 
+    final scheme = Theme.of(context).colorScheme;
+
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
       children: <Widget>[
         if (transferState.pendingIncoming != null)
           _IncomingTransferBanner(
@@ -112,156 +107,186 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
             onDecline: () => controller
                 .declineIncomingTransfer(transferState.pendingIncoming!),
           ),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Send to device',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 12),
-                if (targets.isEmpty)
-                  Text(
-                    'No paired or discovered computers found.',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  )
-                else
-                  DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    initialValue: _selectedTargetId,
-                    decoration: const InputDecoration(
-                      labelText: 'Target device',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.computer),
+        AppSectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: scheme.primary.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    items: <DropdownMenuItem<String>>[
-                      for (final t in targets)
-                        DropdownMenuItem<String>(
-                          value: t.id.value,
-                          child: Text(
-                            '${t.name} ${t.isLive ? "(online)" : "(offline)"}',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: (val) => setState(() => _selectedTargetId = val),
+                    child: Icon(Icons.near_me_rounded, color: scheme.primary),
                   ),
-                const SizedBox(height: 16),
-                SegmentedButton<int>(
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Send to device',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Text(
+                          'Photos, videos, and files',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              if (targets.isEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: scheme.errorContainer,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    'No paired or discovered computers found.',
+                    style: TextStyle(color: scheme.onErrorContainer),
+                  ),
+                )
+              else
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  initialValue: _selectedTargetId,
+                  decoration: const InputDecoration(
+                    labelText: 'Send to',
+                    prefixIcon: Icon(Icons.computer_rounded),
+                  ),
+                  items: <DropdownMenuItem<String>>[
+                    for (final t in targets)
+                      DropdownMenuItem<String>(
+                        value: t.id.value,
+                        child: Row(
+                          children: <Widget>[
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: BoxDecoration(
+                                color: t.isLive
+                                    ? const Color(0xFF22A06B)
+                                    : scheme.outline,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 9),
+                            Expanded(
+                              child: Text(
+                                t.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                  onChanged: (val) => setState(() => _selectedTargetId = val),
+                ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<int>(
                   segments: const <ButtonSegment<int>>[
                     ButtonSegment<int>(
                       value: 0,
-                      label: Text('Text / URL'),
-                      icon: Icon(Icons.text_snippet_outlined),
+                      label: Text('Media'),
+                      icon: Icon(Icons.photo_library_outlined),
                     ),
                     ButtonSegment<int>(
                       value: 1,
                       label: Text('File'),
-                      icon: Icon(Icons.insert_drive_file_outlined),
-                    ),
-                    ButtonSegment<int>(
-                      value: 2,
-                      label: Text('Media'),
-                      icon: Icon(Icons.perm_media_outlined),
+                      icon: Icon(Icons.folder_copy_outlined),
                     ),
                   ],
                   selected: <int>{_selectedType},
-                  onSelectionChanged: (set) =>
-                      setState(() => _selectedType = set.first),
+                  onSelectionChanged: (set) => setState(() {
+                    _selectedType = set.first;
+                    _statusError = null;
+                  }),
                 ),
-                const SizedBox(height: 16),
-                if (_selectedType == 0) ...<Widget>[
-                  TextField(
-                    controller: _textController,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: 'Text, URL, or code snippet',
-                      hintText: 'Enter text to send directly to the computer…',
-                      border: OutlineInputBorder(),
+              ),
+              const SizedBox(height: 16),
+              AnimatedSwitcher(
+                duration: context.motion(const Duration(milliseconds: 220)),
+                child: _PickedFilesField(
+                  key: ValueKey<int>(_selectedType),
+                  picked: _picked,
+                  isMediaMode: _selectedType == 0,
+                  isPicking: _isPicking,
+                  onPick: _pick,
+                  onRemove: (file) => setState(() => _picked.remove(file)),
+                ),
+              ),
+              if (_statusError != null) ...<Widget>[
+                const SizedBox(height: 10),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Icon(Icons.error_outline_rounded,
+                        color: scheme.error, size: 18),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        _statusError!,
+                        style: TextStyle(color: scheme.error, fontSize: 13),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _customNameController,
-                    decoration: const InputDecoration(
-                      labelText: 'File name (optional)',
-                      hintText: 'snippet.txt',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ] else ...<Widget>[
-                  _PickedFilesField(
-                    picked: _picked,
-                    isMediaMode: _selectedType == 2,
-                    isPicking: _isPicking,
-                    onPick: _pick,
-                    onRemove: (file) => setState(() => _picked.remove(file)),
-                  ),
-                ],
-                if (_statusError != null) ...<Widget>[
-                  const SizedBox(height: 8),
-                  Text(
-                    _statusError!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  // Disabled with nothing chosen, rather than enabled and then
-                  // complaining. The button is the only place the state is
-                  // visible, and an enabled Send that cannot send is the shape
-                  // of the bug this screen already had once.
-                  onPressed: isConnected &&
-                          targets.isNotEmpty &&
-                          (_selectedType == 0 || _picked.isNotEmpty)
-                      ? () => _send(controller, targets)
-                      : null,
-                  icon: const Icon(Icons.send),
-                  label: Text(_sendLabel),
+                  ],
                 ),
               ],
-            ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed:
+                      isConnected && targets.isNotEmpty && _picked.isNotEmpty
+                          ? () => _send(controller, targets)
+                          : null,
+                  icon: const Icon(Icons.arrow_upward_rounded),
+                  label: Text(_sendLabel),
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 24),
-        Text(
-          'Transfers',
-          style: Theme.of(context).textTheme.titleMedium,
+        const SizedBox(height: 28),
+        AppSectionTitle(
+          title: 'Transfers',
+          subtitle: transferState.transfers.isEmpty
+              ? 'Your recent activity appears here'
+              : '${transferState.transfers.length} recent',
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         if (transferState.transfers.isEmpty)
-          const Card(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(
-                child: Text('No active or recent transfers.'),
-              ),
-            ),
+          const AppEmptyState(
+            icon: Icons.swap_vert_rounded,
+            title: 'No transfers yet',
+            message: 'Anything you send or receive will stay visible here.',
           )
         else
           for (final transfer in transferState.transfers)
             _TransferCard(
               transfer: transfer,
               onCancel: () => controller.cancelTransfer(transfer.transferId),
-              onRetry: () => controller.retryTransfer(transfer.transferId),
+              onRetry: () => _retryTransfer(controller, transfer.transferId),
+              onDelete: () => controller.removeTransfer(transfer.transferId),
             ),
       ],
     );
   }
 
   String get _sendLabel {
-    if (_selectedType == 0) return 'Send Text';
-    // "Item" for media, because the tab now mixes photos and videos and
-    // "Send 3 Media" is not a sentence. Files keep their own noun: there is
-    // only one kind of thing on that tab and naming it reads better.
-    final noun = _selectedType == 2 ? 'Item' : 'File';
-    if (_picked.isEmpty) return _selectedType == 2 ? 'Send Media' : 'Send File';
+    final noun = _selectedType == 0 ? 'Item' : 'File';
+    if (_picked.isEmpty) return _selectedType == 0 ? 'Send Media' : 'Send File';
     if (_picked.length == 1) return 'Send 1 $noun';
     return 'Send ${_picked.length} ${noun}s';
   }
@@ -275,7 +300,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
 
     final picker = ref.read(transferFilePickerProvider);
     try {
-      final chosen = _selectedType == 2
+      final chosen = _selectedType == 0
           ? await picker.pickMedia()
           : await picker.pickFiles();
       if (!mounted) return;
@@ -313,59 +338,55 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     }
 
     try {
-      if (_selectedType == 0) {
-        final text = _textController.text;
-        if (text.trim().isEmpty) {
-          setState(() => _statusError = 'Please enter text to send');
-          return;
-        }
-        await controller.sendText(
-          targetPeerId: target.id,
-          targetPeerName: target.name,
-          text: text,
-          customFileName: _customNameController.text.trim().isEmpty
-              ? null
-              : _customNameController.text.trim(),
+      if (_picked.isEmpty) {
+        setState(
+          () => _statusError = _selectedType == 0
+              ? 'Choose at least one photo or video to send'
+              : 'Choose at least one file to send',
         );
-        _textController.clear();
-        _customNameController.clear();
-      } else {
-        if (_picked.isEmpty) {
-          setState(
-            () => _statusError = _selectedType == 2
-                ? 'Choose at least one photo or video to send'
-                : 'Choose at least one file to send',
-          );
-          return;
-        }
-
-        // Re-checked at send time, not only at pick time. Android can evict a
-        // cached copy between the two, and the alternative — the transfer
-        // engine throwing on `lengthSync` — surfaces as an unexplained failure
-        // partway through the offer.
-        final missing = _picked.where((p) => !p.file.existsSync()).toList();
-        if (missing.isNotEmpty) {
-          setState(() {
-            _picked.removeWhere((p) => missing.contains(p));
-            _statusError = missing.length == 1
-                ? '${missing.first.displayName} is no longer available. '
-                    'Choose it again.'
-                : '${missing.length} files are no longer available. '
-                    'Choose them again.';
-          });
-          return;
-        }
-
-        await controller.sendFiles(
-          targetPeerId: target.id,
-          targetPeerName: target.name,
-          files: <File>[for (final p in _picked) p.file],
-          fileNames: <String>[for (final p in _picked) p.displayName],
-        );
-        setState(_picked.clear);
+        return;
       }
+
+      // Re-checked at send time, not only at pick time. Android can evict a
+      // cached copy between the two, and the alternative — the transfer
+      // engine throwing on `lengthSync` — surfaces as an unexplained failure
+      // partway through the offer.
+      final missing = _picked.where((p) => !p.file.existsSync()).toList();
+      if (missing.isNotEmpty) {
+        setState(() {
+          _picked.removeWhere((p) => missing.contains(p));
+          _statusError = missing.length == 1
+              ? '${missing.first.displayName} is no longer available. '
+                  'Choose it again.'
+              : '${missing.length} files are no longer available. '
+                  'Choose them again.';
+        });
+        return;
+      }
+
+      await controller.sendFiles(
+        targetPeerId: target.id,
+        targetPeerName: target.name,
+        files: <File>[for (final p in _picked) p.file],
+        fileNames: <String>[for (final p in _picked) p.displayName],
+      );
+      setState(_picked.clear);
     } catch (e) {
       setState(() => _statusError = 'Send failed: $e');
+    }
+  }
+
+  Future<void> _retryTransfer(
+    MobileTransferController controller,
+    String transferId,
+  ) async {
+    try {
+      await controller.retryTransfer(transferId);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not retry: $error')),
+      );
     }
   }
 
@@ -408,6 +429,7 @@ class _PickedFilesField extends StatelessWidget {
     required this.isPicking,
     required this.onPick,
     required this.onRemove,
+    super.key,
   });
 
   final List<PickedFile> picked;
@@ -424,58 +446,117 @@ class _PickedFilesField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        OutlinedButton.icon(
-          onPressed: isPicking ? null : () => unawaited(onPick()),
-          icon: isPicking
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Icon(
-                  isMediaMode ? Icons.perm_media_outlined : Icons.folder_open),
-          label: Text(
-            picked.isEmpty ? 'Choose $noun' : 'Add more $noun',
+        Material(
+          color: scheme.primary.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(18),
+          child: InkWell(
+            onTap: isPicking ? null : () => unawaited(onPick()),
+            borderRadius: BorderRadius.circular(18),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 96),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                child: Row(
+                  children: <Widget>[
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: scheme.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: isPicking
+                          ? const Padding(
+                              padding: EdgeInsets.all(15),
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              isMediaMode
+                                  ? Icons.add_photo_alternate_outlined
+                                  : Icons.note_add_outlined,
+                              color: scheme.primary,
+                            ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            picked.isEmpty ? 'Choose $noun' : 'Add more $noun',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            isMediaMode
+                                ? 'Pick photos or videos from your library'
+                                : 'Browse files on this device',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.chevron_right_rounded,
+                        color: scheme.onSurfaceVariant),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
         if (picked.isEmpty) ...<Widget>[
-          const SizedBox(height: 8),
-          Text(
-            isMediaMode
-                ? 'Opens your photo and video library.'
-                : 'Opens your files.',
-            style: Theme.of(context).textTheme.bodySmall,
-            textAlign: TextAlign.center,
-          ),
+          const SizedBox.shrink(),
         ] else ...<Widget>[
           const SizedBox(height: 12),
           for (final file in picked)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(16),
+              ),
               child: Row(
                 children: <Widget>[
-                  Icon(
-                    isMediaMode ? Icons.perm_media_outlined : Icons.description,
-                    size: 18,
-                    color: scheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      file.displayName,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: scheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      isMediaMode
+                          ? Icons.image_outlined
+                          : Icons.description_outlined,
+                      size: 20,
+                      color: scheme.primary,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    formatBytes(_lengthOrZero(file.file)),
-                    style: Theme.of(context).textTheme.bodySmall,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          file.displayName,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          formatBytes(_lengthOrZero(file.file)),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.close, size: 18),
+                    icon: const Icon(Icons.delete_outline_rounded, size: 21),
                     tooltip: 'Remove ${file.displayName}',
                     onPressed: () => onRemove(file),
+                    color: scheme.error,
                   ),
                 ],
               ),
@@ -655,111 +736,138 @@ class _TransferCard extends StatelessWidget {
     required this.transfer,
     required this.onCancel,
     required this.onRetry,
+    required this.onDelete,
   });
 
   final TransferRecord transfer;
   final VoidCallback onCancel;
   final VoidCallback onRetry;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isIncoming = transfer.direction == TransferDirection.incoming;
 
-    return Card(
+    return AppSectionCard(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                Icon(
-                  isIncoming ? Icons.download : Icons.upload,
-                  size: 20,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: scheme.primary.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Icon(
+                  isIncoming
+                      ? Icons.arrow_downward_rounded
+                      : Icons.arrow_upward_rounded,
+                  size: 21,
                   color: scheme.primary,
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    isIncoming
-                        ? 'From ${transfer.peerName}'
-                        : 'To ${transfer.peerName}',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                ),
-                _StatusChip(status: transfer.status),
-              ],
-            ),
-            const SizedBox(height: 12),
-            for (final f in transfer.files) ...<Widget>[
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      f.fileName,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      isIncoming
+                          ? 'From ${transfer.peerName}'
+                          : 'To ${transfer.peerName}',
+                      style: Theme.of(context).textTheme.titleSmall,
                     ),
-                  ),
-                  Text(
-                    '${formatBytes(f.transferredBytes)} / ${formatBytes(f.totalBytes)}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
+                    const SizedBox(height: 3),
+                    Text(
+                      '${transfer.files.length} ${transfer.files.length == 1 ? 'item' : 'items'} · ${formatBytes(transfer.totalBytes)}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 4),
-              LinearProgressIndicator(
-                value: f.progress,
-                backgroundColor: scheme.surfaceContainerHighest,
-              ),
-              const SizedBox(height: 8),
+              _StatusChip(status: transfer.status),
+              if (!transfer.isActive) ...<Widget>[
+                const SizedBox(width: 2),
+                IconButton(
+                  onPressed: onDelete,
+                  icon: const Icon(Icons.delete_outline_rounded, size: 21),
+                  tooltip: 'Delete transfer',
+                  color: scheme.onSurfaceVariant,
+                ),
+              ],
             ],
+          ),
+          const SizedBox(height: 14),
+          for (final f in transfer.files) ...<Widget>[
             Row(
               children: <Widget>[
+                Expanded(
+                  child: Text(
+                    f.fileName,
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                ),
                 Text(
-                  '${formatBytes(transfer.transferredBytes)} / ${formatBytes(transfer.totalBytes)}',
+                  '${formatBytes(f.transferredBytes)} / ${formatBytes(f.totalBytes)}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
-                if (transfer.status == TransferStatus.inProgress) ...<Widget>[
-                  const SizedBox(width: 8),
-                  Text(
-                    '·  ${formatSpeed(transfer.speedBytesPerSecond)}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '·  ETA: ${formatEta(transfer.eta)}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-                const Spacer(),
-                if (transfer.canCancel)
-                  TextButton.icon(
-                    onPressed: onCancel,
-                    icon: const Icon(Icons.close, size: 16),
-                    label: const Text('Cancel'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: scheme.error,
-                    ),
-                  ),
-                if (transfer.canRetry)
-                  TextButton.icon(
-                    onPressed: onRetry,
-                    icon: const Icon(Icons.refresh, size: 16),
-                    label: const Text('Retry'),
-                  ),
               ],
             ),
-            if (transfer.errorMessage != null) ...<Widget>[
-              const SizedBox(height: 4),
-              Text(
-                transfer.errorMessage!,
-                style: TextStyle(color: scheme.error, fontSize: 12),
-              ),
-            ],
+            const SizedBox(height: 4),
+            LinearProgressIndicator(
+              value: f.progress,
+              backgroundColor: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            const SizedBox(height: 8),
           ],
-        ),
+          Row(
+            children: <Widget>[
+              Text(
+                '${formatBytes(transfer.transferredBytes)} / ${formatBytes(transfer.totalBytes)}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              if (transfer.status == TransferStatus.inProgress) ...<Widget>[
+                const SizedBox(width: 8),
+                Text(
+                  '·  ${formatSpeed(transfer.speedBytesPerSecond)}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '·  ETA: ${formatEta(transfer.eta)}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+              const Spacer(),
+              if (transfer.canCancel)
+                IconButton(
+                  onPressed: onCancel,
+                  icon: const Icon(Icons.close_rounded, size: 20),
+                  tooltip: 'Cancel',
+                  color: scheme.error,
+                ),
+              if (transfer.canRetry)
+                FilledButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: const Text('Retry'),
+                ),
+            ],
+          ),
+          if (transfer.errorMessage != null) ...<Widget>[
+            const SizedBox(height: 4),
+            Text(
+              transfer.errorMessage!,
+              style: TextStyle(color: scheme.error, fontSize: 12),
+            ),
+          ],
+        ],
       ),
     );
   }

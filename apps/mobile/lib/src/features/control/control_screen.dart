@@ -6,6 +6,7 @@ import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/modern_ui.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
 import '../clipboard/clipboard_controller.dart';
@@ -66,7 +67,9 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
             (tier?.canViewScreen ?? false);
 
     return Scaffold(
+      extendBody: true,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         title: Text(
           switch (_index) {
             0 => 'Touchpad',
@@ -78,12 +81,24 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
         ),
         actions: <Widget>[
           if (quality != null && state == ClientState.connected)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Center(
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(right: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .primary
+                      .withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(20),
+                ),
                 child: Text(
                   '${quality.roundTripMillis.toStringAsFixed(0)} ms',
-                  style: Theme.of(context).textTheme.labelMedium,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
                 ),
               ),
             ),
@@ -116,46 +131,49 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
         children: <Widget>[
           const SystemStatusStrip(),
           Expanded(
-            child: IndexedStack(
-              index: _index,
-              children: const <Widget>[
-                TouchpadSurfaceView(),
-                KeyboardScreen(),
-                MediaScreen(),
-                ClipboardView(),
-                TransferScreen(),
-              ],
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 88),
+              child: IndexedStack(
+                index: _index,
+                children: const <Widget>[
+                  TouchpadSurfaceView(),
+                  KeyboardScreen(),
+                  MediaScreen(),
+                  ClipboardView(),
+                  TransferScreen(),
+                ],
+              ),
             ),
           ),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
+      bottomNavigationBar: LiquidNavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (index) => setState(() => _index = index),
-        destinations: const <NavigationDestination>[
-          NavigationDestination(
-            icon: Icon(Icons.touch_app_outlined),
-            selectedIcon: Icon(Icons.touch_app),
+        destinations: const <LiquidNavDestination>[
+          LiquidNavDestination(
+            icon: Icons.touch_app_outlined,
+            selectedIcon: Icons.touch_app_rounded,
             label: 'Touchpad',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.keyboard_outlined),
-            selectedIcon: Icon(Icons.keyboard),
+          LiquidNavDestination(
+            icon: Icons.keyboard_outlined,
+            selectedIcon: Icons.keyboard_rounded,
             label: 'Keyboard',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.play_circle_outline),
-            selectedIcon: Icon(Icons.play_circle),
+          LiquidNavDestination(
+            icon: Icons.play_circle_outline_rounded,
+            selectedIcon: Icons.play_circle_rounded,
             label: 'Media',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.content_paste_outlined),
-            selectedIcon: Icon(Icons.content_paste),
+          LiquidNavDestination(
+            icon: Icons.content_paste_outlined,
+            selectedIcon: Icons.content_paste_rounded,
             label: 'Clipboard',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.send_outlined),
-            selectedIcon: Icon(Icons.send),
+          LiquidNavDestination(
+            icon: Icons.send_outlined,
+            selectedIcon: Icons.send_rounded,
             label: 'Send',
           ),
         ],
@@ -183,88 +201,145 @@ class ClipboardView extends ConsumerWidget {
         ref.watch(clientStateProvider).valueOrNull == ClientState.connected;
     final syncEnabled =
         clipboardSettings.syncFromDesktop || clipboardSettings.syncToDesktop;
+    final scheme = Theme.of(context).colorScheme;
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
       children: <Widget>[
-        Card(
-          child: SwitchListTile(
-            title: const Text('Clipboard sync'),
-            subtitle: Text(
-              syncEnabled
-                  ? 'Syncing with connected computer'
-                  : 'Clipboard sync is paused',
-            ),
-            value: syncEnabled,
-            onChanged: (val) => controller.toggleSync(val),
-            secondary: const Icon(Icons.sync_alt),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Row(
+        AppSectionCard(
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: scheme.primary.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(Icons.sync_rounded, color: scheme.primary),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Icon(
-                      clipboard.fromDesktop
-                          ? Icons.laptop_mac
-                          : Icons.smartphone,
-                      size: 18,
-                    ),
-                    const SizedBox(width: 8),
                     Text(
-                      clipboard.text == null
-                          ? 'Nothing synced yet'
-                          : clipboard.fromDesktop
-                              ? 'From your computer'
-                              : 'Sent from this phone',
-                      style: Theme.of(context).textTheme.labelLarge,
+                      'Clipboard sync',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      syncEnabled ? 'Connected and active' : 'Sync is paused',
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
                 ),
-                if (clipboard.text != null) ...<Widget>[
-                  const SizedBox(height: 12),
-                  Text(
-                    clipboard.text!,
-                    maxLines: 8,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                ],
-              ],
-            ),
+              ),
+              Switch(
+                value: syncEnabled,
+                onChanged: controller.toggleSync,
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 16),
-        FilledButton.icon(
-          onPressed: connected && syncEnabled && !clipboard.sending
-              ? () => controller.sendCurrent()
-              : null,
-          icon: const Icon(Icons.upload),
-          label: const Text('Send this phone’s clipboard'),
+        const SizedBox(height: 12),
+        AppSectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Icon(
+                    clipboard.fromDesktop
+                        ? Icons.computer_rounded
+                        : Icons.smartphone_rounded,
+                    size: 20,
+                    color: scheme.primary,
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      clipboard.text == null
+                          ? 'Ready to sync'
+                          : clipboard.fromDesktop
+                              ? 'From your computer'
+                              : 'From this phone',
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                constraints: const BoxConstraints(minHeight: 76),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Text(
+                  clipboard.text ??
+                      'Your latest clipboard item will appear here.',
+                  maxLines: 8,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: clipboard.text == null
+                            ? scheme.onSurfaceVariant
+                            : scheme.onSurface,
+                      ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: connected && syncEnabled && !clipboard.sending
+                          ? () => controller.sendCurrent()
+                          : null,
+                      icon: const Icon(Icons.arrow_upward_rounded),
+                      label: const Text('Send'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: connected && syncEnabled
+                          ? controller.requestFromDesktop
+                          : null,
+                      icon: const Icon(Icons.arrow_downward_rounded),
+                      label: const Text('Get'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed:
-              connected && syncEnabled ? controller.requestFromDesktop : null,
-          icon: const Icon(Icons.download),
-          label: const Text('Get the computer’s clipboard'),
+        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Icon(
+                Icons.info_outline_rounded,
+                size: 18,
+                color: scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Computer copies arrive automatically. Sending this phone’s '
+                  'clipboard needs a tap because iOS protects clipboard reads.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 24),
-        Text(
-          'Copying on your computer syncs here automatically.\n\n'
-          'The other direction needs a tap: iOS shows a “pasted from” alert '
-          'every time an app reads your clipboard, so RemoteLink only reads it '
-          'when you open the app or press the button.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SizedBox(height: 24),
-        const Divider(),
-        const SizedBox(height: 8),
+        const SizedBox(height: 28),
         const ClipboardHistoryList(),
       ],
     );
@@ -282,46 +357,45 @@ class ClipboardHistoryList extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final snapshot = ref.watch(clipboardHistoryControllerProvider);
     final controller = ref.read(clipboardHistoryControllerProvider.notifier);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Row(
-          children: <Widget>[
-            Text('History', style: theme.textTheme.titleMedium),
-            const Spacer(),
-            if (snapshot.entries.isNotEmpty)
-              TextButton(
-                onPressed: controller.clear,
-                child: const Text('Clear all'),
-              ),
-          ],
+        AppSectionTitle(
+          title: 'History',
+          subtitle: 'Tap an item to copy it again',
+          trailing: snapshot.entries.isNotEmpty
+              ? TextButton(
+                  onPressed: controller.clear,
+                  child: const Text('Clear all'),
+                )
+              : null,
         ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          value: snapshot.isPersistent,
-          onChanged: (value) => _setPersistence(context, controller, value),
-          title: const Text('Keep history on this phone'),
-          // Both halves matter to someone deciding what to leave in this list,
-          // so both are said plainly rather than hidden behind a help link.
-          subtitle: Text(
-            snapshot.isPersistent
-                ? 'Saved on this phone and encrypted with a key held in the '
-                    'device keystore.'
-                : 'Off — the list is kept in memory and disappears when you '
-                    'close RemoteLink.',
+        const SizedBox(height: 12),
+        AppSectionCard(
+          padding: EdgeInsets.zero,
+          child: SwitchListTile(
+            value: snapshot.isPersistent,
+            onChanged: (value) => _setPersistence(context, controller, value),
+            title: const Text('Keep history on this phone'),
+            subtitle: Text(
+              snapshot.isPersistent
+                  ? 'Encrypted and saved securely on this device.'
+                  : 'Off — the list is kept in memory and disappears when you '
+                      'close RemoteLink.',
+            ),
+            secondary: const Icon(Icons.lock_outline_rounded),
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         if (snapshot.entries.isEmpty)
-          Text(
-            'Nothing yet. The last $kClipboardHistoryCapacity items you copy '
-            'or receive will appear here. Anything your password manager '
-            'marks confidential is never recorded.',
-            style: theme.textTheme.bodySmall,
+          const AppEmptyState(
+            icon: Icons.content_paste_search_rounded,
+            title: 'Nothing copied yet',
+            message: 'Recent items appear here. Anything your password manager '
+                'marks confidential is never recorded.',
           )
         else
           for (final entry in snapshot.entries)
@@ -368,37 +442,52 @@ class _HistoryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(
-        switch (entry.kind) {
-          ClipboardHistoryKind.image => Icons.image_outlined,
-          ClipboardHistoryKind.url => Icons.link,
-          ClipboardHistoryKind.html => Icons.code,
-          ClipboardHistoryKind.text => Icons.notes,
-        },
-        size: 20,
-      ),
-      title: Text(
-        entry.preview(maxCharacters: 80),
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-      ),
-      onTap: () => _copy(context),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          IconButton(
-            icon: Icon(entry.pinned ? Icons.push_pin : Icons.push_pin_outlined),
-            tooltip: entry.pinned ? 'Unpin' : 'Pin',
-            onPressed: () => _togglePin(context),
+    final scheme = Theme.of(context).colorScheme;
+    return AppSectionCard(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: EdgeInsets.zero,
+      child: ListTile(
+        minTileHeight: 68,
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: scheme.primary.withValues(alpha: 0.09),
+            borderRadius: BorderRadius.circular(12),
           ),
-          IconButton(
-            icon: const Icon(Icons.close),
-            tooltip: 'Remove',
-            onPressed: () => controller.remove(entry.id),
+          child: Icon(
+            switch (entry.kind) {
+              ClipboardHistoryKind.image => Icons.image_outlined,
+              ClipboardHistoryKind.url => Icons.link_rounded,
+              ClipboardHistoryKind.html => Icons.code_rounded,
+              ClipboardHistoryKind.text => Icons.notes_rounded,
+            },
+            size: 20,
+            color: scheme.primary,
           ),
-        ],
+        ),
+        title: Text(
+          entry.preview(maxCharacters: 80),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        onTap: () => _copy(context),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            IconButton(
+              icon:
+                  Icon(entry.pinned ? Icons.push_pin : Icons.push_pin_outlined),
+              tooltip: entry.pinned ? 'Unpin' : 'Pin',
+              onPressed: () => _togglePin(context),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline_rounded),
+              tooltip: 'Remove',
+              onPressed: () => controller.remove(entry.id),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -183,7 +183,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
         title: const Text('Computers'),
         actions: <Widget>[
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Search again',
             onPressed: () async {
               _beginSearchWindow();
@@ -204,7 +204,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _promptForAddress(context),
-        icon: const Icon(Icons.keyboard),
+        icon: const Icon(Icons.add_rounded),
         label: const Text('Connect by address'),
       ),
       body: entries.isEmpty
@@ -225,7 +225,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
               },
               child: ListView.builder(
                 // Leaves room for the FAB so the last row is never covered.
-                padding: const EdgeInsets.only(bottom: 88),
+                padding: const EdgeInsets.fromLTRB(0, 8, 0, 96),
                 itemCount: entries.length,
                 itemBuilder: (context, index) {
                   final entry = entries[index];
@@ -645,74 +645,92 @@ class _DeviceTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return ListTile(
-      leading: Icon(
-        switch (entry.platform) {
-          PlatformKind.macos => Icons.laptop_mac,
-          PlatformKind.windows => Icons.laptop_windows,
-          _ => Icons.computer,
-        },
-        // The platform is carried by the glyph alone. `ListTile` merges its
-        // children into one node, so this is announced ahead of the name:
-        // "Mac, Ahmed's iMac, Paired".
-        semanticLabel: switch (entry.platform) {
-          PlatformKind.macos => 'Mac',
-          PlatformKind.windows => 'Windows PC',
-          PlatformKind.linux => 'Linux computer',
-          _ => 'Computer',
-        },
-        size: 32,
-        // Dimmed when the computer is paired but not currently announcing: the
-        // address may be stale, and the tap may fail. Better to show it looking
-        // uncertain than to hide it or pretend it is online.
-        color: entry.isLive
-            ? null
-            : scheme.onSurfaceVariant.withValues(alpha: 0.5),
-      ),
-      title: Text(entry.name),
-      subtitle: Text(
-        wasRevoked
-            ? 'This computer removed your access'
-            : switch ((entry.isPaired, entry.isLive)) {
-                _ when entry.host == null =>
-                  'Paired · tap to enter its address',
-                (true, true) => 'Paired · ${entry.host}',
-                (true, false) => 'Paired · not seen right now · ${entry.host}',
-                (false, true) => 'Tap to pair · ${entry.host}',
-                (false, false) => entry.host!,
-              },
-      ),
-      trailing: wasRevoked
-          ? TextButton(
-              onPressed: onPairAgain,
-              child: const Text('Pair again'),
-            )
-          : entry.isPaired
-              ? Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    if (onWake != null)
-                      TextButton(
-                        onPressed: onWake,
-                        child: const Text('Wake'),
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: ListTile(
+        minTileHeight: 78,
+        leading: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: (entry.isLive ? scheme.primary : scheme.onSurfaceVariant)
+                .withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(15),
+          ),
+          child: Icon(
+            switch (entry.platform) {
+              PlatformKind.macos => Icons.laptop_mac_rounded,
+              PlatformKind.windows => Icons.laptop_windows_rounded,
+              _ => Icons.computer_rounded,
+            },
+            // The platform is carried by the glyph alone. `ListTile` merges its
+            // children into one node, so this is announced ahead of the name:
+            // "Mac, Ahmed's iMac, Paired".
+            semanticLabel: switch (entry.platform) {
+              PlatformKind.macos => 'Mac',
+              PlatformKind.windows => 'Windows PC',
+              PlatformKind.linux => 'Linux computer',
+              _ => 'Computer',
+            },
+            size: 25,
+            // Dimmed when the computer is paired but not currently announcing: the
+            // address may be stale, and the tap may fail. Better to show it looking
+            // uncertain than to hide it or pretend it is online.
+            color: entry.isLive
+                ? null
+                : scheme.onSurfaceVariant.withValues(alpha: 0.5),
+          ),
+        ),
+        title: Text(entry.name),
+        subtitle: Text(
+          wasRevoked
+              ? 'This computer removed your access'
+              : switch ((entry.isPaired, entry.isLive)) {
+                  _ when entry.host == null =>
+                    'Paired · tap to enter its address',
+                  (true, true) => 'Paired · ${entry.host}',
+                  (true, false) =>
+                    'Paired · not seen right now · ${entry.host}',
+                  (false, true) => 'Tap to pair · ${entry.host}',
+                  (false, false) => entry.host!,
+                },
+        ),
+        trailing: wasRevoked
+            ? TextButton(
+                onPressed: onPairAgain,
+                child: const Text('Pair again'),
+              )
+            : entry.isPaired
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      if (onWake != null)
+                        TextButton(
+                          onPressed: onWake,
+                          child: const Text('Wake'),
+                        ),
+                      if (onRename != null)
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined),
+                          tooltip: 'Rename computer',
+                          onPressed: onRename,
+                        ),
+                      // Both of these repeat what the subtitle already says —
+                      // "Paired · 192.168.1.4", or that the row is tappable.
+                      // Excluded rather than labelled: the fix for an unlabelled
+                      // icon is not always a label.
+                      ExcludeSemantics(
+                        child:
+                            Icon(Icons.verified_rounded, color: scheme.primary),
                       ),
-                    if (onRename != null)
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined),
-                        tooltip: 'Rename computer',
-                        onPressed: onRename,
-                      ),
-                    // Both of these repeat what the subtitle already says —
-                    // "Paired · 192.168.1.4", or that the row is tappable.
-                    // Excluded rather than labelled: the fix for an unlabelled
-                    // icon is not always a label.
-                    ExcludeSemantics(
-                      child: Icon(Icons.verified_user, color: scheme.primary),
-                    ),
-                  ],
-                )
-              : const ExcludeSemantics(child: Icon(Icons.chevron_right)),
-      onTap: onTap,
+                    ],
+                  )
+                : const ExcludeSemantics(
+                    child: Icon(Icons.chevron_right_rounded),
+                  ),
+        onTap: onTap,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      ),
     );
   }
 }

@@ -64,6 +64,23 @@ void main() {
 
       expect(() => file.read(6, 4), throwsRangeError);
     });
+
+    test('retry is offered only for outgoing recoverable transfers', () {
+      TransferRecord record(TransferDirection direction) => TransferRecord(
+            transferId: 'retry-1',
+            peerId: const DeviceId('desktop-1'),
+            peerName: 'Desktop',
+            direction: direction,
+            status: TransferStatus.failed,
+            files: const <TransferFileProgress>[],
+            totalBytes: 0,
+            transferredBytes: 0,
+            createdAt: DateTime(2026),
+          );
+
+      expect(record(TransferDirection.outgoing).canRetry, isTrue);
+      expect(record(TransferDirection.incoming).canRetry, isFalse);
+    });
   });
 
   group('MobileTransferStore', () {
@@ -166,7 +183,7 @@ void main() {
   });
 
   group('TransferScreen Widget Tests', () {
-    testWidgets('renders targets and lets user switch input modes',
+    testWidgets('renders targets with Media first and File second',
         (tester) async {
       final now = DateTime.now();
       final targetPeer = TrustedPeer(
@@ -236,10 +253,11 @@ void main() {
       await tester.pump();
 
       expect(find.text('Send to device'), findsOneWidget);
-      expect(find.text('Text / URL'), findsOneWidget);
+      expect(find.text('Text / URL'), findsNothing);
       expect(find.text('File'), findsOneWidget);
       expect(find.text('Media'), findsOneWidget);
-      expect(find.text('Send Text'), findsOneWidget);
+      expect(find.text('Send Media'), findsOneWidget);
+      expect(find.text('Choose media'), findsOneWidget);
 
       // Switch to File mode. This used to assert a "File path" text field, in
       // which the user was expected to type an absolute path by hand — the
@@ -249,11 +267,6 @@ void main() {
       expect(find.text('Choose files'), findsOneWidget);
       expect(find.text('Send File'), findsOneWidget);
 
-      // Switch to Media mode
-      await tester.tap(find.text('Media'));
-      await tester.pumpAndSettle();
-      expect(find.text('Choose media'), findsOneWidget);
-      expect(find.text('Send Media'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
@@ -492,7 +505,7 @@ void main() {
       expect(find.text('Transferring'), findsOneWidget);
       expect(find.text('·  2.0 MB/s'), findsOneWidget);
       expect(find.text('·  ETA: 3s'), findsOneWidget);
-      expect(find.text('Cancel'), findsOneWidget);
+      expect(find.byTooltip('Cancel'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 

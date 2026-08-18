@@ -375,7 +375,7 @@ void main() {
       isTrue,
     );
 
-    await tester.tap(find.byIcon(Icons.close).first);
+    await tester.tap(find.byIcon(Icons.delete_outline_rounded).first);
     await tester.pumpAndSettle();
 
     expect(history.entries, hasLength(1));

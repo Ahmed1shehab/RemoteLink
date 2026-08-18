@@ -844,6 +844,9 @@ class MobileTransferController extends StateNotifier<TransferState> {
     if (offer == null || sources == null || record == null) {
       throw StateError('Cannot retry transfer: offer not found');
     }
+    if (record.direction != TransferDirection.outgoing || !record.canRetry) {
+      throw StateError('This transfer cannot be retried');
+    }
 
     final client = _ref.read(clientProvider).valueOrNull;
     final session = client?.session;
@@ -851,16 +854,54 @@ class MobileTransferController extends StateNotifier<TransferState> {
       throw StateError('Cannot retry: not connected');
     }
 
+    _speedTrackers[transferId] = TransferSpeedTracker();
     final updated = _updateTransfer(
       transferId,
       (t) => t.copyWith(
         status: TransferStatus.offered,
-        errorMessage: null,
+        files: <TransferFileProgress>[
+          for (final file in t.files)
+            file.copyWith(
+              transferredBytes: 0,
+              isComplete: false,
+              clearError: true,
+            ),
+        ],
+        transferredBytes: 0,
+        speedBytesPerSecond: 0,
+        clearEta: true,
+        clearCompletedAt: true,
+        clearErrorMessage: true,
       ),
     );
     state = state.copyWith(transfers: updated);
 
-    await session.send(offer);
+    try {
+      await session.send(offer);
+    } catch (error) {
+      _failTransfer(transferId, 'Retry failed: $error');
+      rethrow;
+    }
+  }
+
+  /// Removes a finished transfer from the visible activity list.
+  ///
+  /// Active transfers must be cancelled first so deleting a row can never
+  /// leave network work running without any visible status or escape route.
+  void removeTransfer(String transferId) {
+    final record =
+        state.transfers.where((t) => t.transferId == transferId).firstOrNull;
+    if (record == null || record.isActive) return;
+
+    _outgoingOffers.remove(transferId);
+    _outgoingSources.remove(transferId);
+    _speedTrackers.remove(transferId);
+    _activeSendCompleters.remove(transferId);
+    state = state.copyWith(
+      transfers: state.transfers
+          .where((transfer) => transfer.transferId != transferId)
+          .toList(growable: false),
+    );
   }
 
   List<TransferRecord> _updateTransfer(

@@ -46,6 +46,7 @@ final class TransferFileProgress {
     int? transferredBytes,
     bool? isComplete,
     String? error,
+    bool clearError = false,
   }) =>
       TransferFileProgress(
         fileId: fileId,
@@ -53,7 +54,7 @@ final class TransferFileProgress {
         totalBytes: totalBytes,
         transferredBytes: transferredBytes ?? this.transferredBytes,
         isComplete: isComplete ?? this.isComplete,
-        error: error ?? this.error,
+        error: clearError ? null : error ?? this.error,
       );
 }
 
@@ -101,9 +102,10 @@ final class TransferRecord {
   bool get canCancel => isActive;
 
   bool get canRetry =>
-      status == TransferStatus.failed ||
-      status == TransferStatus.cancelled ||
-      status == TransferStatus.declined;
+      direction == TransferDirection.outgoing &&
+      (status == TransferStatus.failed ||
+          status == TransferStatus.cancelled ||
+          status == TransferStatus.declined);
 
   TransferRecord copyWith({
     TransferStatus? status,
@@ -113,6 +115,9 @@ final class TransferRecord {
     Duration? eta,
     DateTime? completedAt,
     String? errorMessage,
+    bool clearCompletedAt = false,
+    bool clearErrorMessage = false,
+    bool clearEta = false,
   }) =>
       TransferRecord(
         transferId: transferId,
@@ -124,10 +129,11 @@ final class TransferRecord {
         totalBytes: totalBytes,
         transferredBytes: transferredBytes ?? this.transferredBytes,
         speedBytesPerSecond: speedBytesPerSecond ?? this.speedBytesPerSecond,
-        eta: eta ?? this.eta,
+        eta: clearEta ? null : eta ?? this.eta,
         createdAt: createdAt,
-        completedAt: completedAt ?? this.completedAt,
-        errorMessage: errorMessage ?? this.errorMessage,
+        completedAt: clearCompletedAt ? null : completedAt ?? this.completedAt,
+        errorMessage:
+            clearErrorMessage ? null : errorMessage ?? this.errorMessage,
       );
 }
 

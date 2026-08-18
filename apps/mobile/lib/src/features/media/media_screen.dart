@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/modern_ui.dart';
+import '../../app/motion.dart';
 import '../../app/providers.dart';
 
 /// The computer's current playback state, pushed from the desktop.
@@ -66,11 +68,14 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
 
     final volume = _dragging ?? state?.volume ?? 0;
 
+    final brightness = _brightnessDragging ?? _brightness;
+    final scheme = Theme.of(context).colorScheme;
+
     return ListView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
       children: <Widget>[
         _NowPlaying(state: state),
-        const SizedBox(height: 32),
+        const SizedBox(height: 24),
         _TransportRow(
           isPlaying: state?.isPlaying ?? false,
           enabled: connected,
@@ -82,119 +87,156 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
           ),
           onNext: () => _send(const MediaCommand(action: MediaAction.next)),
         ),
-        const SizedBox(height: 32),
-        Row(
-          children: <Widget>[
-            IconButton(
-              // The icon alone says nothing, and which way it toggles is not
-              // guessable from a speaker glyph — so the label states the
-              // action, not the state.
-              tooltip: (state?.isMuted ?? false) ? 'Unmute' : 'Mute',
-              icon: Icon(
-                (state?.isMuted ?? false)
-                    ? Icons.volume_off
-                    : Icons.volume_mute,
-              ),
-              onPressed: connected
-                  ? () => _send(
-                        const VolumeCommand(
-                          mode: VolumeMode.toggleMute,
-                          value: 0,
-                        ),
-                      )
-                  : null,
-            ),
-            Expanded(
-              child: Slider(
-                value: volume.clamp(0.0, 1.0),
-                label: '${(volume * 100).round()}%',
-                // Without this a screen reader reads the raw 0–1 double: "zero
-                // point four two". Volume is a percentage everywhere else in
-                // the app and on the computer being controlled.
-                semanticFormatterCallback: (value) =>
-                    'Volume ${(value * 100).round()} percent',
-                onChanged: connected
-                    ? (value) => setState(() => _dragging = value)
-                    : null,
-                // Sent on release, not on every frame. A slider emits dozens of
-                // values per second and each one here is an AppleScript
-                // round trip on the desktop.
-                onChangeEnd: (value) {
-                  setState(() => _dragging = null);
-                  unawaited(
-                    _send(
-                      VolumeCommand(mode: VolumeMode.absolute, value: value),
-                    ),
-                  );
-                },
-              ),
-            ),
-            // A scale marker at the end of the slider, not a control.
-            const ExcludeSemantics(child: Icon(Icons.volume_up)),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Center(
-          // Excluded because the slider already announces this number. Left
-          // visible because a sighted user cannot read a slider to the percent.
-          child: ExcludeSemantics(
-            child: Text(
-              '${(volume * 100).round()}%',
-              style: Theme.of(context).textTheme.labelMedium,
-            ),
-          ),
-        ),
-        if (brightnessSupported) ...<Widget>[
-          const SizedBox(height: 24),
-          Row(
+        const SizedBox(height: 26),
+        AppSectionCard(
+          child: Column(
             children: <Widget>[
-              const ExcludeSemantics(
-                child: Padding(
-                  padding: EdgeInsets.all(12.0),
-                  child: Icon(Icons.brightness_low),
-                ),
-              ),
-              Expanded(
-                child: Slider(
-                  value: (_brightnessDragging ?? _brightness).clamp(0.0, 1.0),
-                  label:
-                      '${((_brightnessDragging ?? _brightness) * 100).round()}%',
-                  semanticFormatterCallback: (value) =>
-                      'Screen brightness ${(value * 100).round()} percent',
-                  onChanged: connected
-                      ? (value) => setState(() => _brightnessDragging = value)
-                      : null,
-                  onChangeEnd: (value) {
-                    setState(() {
-                      _brightness = value;
-                      _brightnessDragging = null;
-                    });
-                    unawaited(
-                      _send(
-                        BrightnessCommand(relative: false, value: value),
+              Row(
+                children: <Widget>[
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: scheme.primary.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: IconButton(
+                      tooltip: (state?.isMuted ?? false) ? 'Unmute' : 'Mute',
+                      icon: Icon(
+                        (state?.isMuted ?? false)
+                            ? Icons.volume_off
+                            : Icons.volume_mute,
+                        size: 21,
                       ),
-                    );
-                  },
-                ),
+                      color: scheme.primary,
+                      onPressed: connected
+                          ? () => _send(
+                                const VolumeCommand(
+                                  mode: VolumeMode.toggleMute,
+                                  value: 0,
+                                ),
+                              )
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Volume',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                  Text(
+                    '${(volume * 100).round()}%',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: scheme.primary,
+                        ),
+                  ),
+                ],
               ),
-              const ExcludeSemantics(
-                child: Padding(
-                  padding: EdgeInsets.all(12.0),
-                  child: Icon(Icons.brightness_high),
-                ),
+              Row(
+                children: <Widget>[
+                  const ExcludeSemantics(
+                    child: Icon(Icons.volume_down_rounded, size: 19),
+                  ),
+                  Expanded(
+                    child: Slider(
+                      value: volume.clamp(0.0, 1.0),
+                      label: '${(volume * 100).round()}%',
+                      semanticFormatterCallback: (value) =>
+                          'Volume ${(value * 100).round()} percent',
+                      onChanged: connected
+                          ? (value) => setState(() => _dragging = value)
+                          : null,
+                      onChangeEnd: (value) {
+                        setState(() => _dragging = null);
+                        unawaited(
+                          _send(
+                            VolumeCommand(
+                              mode: VolumeMode.absolute,
+                              value: value,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const ExcludeSemantics(child: Icon(Icons.volume_up)),
+                ],
               ),
+              if (brightnessSupported) ...<Widget>[
+                const Divider(),
+                const SizedBox(height: 16),
+                Row(
+                  children: <Widget>[
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: scheme.tertiary.withValues(alpha: 0.11),
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                      child: Icon(
+                        Icons.brightness_6_rounded,
+                        size: 21,
+                        color: scheme.tertiary,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Display',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                    ),
+                    Text(
+                      '${(brightness * 100).round()}%',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                            color: scheme.tertiary,
+                          ),
+                    ),
+                  ],
+                ),
+                Row(
+                  children: <Widget>[
+                    const ExcludeSemantics(
+                      child: Icon(Icons.brightness_low, size: 20),
+                    ),
+                    Expanded(
+                      child: Slider(
+                        value: brightness.clamp(0.0, 1.0),
+                        label: '${(brightness * 100).round()}%',
+                        semanticFormatterCallback: (value) =>
+                            'Screen brightness ${(value * 100).round()} percent',
+                        onChanged: connected
+                            ? (value) =>
+                                setState(() => _brightnessDragging = value)
+                            : null,
+                        onChangeEnd: (value) {
+                          setState(() {
+                            _brightness = value;
+                            _brightnessDragging = null;
+                          });
+                          unawaited(
+                            _send(
+                              BrightnessCommand(
+                                relative: false,
+                                value: value,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const ExcludeSemantics(
+                      child: Icon(Icons.brightness_high, size: 20),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
-          const SizedBox(height: 8),
-          Center(
-            child: ExcludeSemantics(
-              child: Text(
-                '${((_brightnessDragging ?? _brightness) * 100).round()}%',
-                style: Theme.of(context).textTheme.labelMedium,
-              ),
-            ),
-          ),
-        ],
+        ),
       ],
     );
   }
@@ -214,30 +256,88 @@ class _NowPlaying extends StatelessWidget {
     return Column(
       children: <Widget>[
         Container(
-          height: 180,
-          width: 180,
+          height: 220,
+          width: 220,
           decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          // A placeholder where artwork would go. Announcing "music note"
-          // before the track title tells a screen-reader user nothing the
-          // title will not.
-          child: ExcludeSemantics(
-            child: Icon(
-              Icons.music_note,
-              size: 64,
-              color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: <Color>[
+                scheme.primary.withValues(alpha: 0.94),
+                scheme.tertiary.withValues(alpha: 0.78),
+              ],
             ),
+            borderRadius: BorderRadius.circular(36),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: scheme.primary.withValues(alpha: 0.22),
+                blurRadius: 36,
+                offset: const Offset(0, 18),
+              ),
+            ],
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: <Widget>[
+              Positioned(
+                top: 20,
+                right: 18,
+                child: Container(
+                  width: 74,
+                  height: 74,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.09),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+              ExcludeSemantics(
+                child: Icon(
+                  hasTrack
+                      ? Icons.graphic_eq_rounded
+                      : Icons.music_note_rounded,
+                  size: 78,
+                  color: Colors.white.withValues(alpha: 0.92),
+                ),
+              ),
+              if (state?.sourceApplication != null)
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  bottom: 15,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      state!.sourceApplication!,
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
-        const SizedBox(height: 20),
-        Text(
-          hasTrack ? title : 'Nothing playing',
-          style: Theme.of(context).textTheme.titleMedium,
-          textAlign: TextAlign.center,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
+        const SizedBox(height: 26),
+        AnimatedSwitcher(
+          duration: context.motion(const Duration(milliseconds: 220)),
+          child: Text(
+            hasTrack ? title : 'Nothing playing',
+            key: ValueKey<String>(title),
+            style: Theme.of(context).textTheme.titleLarge,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
         if (hasTrack) ...<Widget>[
           const SizedBox(height: 4),
@@ -246,17 +346,12 @@ class _NowPlaying extends StatelessWidget {
               if (state!.artist.isNotEmpty) state!.artist,
               if (state!.album.isNotEmpty) state!.album,
             ].join(' — '),
-            style: Theme.of(context).textTheme.bodySmall,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-          ),
-        ],
-        if (state?.sourceApplication != null) ...<Widget>[
-          const SizedBox(height: 8),
-          Chip(
-            label: Text(state!.sourceApplication!),
-            visualDensity: VisualDensity.compact,
           ),
         ],
         if (!hasTrack) ...<Widget>[
@@ -295,32 +390,51 @@ class _TransportRow extends StatelessWidget {
   final VoidCallback onNext;
 
   @override
-  Widget build(BuildContext context) => Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: <Widget>[
-          IconButton.filledTonal(
-            iconSize: 32,
-            tooltip: 'Previous track',
-            onPressed: enabled ? onPrevious : null,
-            icon: const Icon(Icons.skip_previous),
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: <Widget>[
+        IconButton.filledTonal(
+          constraints: const BoxConstraints.tightFor(width: 56, height: 56),
+          iconSize: 28,
+          tooltip: 'Previous track',
+          onPressed: enabled ? onPrevious : null,
+          icon: const Icon(Icons.skip_previous_rounded),
+        ),
+        const SizedBox(width: 22),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: scheme.primary.withValues(alpha: 0.24),
+                blurRadius: 22,
+                offset: const Offset(0, 10),
+              ),
+            ],
           ),
-          IconButton.filled(
-            iconSize: 44,
-            // Names what pressing it does, which is the opposite of the state
-            // it reports. "Pause" while paused is a lie a sighted user can see
-            // past and a screen-reader user cannot.
+          child: IconButton.filled(
+            constraints: const BoxConstraints.tightFor(width: 76, height: 76),
+            iconSize: 40,
             tooltip: isPlaying ? 'Pause' : 'Play',
             onPressed: enabled ? onPlayPause : null,
-            icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
+            icon: Icon(
+              isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            ),
           ),
-          IconButton.filledTonal(
-            iconSize: 32,
-            tooltip: 'Next track',
-            onPressed: enabled ? onNext : null,
-            icon: const Icon(Icons.skip_next),
-          ),
-        ],
-      );
+        ),
+        const SizedBox(width: 22),
+        IconButton.filledTonal(
+          constraints: const BoxConstraints.tightFor(width: 56, height: 56),
+          iconSize: 28,
+          tooltip: 'Next track',
+          onPressed: enabled ? onNext : null,
+          icon: const Icon(Icons.skip_next_rounded),
+        ),
+      ],
+    );
+  }
 }
 
 class _Unsupported extends StatelessWidget {
