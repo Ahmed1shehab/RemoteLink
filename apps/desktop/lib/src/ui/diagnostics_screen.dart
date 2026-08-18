@@ -80,26 +80,45 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
     DiagnosticsInfo info,
     MemoryLogSink memorySink,
   ) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          _ServiceStatusCard(status: info.serviceStatus),
-          const SizedBox(height: 16),
-          _DispatcherCountersCard(counters: info.dispatcherCounters),
-          const SizedBox(height: 16),
-          _BackendsCard(backends: info.backends),
-          const SizedBox(height: 16),
-          _ConnectedDevicesCard(devices: info.devices),
-          const SizedBox(height: 16),
-          _LogViewerCard(
-            records: memorySink.records,
-            selectedLevel: _selectedLevel,
-            onLevelSelected: (level) => setState(() => _selectedLevel = level),
-            onCopyLogs: () => _copyLogs(context, memorySink.records),
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1080),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(
+                'System health',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Network, permissions, connected devices, and live logs.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 24),
+              _ServiceStatusCard(status: info.serviceStatus),
+              const SizedBox(height: 16),
+              _DispatcherCountersCard(counters: info.dispatcherCounters),
+              const SizedBox(height: 16),
+              _BackendsCard(backends: info.backends),
+              const SizedBox(height: 16),
+              _ConnectedDevicesCard(devices: info.devices),
+              const SizedBox(height: 16),
+              _LogViewerCard(
+                records: memorySink.records,
+                selectedLevel: _selectedLevel,
+                onLevelSelected: (level) =>
+                    setState(() => _selectedLevel = level),
+                onCopyLogs: () => _copyLogs(context, memorySink.records),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

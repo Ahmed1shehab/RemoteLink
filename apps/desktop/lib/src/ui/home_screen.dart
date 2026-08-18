@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
+import '../app/desktop_ui.dart';
+import '../app/motion.dart';
 import '../app/providers.dart';
 import '../app/theme.dart';
 import '../domain/desktop_service.dart';
@@ -25,6 +27,20 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _overviewKey = GlobalKey();
+  final GlobalKey _devicesKey = GlobalKey();
+  final GlobalKey _sendKey = GlobalKey();
+  final GlobalKey _transfersKey = GlobalKey();
+  final GlobalKey _clipboardKey = GlobalKey();
+  int _sidebarIndex = 0;
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     // Pairing requests arrive asynchronously and need the user's attention
@@ -52,22 +68,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final status = ref.watch(desktopStatusProvider);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('RemoteLink'),
-        actions: <Widget>[
-          IconButton(
-            icon: const Icon(Icons.analytics_outlined),
-            tooltip: 'Diagnostics',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (context) => const DiagnosticsScreen(),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
       body: status.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, stack) => _StartupError(error: error),
@@ -97,107 +97,236 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final screenCapture =
         ref.watch(screenCaptureAvailabilityProvider).valueOrNull;
 
-    return FocusTraversalGroup(
+    final content = FocusTraversalGroup(
       policy: OrderedTraversalPolicy(),
-      child: ListView(
-        padding: const EdgeInsets.all(24),
-        children: <Widget>[
-          // Above the permission banner and everything else. This is the one
-          // thing on this window that says the screen is leaving the machine,
-          // and it is worth nothing if it is below the fold.
-          if (screenViewers.isNotEmpty)
-            FocusTraversalOrder(
-              order: const NumericFocusOrder(0),
-              child: _ScreenSharingBanner(
-                viewers: screenViewers,
-                onStop: _stopAllScreenStreams,
-              ),
-            ),
-          if (input != null && !input.available && input.reason != null)
-            FocusTraversalOrder(
-              order: const NumericFocusOrder(1),
-              child: _PermissionBanner(
-                reason: input.reason!,
-                onOpenSettings: _openAccessibilitySettings,
-              ),
-            ),
-          // Screen Recording is a separate grant in a separate pane, and
-          // without a banner of its own there was nothing anywhere in the app
-          // saying why screen sharing did not appear on the phone. The button
-          // simply never showed up and the reason lived only in a log line.
-          if (screenCapture != null && !screenCapture.available)
-            FocusTraversalOrder(
-              order: const NumericFocusOrder(1),
-              child: _PermissionBanner(
-                reason: screenCapture.reason ??
-                    'RemoteLink needs Screen Recording permission before it '
-                        'can share this screen.',
-                onOpenSettings: _openScreenRecordingSettings,
-                severity: _BannerSeverity.advisory,
-              ),
-            ),
-          FocusTraversalOrder(
-            order: const NumericFocusOrder(2),
-            child: _StatusCard(
-              status: status,
-              screenCaptureReady: screenCapture?.available ?? false,
-            ),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'Connected devices',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          FocusTraversalOrder(
-            order: const NumericFocusOrder(3),
-            child: devices.when(
-              loading: () => const _EmptyState(
-                message: 'Waiting for devices to connect…',
-              ),
-              error: (error, _) => _EmptyState(message: 'Error: $error'),
-              data: (list) => list.isEmpty
-                  ? const _EmptyState(
-                      message: 'No devices connected. Open RemoteLink on your '
-                          'phone — it should find this computer automatically.',
-                    )
-                  : Column(
-                      children: <Widget>[
-                        for (final device in list)
-                          _DeviceTile(
-                            device: device,
-                            onRevoke: () => _revoke(device.id),
-                            onTierChanged: (tier) => _setTier(device.id, tier),
-                            onRename: () =>
-                                _renameDevice(device.id, device.name),
-                            onClipboardSyncChanged: (enabled) =>
-                                _setClipboardSync(device.id, enabled),
-                          ),
-                      ],
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1080),
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Text(
+                  'Workspace',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Manage connections, permissions, and transfers from one place.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+                const SizedBox(height: 24),
+                // Above the permission banner and everything else. This is the one
+                // thing on this window that says the screen is leaving the machine,
+                // and it is worth nothing if it is below the fold.
+                if (screenViewers.isNotEmpty)
+                  FocusTraversalOrder(
+                    order: const NumericFocusOrder(0),
+                    child: _ScreenSharingBanner(
+                      viewers: screenViewers,
+                      onStop: _stopAllScreenStreams,
                     ),
+                  ),
+                if (input != null && !input.available && input.reason != null)
+                  FocusTraversalOrder(
+                    order: const NumericFocusOrder(1),
+                    child: _PermissionBanner(
+                      reason: input.reason!,
+                      onOpenSettings: _openAccessibilitySettings,
+                    ),
+                  ),
+                // Screen Recording is a separate grant in a separate pane, and
+                // without a banner of its own there was nothing anywhere in the app
+                // saying why screen sharing did not appear on the phone. The button
+                // simply never showed up and the reason lived only in a log line.
+                if (screenCapture != null && !screenCapture.available)
+                  FocusTraversalOrder(
+                    order: const NumericFocusOrder(1),
+                    child: _PermissionBanner(
+                      reason: screenCapture.reason ??
+                          'RemoteLink needs Screen Recording permission before it '
+                              'can share this screen.',
+                      onOpenSettings: _openScreenRecordingSettings,
+                      severity: _BannerSeverity.advisory,
+                    ),
+                  ),
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(2),
+                  child: KeyedSubtree(
+                    key: _overviewKey,
+                    child: _StatusCard(
+                      status: status,
+                      screenCaptureReady: screenCapture?.available ?? false,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 28),
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(3),
+                  child: KeyedSubtree(
+                    key: _sendKey,
+                    child: _SendCard(
+                      devices: devices.valueOrNull ?? <ConnectedDevice>[],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                DesktopSectionHeader(
+                  key: _devicesKey,
+                  title: 'Connected devices',
+                  subtitle: devices.valueOrNull?.isEmpty ?? true
+                      ? 'Phones connected to this computer appear here'
+                      : '${devices.valueOrNull!.length} connected',
+                ),
+                const SizedBox(height: 12),
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(4),
+                  child: devices.when(
+                    loading: () => const _EmptyState(
+                      message: 'Waiting for devices to connect…',
+                    ),
+                    error: (error, _) => _EmptyState(message: 'Error: $error'),
+                    data: (list) => list.isEmpty
+                        ? const _EmptyState(
+                            message:
+                                'No devices connected. Open RemoteLink on your '
+                                'phone — it should find this computer automatically.',
+                          )
+                        : Column(
+                            children: <Widget>[
+                              for (final device in list)
+                                _DeviceTile(
+                                  device: device,
+                                  onRevoke: () => _revoke(device.id),
+                                  onTierChanged: (tier) =>
+                                      _setTier(device.id, tier),
+                                  onRename: () =>
+                                      _renameDevice(device.id, device.name),
+                                  onClipboardSyncChanged: (enabled) =>
+                                      _setClipboardSync(device.id, enabled),
+                                ),
+                            ],
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(5),
+                  child: KeyedSubtree(
+                    key: _transfersKey,
+                    child: _TransfersSection(
+                      transfers: transfers,
+                      onCancel: _cancelTransfer,
+                      onRetry: _retryTransfer,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(6),
+                  child: KeyedSubtree(
+                    key: _clipboardKey,
+                    child: const ClipboardHistoryPanel(),
+                  ),
+                ),
+                const SizedBox(height: 24),
+              ],
             ),
           ),
-          const SizedBox(height: 24),
-          FocusTraversalOrder(
-            order: const NumericFocusOrder(4),
-            child:
-                _SendCard(devices: devices.valueOrNull ?? <ConnectedDevice>[]),
-          ),
-          const SizedBox(height: 24),
-          FocusTraversalOrder(
-            order: const NumericFocusOrder(5),
-            child: _TransfersSection(
-              transfers: transfers,
-              onCancel: _cancelTransfer,
-              onRetry: _retryTransfer,
+        ),
+      ),
+    );
+
+    final scheme = Theme.of(context).colorScheme;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 800) {
+          return Column(
+            children: <Widget>[
+              DesktopCompactHeader(onDiagnostics: _openDiagnostics),
+              Expanded(child: content),
+            ],
+          );
+        }
+
+        return Row(
+          children: <Widget>[
+            DesktopSidebar(
+              selectedIndex: _sidebarIndex,
+              destinations: const <DesktopNavDestination>[
+                DesktopNavDestination(
+                  icon: Icons.space_dashboard_outlined,
+                  label: 'Overview',
+                ),
+                DesktopNavDestination(
+                  icon: Icons.devices_rounded,
+                  label: 'Devices',
+                ),
+                DesktopNavDestination(
+                  icon: Icons.near_me_outlined,
+                  label: 'Send',
+                ),
+                DesktopNavDestination(
+                  icon: Icons.swap_vert_rounded,
+                  label: 'Activity',
+                ),
+                DesktopNavDestination(
+                  icon: Icons.content_paste_outlined,
+                  label: 'Clipboard',
+                ),
+                DesktopNavDestination(
+                  icon: Icons.monitor_heart_outlined,
+                  label: 'Diagnostics',
+                ),
+              ],
+              onSelected: _selectSidebarDestination,
+              statusLabel:
+                  status.isRunning ? 'Service online' : 'Service offline',
+              statusColor:
+                  status.isRunning ? const Color(0xFF22A06B) : scheme.error,
             ),
-          ),
-          const SizedBox(height: 24),
-          const FocusTraversalOrder(
-            order: NumericFocusOrder(6),
-            child: ClipboardHistoryPanel(),
-          ),
-        ],
+            Expanded(child: content),
+          ],
+        );
+      },
+    );
+  }
+
+  void _selectSidebarDestination(int index) {
+    if (index == 5) {
+      _openDiagnostics();
+      return;
+    }
+
+    setState(() => _sidebarIndex = index);
+    final key = switch (index) {
+      0 => _overviewKey,
+      1 => _devicesKey,
+      2 => _sendKey,
+      3 => _transfersKey,
+      _ => _clipboardKey,
+    };
+    final targetContext = key.currentContext;
+    if (targetContext == null) return;
+    unawaited(
+      Scrollable.ensureVisible(
+        targetContext,
+        duration: context.motion(const Duration(milliseconds: 300)),
+        curve: Curves.easeOutCubic,
+        alignment: 0.06,
+      ),
+    );
+  }
+
+  void _openDiagnostics() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => const DiagnosticsScreen(),
       ),
     );
   }
@@ -402,11 +531,30 @@ class _SendCardState extends ConsumerState<_SendCard> {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Icon(Icons.send_rounded, color: scheme.primary),
-                const SizedBox(width: 8),
-                Text(
-                  'Send to device',
-                  style: Theme.of(context).textTheme.titleMedium,
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(Icons.near_me_rounded, color: scheme.primary),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        'Send to device',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      Text(
+                        'Share files, links, or notes with a connected phone',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -419,10 +567,10 @@ class _SendCardState extends ConsumerState<_SendCard> {
             else ...<Widget>[
               DropdownButtonFormField<String>(
                 initialValue: _selectedDeviceId,
+                isExpanded: true,
                 decoration: const InputDecoration(
-                  labelText: 'Target device',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.smartphone),
+                  labelText: 'Send to',
+                  prefixIcon: Icon(Icons.smartphone_rounded),
                 ),
                 items: <DropdownMenuItem<String>>[
                   for (final d in availableDevices)
@@ -430,6 +578,8 @@ class _SendCardState extends ConsumerState<_SendCard> {
                       value: d.id.value,
                       child: Text(
                         '${d.name} (${d.tier == PermissionTier.extended || d.tier == PermissionTier.admin ? "Transfers enabled" : "Tier: ${d.tier.name}"})',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                 ],
@@ -462,7 +612,11 @@ class _SendCardState extends ConsumerState<_SendCard> {
                   onDragEntered: (_) => setState(() => _isDraggingOver = true),
                   onDragExited: (_) => setState(() => _isDraggingOver = false),
                   onDragDone: (details) => _addDropped(details.files),
-                  child: Container(
+                  child: AnimatedContainer(
+                    duration: context.motion(
+                      const Duration(milliseconds: 180),
+                    ),
+                    curve: Curves.easeOutCubic,
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
                       border: Border.all(
@@ -472,16 +626,18 @@ class _SendCardState extends ConsumerState<_SendCard> {
                         width: _isDraggingOver ? 2 : 1,
                         strokeAlign: BorderSide.strokeAlignInside,
                       ),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(18),
                       color: _isDraggingOver
-                          ? scheme.primaryContainer.withValues(alpha: 0.2)
-                          : scheme.surfaceContainerLow,
+                          ? scheme.primary.withValues(alpha: 0.10)
+                          : scheme.surfaceContainerHighest.withValues(
+                              alpha: 0.42,
+                            ),
                     ),
                     child: Column(
                       children: <Widget>[
                         Icon(
-                          Icons.file_upload_outlined,
-                          size: 36,
+                          Icons.cloud_upload_outlined,
+                          size: 40,
                           color: _isDraggingOver
                               ? scheme.primary
                               : scheme.onSurfaceVariant,
@@ -498,7 +654,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
                         OutlinedButton.icon(
                           onPressed:
                               _isPicking ? null : () => unawaited(_pick()),
-                          icon: const Icon(Icons.folder_open),
+                          icon: const Icon(Icons.folder_open_rounded),
                           label: Text(
                             _picked.isEmpty ? 'Choose files' : 'Add more files',
                           ),
@@ -510,16 +666,31 @@ class _SendCardState extends ConsumerState<_SendCard> {
                 if (_picked.isNotEmpty) ...<Widget>[
                   const SizedBox(height: 12),
                   for (final file in _picked)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.fromLTRB(10, 7, 4, 7),
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerHighest.withValues(
+                          alpha: 0.50,
+                        ),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                       child: Row(
                         children: <Widget>[
-                          Icon(
-                            Icons.description,
-                            size: 18,
-                            color: scheme.primary,
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: scheme.surface,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              Icons.description_outlined,
+                              size: 19,
+                              color: scheme.primary,
+                            ),
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               file.uri.pathSegments.last,
@@ -529,10 +700,14 @@ class _SendCardState extends ConsumerState<_SendCard> {
                             ),
                           ),
                           IconButton(
-                            icon: const Icon(Icons.close, size: 18),
+                            icon: const Icon(
+                              Icons.delete_outline_rounded,
+                              size: 20,
+                            ),
                             tooltip: 'Remove ${file.uri.pathSegments.last}',
                             onPressed: () =>
                                 setState(() => _picked.remove(file)),
+                            color: scheme.error,
                           ),
                         ],
                       ),
@@ -542,10 +717,10 @@ class _SendCardState extends ConsumerState<_SendCard> {
                 TextField(
                   controller: _textController,
                   maxLines: 4,
+                  onChanged: (_) => setState(() {}),
                   decoration: const InputDecoration(
                     labelText: 'Text or URL snippet',
                     hintText: 'Enter text to send directly to the phone…',
-                    border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -554,22 +729,41 @@ class _SendCardState extends ConsumerState<_SendCard> {
                   decoration: const InputDecoration(
                     labelText: 'File name (optional)',
                     hintText: 'snippet.txt',
-                    border: OutlineInputBorder(),
                   ),
                 ),
               ],
               if (_statusError != null) ...<Widget>[
                 const SizedBox(height: 8),
-                Text(
-                  _statusError!,
-                  style: TextStyle(color: scheme.error, fontSize: 13),
+                Row(
+                  children: <Widget>[
+                    Icon(
+                      Icons.error_outline_rounded,
+                      size: 18,
+                      color: scheme.error,
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        _statusError!,
+                        style: TextStyle(color: scheme.error, fontSize: 13),
+                      ),
+                    ),
+                  ],
                 ),
               ],
               const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: () => _send(availableDevices),
-                icon: const Icon(Icons.send),
-                label: Text(_tab == 0 ? 'Send File' : 'Send Text'),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.icon(
+                  onPressed: (_tab == 0
+                              ? _picked.isNotEmpty
+                              : _textController.text.trim().isNotEmpty) &&
+                          availableDevices.isNotEmpty
+                      ? () => _send(availableDevices)
+                      : null,
+                  icon: const Icon(Icons.arrow_upward_rounded),
+                  label: Text(_tab == 0 ? 'Send File' : 'Send Text'),
+                ),
               ),
             ],
           ],
@@ -695,19 +889,18 @@ class _TransfersSection extends StatelessWidget {
   Widget build(BuildContext context) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(
-            'Transfers',
-            style: Theme.of(context).textTheme.titleMedium,
+          DesktopSectionHeader(
+            title: 'Transfers',
+            subtitle: transfers.isEmpty
+                ? 'Completed and active transfers appear here'
+                : '${transfers.length} recent ${transfers.length == 1 ? "transfer" : "transfers"}',
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           if (transfers.isEmpty)
-            const Card(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(
-                  child: Text('No active or recent transfers.'),
-                ),
-              ),
+            const DesktopEmptyState(
+              icon: Icons.swap_vert_circle_outlined,
+              title: 'No transfers yet',
+              message: 'No active or recent transfers.',
             )
           else
             for (final transfer in transfers)
@@ -745,12 +938,22 @@ class _TransferTile extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Icon(
-                  isIncoming ? Icons.download : Icons.upload,
-                  size: 20,
-                  color: scheme.primary,
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: Icon(
+                    isIncoming
+                        ? Icons.south_west_rounded
+                        : Icons.north_east_rounded,
+                    size: 20,
+                    color: scheme.primary,
+                  ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     isIncoming
@@ -782,41 +985,50 @@ class _TransferTile extends StatelessWidget {
               LinearProgressIndicator(
                 value: f.progress,
                 backgroundColor: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(999),
+                minHeight: 6,
               ),
               const SizedBox(height: 8),
             ],
             Row(
               children: <Widget>[
-                Text(
-                  '${formatBytes(transfer.transferredBytes)} / ${formatBytes(transfer.totalBytes)}',
-                  style: Theme.of(context).textTheme.bodySmall,
+                Expanded(
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: <Widget>[
+                      Text(
+                        '${formatBytes(transfer.transferredBytes)} / ${formatBytes(transfer.totalBytes)}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      if (transfer.status ==
+                          TransferStatus.inProgress) ...<Widget>[
+                        Text(
+                          '·  ${formatSpeed(transfer.speedBytesPerSecond)}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        Text(
+                          '·  ETA: ${formatEta(transfer.eta)}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
-                if (transfer.status == TransferStatus.inProgress) ...<Widget>[
-                  const SizedBox(width: 8),
-                  Text(
-                    '·  ${formatSpeed(transfer.speedBytesPerSecond)}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '·  ETA: ${formatEta(transfer.eta)}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-                const Spacer(),
+                const SizedBox(width: 8),
                 if (transfer.canCancel)
                   TextButton.icon(
                     onPressed: onCancel,
-                    icon: const Icon(Icons.close, size: 16),
+                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
                     label: const Text('Cancel'),
                     style: TextButton.styleFrom(
                       foregroundColor: scheme.error,
                     ),
                   ),
                 if (transfer.canRetry)
-                  TextButton.icon(
+                  FilledButton.tonalIcon(
                     onPressed: onRetry,
-                    icon: const Icon(Icons.refresh, size: 16),
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
                     label: const Text('Retry'),
                   ),
               ],
@@ -1164,92 +1376,135 @@ class _StatusCard extends StatelessWidget {
   final bool screenCaptureReady;
 
   @override
-  Widget build(BuildContext context) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Row(
-            children: <Widget>[
-              Icon(
-                status.isRunning ? Icons.wifi_tethering : Icons.wifi_off,
-                size: 40,
-                color: Theme.of(context).colorScheme.primary,
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final statusColor = status.isRunning ? scheme.primary : scheme.error;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Row(
+          children: <Widget>[
+            Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                color: statusColor.withValues(alpha: 0.11),
+                borderRadius: BorderRadius.circular(18),
               ),
-              const SizedBox(width: 20),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      status.isRunning
-                          ? 'Discoverable on this network'
-                          : 'Not running',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${status.deviceName} · port ${status.boundPort}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 2),
-                    // Selectable and shown as a raw IP: this is the value a
-                    // user reads off the screen and types into a phone that
-                    // cannot discover automatically, and resolving the `.local`
-                    // hostname needs the very mDNS that is unavailable then.
-                    if (status.localAddresses.isNotEmpty)
-                      SelectableText(
-                        status.localAddresses
-                            .map((address) => '$address:${status.boundPort}')
-                            .join('  ·  '),
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              fontFamily: 'monospace',
-                            ),
-                      ),
-                    const SizedBox(height: 2),
-                    // The device ID is shown because it is the only thing a
-                    // user can compare when they have two identically named
-                    // computers on one network.
+              child: Icon(
+                status.isRunning
+                    ? Icons.wifi_tethering_rounded
+                    : Icons.wifi_off_rounded,
+                size: 28,
+                color: statusColor,
+              ),
+            ),
+            const SizedBox(width: 18),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    status.isRunning
+                        ? 'Discoverable on this network'
+                        : 'Not running',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${status.deviceName} · port ${status.boundPort}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 2),
+                  // Selectable and shown as a raw IP: this is the value a
+                  // user reads off the screen and types into a phone that
+                  // cannot discover automatically, and resolving the `.local`
+                  // hostname needs the very mDNS that is unavailable then.
+                  if (status.localAddresses.isNotEmpty)
                     SelectableText(
-                      status.deviceId,
+                      status.localAddresses
+                          .map((address) => '$address:${status.boundPort}')
+                          .join('  ·  '),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             fontFamily: 'monospace',
                           ),
                     ),
-                    // Screen sharing is started from the phone and has no
-                    // control on this window at all, so with the permission
-                    // granted the desktop said nothing about it whatsoever —
-                    // and someone looking here for a "share screen" button
-                    // found no button and no explanation of where it lives.
-                    // The permission banner covers the not-granted case; this
-                    // covers the far more confusing one where it works.
-                    if (screenCaptureReady) ...<Widget>[
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
-                          Icon(
-                            Icons.screen_share_outlined,
-                            size: 16,
-                            color: Theme.of(context).colorScheme.primary,
+                  const SizedBox(height: 2),
+                  // The device ID is shown because it is the only thing a
+                  // user can compare when they have two identically named
+                  // computers on one network.
+                  SelectableText(
+                    status.deviceId,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace',
+                        ),
+                  ),
+                  // Screen sharing is started from the phone and has no
+                  // control on this window at all, so with the permission
+                  // granted the desktop said nothing about it whatsoever —
+                  // and someone looking here for a "share screen" button
+                  // found no button and no explanation of where it lives.
+                  // The permission banner covers the not-granted case; this
+                  // covers the far more confusing one where it works.
+                  if (screenCaptureReady) ...<Widget>[
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Icon(
+                          Icons.screen_share_outlined,
+                          size: 16,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            'Ready to share this screen — start it from the '
+                            'phone, using the monitor button at the top of '
+                            'its remote screen.',
+                            style: Theme.of(context).textTheme.bodySmall,
                           ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              'Ready to share this screen — start it from the '
-                              'phone, using the monitor button at the top of '
-                              'its remote screen.',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                        ),
+                      ],
+                    ),
                   ],
-                ),
+                ],
               ),
-            ],
-          ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: statusColor.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: statusColor,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Text(
+                    status.isRunning ? 'Online' : 'Offline',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: statusColor,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-      );
+      ),
+    );
+  }
 }
 
 /// Says, unmissably, that this screen is being watched — and by whom.
@@ -1397,8 +1652,21 @@ class _DeviceTile extends StatelessWidget {
 
     return Card(
       child: ListTile(
-        leading: Icon(
-          device.awaitingPairing ? Icons.hourglass_top : Icons.smartphone,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color:
+                Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Icon(
+            device.awaitingPairing
+                ? Icons.hourglass_top_rounded
+                : Icons.smartphone_rounded,
+            color: Theme.of(context).colorScheme.primary,
+          ),
         ),
         title: Text(device.name),
         subtitle: Text(
@@ -1424,7 +1692,7 @@ class _DeviceTile extends StatelessWidget {
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.edit_outlined),
+              icon: const Icon(Icons.edit_rounded),
               tooltip: 'Rename this device',
               onPressed: onRename,
             ),
@@ -1441,9 +1709,10 @@ class _DeviceTile extends StatelessWidget {
               ],
             ),
             IconButton(
-              icon: const Icon(Icons.link_off),
+              icon: const Icon(Icons.delete_outline_rounded),
               tooltip: 'Forget this device',
               onPressed: onRevoke,
+              color: Theme.of(context).colorScheme.error,
             ),
           ],
         ),

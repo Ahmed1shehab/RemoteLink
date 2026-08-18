@@ -116,7 +116,7 @@ void main() {
     expect(find.byIcon(Icons.push_pin), findsOneWidget);
 
     // Remove the first row.
-    await tester.tap(find.byIcon(Icons.close).first);
+    await tester.tap(find.byIcon(Icons.delete_outline_rounded).first);
     await tester.pump();
     await tester.pump();
 

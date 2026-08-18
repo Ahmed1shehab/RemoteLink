@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 
+import '../app/desktop_ui.dart';
 import '../app/providers.dart';
 
 /// The last few things copied on this computer.
@@ -19,28 +20,26 @@ class ClipboardHistoryPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final snapshot = ref.watch(clipboardHistoryViewProvider).valueOrNull ??
         ClipboardHistorySnapshot.empty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Row(
-          children: <Widget>[
-            Text('Clipboard history', style: theme.textTheme.titleMedium),
-            const Spacer(),
-            if (snapshot.entries.isNotEmpty)
-              TextButton.icon(
-                onPressed: () => _clearAll(context, ref),
-                icon: const Icon(Icons.delete_sweep_outlined, size: 18),
-                label: const Text('Clear all'),
-              ),
-          ],
+        DesktopSectionHeader(
+          title: 'Clipboard history',
+          subtitle: 'Quickly reuse recent content from this computer',
+          trailing: snapshot.entries.isEmpty
+              ? null
+              : TextButton.icon(
+                  onPressed: () => _clearAll(context, ref),
+                  icon: const Icon(Icons.delete_sweep_rounded, size: 18),
+                  label: const Text('Clear all'),
+                ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 12),
         _PersistenceRow(isPersistent: snapshot.isPersistent),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         if (snapshot.entries.isEmpty)
           _EmptyHistory(isPersistent: snapshot.isPersistent)
         else
@@ -80,24 +79,48 @@ class _PersistenceRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
 
-    return Row(
-      children: <Widget>[
-        Expanded(
-          child: Text(
-            isPersistent
-                ? 'Kept on this computer, encrypted. Content marked '
-                    'confidential by a password manager is never recorded.'
-                : 'Kept in memory only — this list is gone when RemoteLink '
-                    'quits. Nothing is written to disk.',
-            style: theme.textTheme.bodySmall,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.55),
+        ),
+      ),
+      child: Row(
+        children: <Widget>[
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              isPersistent ? Icons.lock_outline_rounded : Icons.memory_rounded,
+              size: 20,
+              color: theme.colorScheme.primary,
+            ),
           ),
-        ),
-        const SizedBox(width: 12),
-        Switch(
-          value: isPersistent,
-          onChanged: (value) => _toggle(context, ref, enabled: value),
-        ),
-      ],
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              isPersistent
+                  ? 'Kept on this computer, encrypted. Content marked '
+                      'confidential by a password manager is never recorded.'
+                  : 'Kept in memory only — this list is gone when RemoteLink '
+                      'quits. Nothing is written to disk.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Switch(
+            value: isPersistent,
+            onChanged: (value) => _toggle(context, ref, enabled: value),
+          ),
+        ],
+      ),
     );
   }
 
@@ -131,20 +154,11 @@ class _EmptyHistory extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        'Nothing copied yet. The last $kClipboardHistoryCapacity items you '
-        'copy will appear here.',
-        style: theme.textTheme.bodyMedium,
-        textAlign: TextAlign.center,
-      ),
+    return const DesktopEmptyState(
+      icon: Icons.content_paste_search_rounded,
+      title: 'Nothing copied yet',
+      message: 'The last $kClipboardHistoryCapacity items you copy will '
+          'appear here.',
     );
   }
 }
@@ -160,14 +174,24 @@ class _HistoryRow extends ConsumerWidget {
     final theme = Theme.of(context);
 
     return ListTile(
-      leading: Icon(
-        switch (entry.kind) {
-          ClipboardHistoryKind.image => Icons.image_outlined,
-          ClipboardHistoryKind.url => Icons.link,
-          ClipboardHistoryKind.html => Icons.code,
-          ClipboardHistoryKind.text => Icons.notes,
-        },
-        size: 20,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primary.withValues(alpha: 0.09),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          switch (entry.kind) {
+            ClipboardHistoryKind.image => Icons.image_rounded,
+            ClipboardHistoryKind.url => Icons.link_rounded,
+            ClipboardHistoryKind.html => Icons.code_rounded,
+            ClipboardHistoryKind.text => Icons.notes_rounded,
+          },
+          size: 19,
+          color: theme.colorScheme.primary,
+        ),
       ),
       title: Text(
         entry.preview(),
@@ -191,9 +215,10 @@ class _HistoryRow extends ConsumerWidget {
             onPressed: () => _togglePin(context, ref),
           ),
           IconButton(
-            icon: const Icon(Icons.close),
+            icon: const Icon(Icons.delete_outline_rounded),
             tooltip: 'Remove from history',
             onPressed: () => _remove(ref),
+            color: theme.colorScheme.error,
           ),
         ],
       ),

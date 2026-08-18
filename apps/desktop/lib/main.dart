@@ -31,8 +31,8 @@ Future<void> main() async {
   await windowManager.ensureInitialized();
   await windowManager.waitUntilReadyToShow(
     const WindowOptions(
-      size: Size(880, 620),
-      minimumSize: Size(720, 520),
+      size: Size(1040, 720),
+      minimumSize: Size(720, 540),
       center: true,
       title: 'RemoteLink',
       titleBarStyle: TitleBarStyle.normal,
