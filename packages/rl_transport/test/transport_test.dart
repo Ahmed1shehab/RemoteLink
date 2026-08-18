@@ -902,6 +902,114 @@ void main() {
     });
   });
 
+  group('heartbeat liveness', () {
+    // Real timers, deliberately. The heartbeat is a `Timer.periodic` over a
+    // real socket, so there is nothing here that a fake clock alone can drive:
+    // what is faked is the *clock the deadline is measured against*, which is
+    // what lets a sixty-second silence be created without waiting sixty
+    // seconds. The test still costs about two real seconds, one per tick.
+    late DeviceIdentity phoneIdentity;
+    late DeviceIdentity desktopIdentity;
+    late InMemoryTrustStore trustStore;
+    late RemoteLinkServer server;
+    late RemoteLinkClient client;
+    late FakeClock phoneClock;
+
+    setUp(() async {
+      phoneIdentity = await DeviceIdentity.generate();
+      desktopIdentity = await DeviceIdentity.generate();
+      trustStore = InMemoryTrustStore();
+      // The phone's clock is the fake one; the desk keeps real time. Sharing a
+      // fake between them would advance both, and the desk would then hang up
+      // on the phone for the very silence this test is creating.
+      phoneClock = FakeClock();
+
+      server = RemoteLinkServer(
+        identity: desktopIdentity,
+        capabilities: _caps,
+        trustStore: trustStore,
+        clock: SystemClock(),
+        port: 0,
+      );
+      await server.start();
+
+      client = RemoteLinkClient(
+        identity: phoneIdentity,
+        capabilities: _caps,
+        clock: phoneClock,
+      );
+
+      await trustStore.upsert(
+        TrustedPeer(
+          id: phoneIdentity.id,
+          publicKey: phoneIdentity.publicKey,
+          name: 'Test Phone',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: 2,
+        ),
+      );
+    });
+
+    tearDown(() async {
+      await client.dispose();
+      await server.stop();
+      await trustStore.dispose();
+    });
+
+    test('a peer still delivering data is not declared silent', () async {
+      // The bug this covers, seen on a real phone: while a screen stream ran,
+      // the session was torn down roughly every fifteen seconds. Both the
+      // frames and the pongs share one TCP stream, so a queued 200 kB frame
+      // sits in front of the pong and delays it past the deadline — and the
+      // deadline was measured on pongs alone. The desk was visibly alive,
+      // sending thirty frames a second, and was hung up on for being silent.
+      final acceptedFuture = server.accepted.first;
+      // Off zero before the first tick. At exactly zero the "have we ever
+      // pinged" guard never opens and the deadline is never evaluated at all,
+      // which would make this test pass without testing anything.
+      phoneClock.advance(const Duration(seconds: 5));
+
+      await client.connect(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: server.boundPort,
+          deviceId: desktopIdentity.id,
+          serverPublicKey: desktopIdentity.publicKey,
+        ),
+      );
+      final accepted =
+          await acceptedFuture.timeout(const Duration(seconds: 10));
+      await client.waitUntilConnected(timeout: const Duration(seconds: 10));
+      final session = client.session!;
+
+      // Wait out one full ping/pong before creating the silence. Doing it
+      // sooner means the first tick both establishes and refreshes the pong
+      // time, and the gap this test depends on never exists.
+      await session.quality.first.timeout(const Duration(seconds: 5));
+
+      // A minute with no pong, and traffic arriving throughout.
+      phoneClock.advance(const Duration(seconds: 60));
+      final delivered = session.messages.first;
+      await accepted.session.send(const MouseMove(deltaX: 1, deltaY: 1));
+      await delivered.timeout(const Duration(seconds: 5));
+
+      final outcome = await Future.any<String>(<Future<String>>[
+        session.quality.first.then((_) => 'stayed up'),
+        session.stateChanges
+            .firstWhere((state) => state == SessionState.closed)
+            .then((_) => 'hung up'),
+      ]).timeout(const Duration(seconds: 5));
+
+      expect(
+        outcome,
+        'stayed up',
+        reason: 'the peer was sending data the whole time',
+      );
+      expect(identical(client.session, session), isTrue);
+    });
+  });
+
   group('FramedConnection framing', () {
     test('reassembles records split across reads', () async {
       // TCP is a stream: a single write can arrive as three reads. This is the

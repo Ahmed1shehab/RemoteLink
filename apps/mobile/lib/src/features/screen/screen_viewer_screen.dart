@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,7 +10,7 @@ import 'package:rl_transport/rl_transport.dart';
 import '../../app/providers.dart';
 import '../input/pointer_controller.dart';
 import 'remote_cursor.dart';
-import 'screen_coordinate_mapping.dart';
+import 'screen_frame_sink.dart';
 import 'screen_stream_request.dart';
 import 'streamed_view_gestures.dart';
 
@@ -172,7 +173,6 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
             if (frame != null)
               _ControllableFrame(
                 frame: frame,
-                monitorId: widget.monitorId,
                 canSendInput: canSendInput,
                 onSend: _unawaitedSend,
                 pointerSettings: pointerSettings,
@@ -262,7 +262,6 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
         child: frame != null
             ? _ControllableFrame(
                 frame: frame,
-                monitorId: widget.monitorId,
                 // Input is a separate grant from watching, and the desktop
                 // refuses out-of-tier messages in silence by design. Passing
                 // the answer down rather than letting the frame widget guess
@@ -309,13 +308,12 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
 
 /// The streamed picture, with touches on it driving the desk's pointer.
 ///
-/// Stateless apart from the gesture bookkeeping, and given the frame rather
-/// than reading it from a provider, so the whole of the touch-to-coordinate
+/// Stateful because a video stream has to own its decoding. Given the frame
+/// rather than reading it from a provider, so the whole of the touch-to-message
 /// path can be exercised without a session behind it.
 class _ControllableFrame extends StatefulWidget {
   const _ControllableFrame({
     required this.frame,
-    required this.monitorId,
     required this.canSendInput,
     required this.onSend,
     required this.pointerSettings,
@@ -323,13 +321,12 @@ class _ControllableFrame extends StatefulWidget {
   });
 
   final ScreenFrame frame;
-  final int monitorId;
   final bool canSendInput;
   final void Function(Message) onSend;
 
-  /// The user's own pointer preferences, so scrolling here behaves the way it
-  /// does on the touchpad — natural scrolling in particular, which is
-  /// backwards from the wrong setting and immediately obvious.
+  /// The user's own pointer preferences, so moving and scrolling here behave
+  /// the way they do on the touchpad — natural scrolling in particular, which
+  /// is backwards from the wrong setting and immediately obvious.
   final PointerSettings pointerSettings;
 
   /// Whether the desk takes part in pinch and rotate. Passed rather than read
@@ -343,20 +340,45 @@ class _ControllableFrame extends StatefulWidget {
 class _ControllableFrameState extends State<_ControllableFrame> {
   StreamedViewGestures? _gestures;
 
+  late final ScreenFrameSink _sink = ScreenFrameSink(onImage: _onImage);
+
+  /// The frame currently on screen. Owned here, and disposed here.
+  ui.Image? _image;
+
+  /// The bytes last handed to the decoder, so a rebuild that changes something
+  /// else — the permission tier, a settings change — does not re-decode a
+  /// picture that is already drawn.
+  Uint8List? _submitted;
+
   /// The size of the widget the picture was last laid out in.
   ///
-  /// Held as state because the gesture recogniser maps a touch against the
-  /// drawn rectangle, and the drawn rectangle depends on both the frame and
-  /// the widget. Recomputing it per event from a stale value is how a pointer
-  /// ends up correct in portrait and wrong the instant the phone turns.
+  /// Held as state because the cursor overlay is positioned against the drawn
+  /// rectangle, and under `BoxFit.contain` that is not the widget's rectangle
+  /// but the letterboxed one inside it.
   Size _containerSize = Size.zero;
 
-  Size get _imageSize => Size(
+  /// The size of the picture actually on screen.
+  ///
+  /// Taken from the decoded image rather than from the newest frame: while a
+  /// decode is in flight those disagree, and the cursor must be placed against
+  /// what the user is looking at.
+  Size get _imageSize {
+    final image = _image;
+    if (image == null) {
+      return Size(
         widget.frame.width.toDouble(),
         widget.frame.height.toDouble(),
       );
+    }
+    return Size(image.width.toDouble(), image.height.toDouble());
+  }
 
   /// The desk's pointer position, if this frame reported one.
+  ///
+  /// Read from the newest frame rather than from the drawn one, deliberately.
+  /// The pointer is what the user is steering, so it should be as current as
+  /// the phone can make it even when the picture behind it is a frame or two
+  /// old.
   Offset? get _cursor {
     final x = widget.frame.cursorX;
     final y = widget.frame.cursorY;
@@ -364,36 +386,75 @@ class _ControllableFrameState extends State<_ControllableFrame> {
     return Offset(x, y);
   }
 
+  @override
+  void initState() {
+    super.initState();
+    _submitted = widget.frame.data;
+    _sink.submit(widget.frame.data);
+  }
+
+  @override
+  void didUpdateWidget(covariant _ControllableFrame oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final data = widget.frame.data;
+    if (identical(data, _submitted)) return;
+    _submitted = data;
+    _sink.submit(data);
+  }
+
+  void _onImage(ui.Image image) {
+    if (!mounted) {
+      image.dispose();
+      return;
+    }
+    setState(() {
+      _image?.dispose();
+      _image = image;
+    });
+  }
+
+  @override
+  void dispose() {
+    _sink.dispose();
+    _image?.dispose();
+    _image = null;
+    super.dispose();
+  }
+
   StreamedViewGestures _recogniser(PointerSettings settings) =>
       _gestures ??= StreamedViewGestures(
         send: widget.onSend,
-        monitorId: widget.monitorId,
         gesturesAvailable: widget.gesturesAvailable,
         settings: settings,
-        // A closure over the *current* size and frame rather than values
-        // captured once: both change while the gesture recogniser lives, and a
-        // recogniser holding the size it was built with aims at the picture as
-        // it used to be.
-        toNormalised: (local) => mapTouchToNormalisedCoordinates(
-          touchPosition: local,
-          containerSize: _containerSize,
-          imageSize: _imageSize,
-        ),
       );
 
   @override
   Widget build(BuildContext context) {
-    final image = Image.memory(
-      widget.frame.data,
-      gaplessPlayback: true,
-      fit: BoxFit.contain,
-    );
+    final image = _image;
+    // A black rectangle until the first frame is decoded, rather than nothing:
+    // the parent has already committed to filling the screen, and an empty
+    // slot there flashes white for one frame on a black background.
+    final picture = image == null
+        ? const ColoredBox(color: Colors.black)
+        // A clone, not the image itself. `RenderImage` takes ownership of what
+        // it is given and disposes it when replaced, so handing it this state's
+        // own handle would mean two owners and a double dispose. It recognises
+        // a clone of what it already holds and drops the duplicate, so a
+        // rebuild that changes nothing costs nothing.
+        : RawImage(
+            image: image.clone(),
+            fit: BoxFit.contain,
+            // Low, explicitly. This is a picture being scaled down and replaced
+            // thirty times a second; the better filters build mipmaps per
+            // image, which is work thrown away before it is ever reused.
+            filterQuality: FilterQuality.low,
+          );
 
     // Without the tier for input this is a picture, and deliberately just a
     // picture — no listener, so nothing is sent that the desktop would refuse
     // without saying so. The cursor still gets drawn: watching where someone
     // else is pointing is the whole value of a view-only stream.
-    if (!widget.canSendInput) return _withCursor(image);
+    if (!widget.canSendInput) return _withCursor(picture);
 
     final gestures = _recogniser(widget.pointerSettings)
       ..settings = widget.pointerSettings;
@@ -419,7 +480,7 @@ class _ControllableFrameState extends State<_ControllableFrame> {
             child: Stack(
               fit: StackFit.expand,
               children: <Widget>[
-                image,
+                picture,
                 RemoteCursor(
                   normalised: _cursor,
                   containerSize: _containerSize,
@@ -433,16 +494,16 @@ class _ControllableFrameState extends State<_ControllableFrame> {
     );
   }
 
-  /// Overlays the desk's pointer on [image].
+  /// Overlays the desk's pointer on [picture].
   ///
   /// Its own [LayoutBuilder] because the cursor's position depends on where the
   /// picture was actually drawn, and under `BoxFit.contain` that is not the
   /// widget's own rectangle — it is the letterboxed rectangle inside it.
-  Widget _withCursor(Widget image) => LayoutBuilder(
+  Widget _withCursor(Widget picture) => LayoutBuilder(
         builder: (context, constraints) => Stack(
           fit: StackFit.expand,
           children: <Widget>[
-            image,
+            picture,
             RemoteCursor(
               normalised: _cursor,
               containerSize: Size(constraints.maxWidth, constraints.maxHeight),

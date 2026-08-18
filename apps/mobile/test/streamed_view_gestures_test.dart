@@ -13,22 +13,11 @@ final class _Harness {
   _Harness({
     bool gesturesAvailable = false,
     PointerSettings settings = const PointerSettings(),
-    Offset? Function(Offset)? toNormalised,
   }) {
     gestures = StreamedViewGestures(
       send: sent.add,
-      monitorId: 4,
       gesturesAvailable: gesturesAvailable,
       settings: settings,
-      // A square picture filling a 100x100 widget, so widget coordinates are
-      // simply percentages. Letterboxing has its own tests in the mapping
-      // module; here it would only obscure the gesture behaviour.
-      toNormalised: toNormalised ??
-          (local) {
-            if (local.dx < 0 || local.dx > 100) return null;
-            if (local.dy < 0 || local.dy > 100) return null;
-            return Offset(local.dx / 100, local.dy / 100);
-          },
     );
   }
 
@@ -37,10 +26,19 @@ final class _Harness {
 
   final Map<int, Offset> _at = <int, Offset>{};
 
+  /// Advanced by a plausible frame interval per event.
+  ///
+  /// Movement is scaled through the same controller the touchpad uses, and
+  /// that controller reads velocity off the timestamps. Leaving every event at
+  /// zero would exercise a division that never happens on a real device.
+  Duration _now = Duration.zero;
+
+  Duration get _tick => _now += const Duration(milliseconds: 8);
+
   void down(int pointer, Offset position) {
     _at[pointer] = position;
     gestures.onPointerDown(
-      PointerDownEvent(pointer: pointer, position: position),
+      PointerDownEvent(pointer: pointer, position: position, timeStamp: _tick),
     );
   }
 
@@ -48,19 +46,32 @@ final class _Harness {
     final from = _at[pointer]!;
     _at[pointer] = to;
     gestures.onPointerMove(
-      PointerMoveEvent(pointer: pointer, position: to, delta: to - from),
+      PointerMoveEvent(
+        pointer: pointer,
+        position: to,
+        delta: to - from,
+        timeStamp: _tick,
+      ),
     );
   }
 
   void up(int pointer) {
     gestures.onPointerUp(
-      PointerUpEvent(pointer: pointer, position: _at.remove(pointer)!),
+      PointerUpEvent(
+        pointer: pointer,
+        position: _at.remove(pointer)!,
+        timeStamp: _tick,
+      ),
     );
   }
 
   void cancel(int pointer) {
     gestures.onPointerCancel(
-      PointerCancelEvent(pointer: pointer, position: _at.remove(pointer)!),
+      PointerCancelEvent(
+        pointer: pointer,
+        position: _at.remove(pointer)!,
+        timeStamp: _tick,
+      ),
     );
   }
 
@@ -69,22 +80,48 @@ final class _Harness {
 
 void main() {
   group('one finger', () {
-    test('aims where it touches, before any click goes out', () {
-      // Order is the assertion. Every button event acts wherever the pointer
-      // currently is, so a click sent before the move lands at the previous
-      // position — which on a remote desktop means clicking whatever the user
-      // last touched rather than what they just tapped.
+    test('putting a finger down does not move the pointer', () {
+      // The distinction between this view and a touchscreen. Landing a finger
+      // is not a movement, so the pointer stays where the user left it and a
+      // tap clicks there — rather than teleporting under the thumb, which is
+      // the one place on the picture nobody can see.
       final harness = _Harness()
         ..down(1, const Offset(30, 70))
         ..up(1);
 
-      expect(harness.sent.first, isA<MouseMoveAbsolute>());
-      final move = harness.sent.first as MouseMoveAbsolute;
-      expect(move.x, closeTo(0.3, 1e-9));
-      expect(move.y, closeTo(0.7, 1e-9));
-      expect(move.monitorId, 4, reason: 'the watched display, not the desktop');
+      expect(harness.sent.first, isA<MouseButtonEvent>());
+      expect(harness.ofType<MouseMove>(), isEmpty);
+    });
 
-      expect(harness.sent[1], isA<MouseButtonEvent>());
+    test('never sends an absolute position', () {
+      // Belt and braces on the whole point of this file: an absolute message
+      // slipping out alongside the relative ones would snap the pointer back
+      // to the finger on every frame, which looks like the relative movement
+      // simply not working.
+      final harness = _Harness()..down(1, const Offset(10, 10));
+      for (var i = 1; i <= 5; i++) {
+        harness.move(1, Offset(10 + i * 10, 10 + i * 3));
+      }
+      harness.up(1);
+
+      expect(harness.ofType<MouseMoveAbsolute>(), isEmpty);
+    });
+
+    test('a drag sends the movement, scaled by sensitivity', () {
+      // Relative, and scaled: the user's sensitivity setting is what makes a
+      // 4K desk crossable without swiping six times, and it has to mean the
+      // same thing here as it does on the touchpad.
+      final harness = _Harness(
+        settings: const PointerSettings(sensitivity: 2),
+      )..down(1, const Offset(10, 10));
+      harness
+        ..move(1, const Offset(40, 10))
+        ..up(1);
+
+      final moves = harness.ofType<MouseMove>();
+      expect(moves, hasLength(1));
+      expect(moves.single.deltaX, 60, reason: '30 logical pixels at 2.0');
+      expect(moves.single.deltaY, 0);
     });
 
     test('a tap is a left click, down then up', () {
@@ -106,7 +143,7 @@ void main() {
       }
       harness.up(1);
 
-      expect(harness.ofType<MouseMoveAbsolute>(), hasLength(6));
+      expect(harness.ofType<MouseMove>(), hasLength(5));
       expect(
         harness.ofType<MouseButtonEvent>(),
         isEmpty,
@@ -125,12 +162,21 @@ void main() {
       expect(harness.ofType<MouseButtonEvent>(), hasLength(2));
     });
 
-    test('a touch in a letterbox bar moves nothing', () {
-      final harness = _Harness(toNormalised: (_) => null)
-        ..down(1, const Offset(50, 50))
-        ..move(1, const Offset(60, 50));
+    test('sub-pixel movement is carried forward, not discarded', () {
+      // A quarter of a pixel thrown away sixty times a second is fifteen
+      // pixels a second of movement the finger made and the pointer did not —
+      // invisible per event and infuriating over a slow, careful drag.
+      final harness = _Harness(
+        settings: const PointerSettings(sensitivity: 0.5),
+      )..down(1, const Offset(50, 50));
+      for (var i = 1; i <= 8; i++) {
+        harness.move(1, Offset(50 + i.toDouble(), 50));
+      }
 
-      expect(harness.ofType<MouseMoveAbsolute>(), isEmpty);
+      final travelled = harness
+          .ofType<MouseMove>()
+          .fold<int>(0, (sum, move) => sum + move.deltaX);
+      expect(travelled, 4, reason: '8 pixels at 0.5, none of it lost');
     });
 
     test('a second quick tap is reported as a double click', () {
@@ -187,10 +233,10 @@ void main() {
 
       expect(harness.ofType<MouseScroll>(), isNotEmpty);
       expect(
-        harness.ofType<MouseMoveAbsolute>(),
-        hasLength(1),
-        reason: 'only the initial aim; the two-finger drag must not move the '
-            'pointer as well as scrolling',
+        harness.ofType<MouseMove>(),
+        isEmpty,
+        reason: 'a two-finger drag must scroll without also dragging the '
+            'pointer across the desk',
       );
     });
 
@@ -354,7 +400,7 @@ void main() {
       final releaseIndex = harness.sent.indexOf(buttons[1]);
       final movedWhileHeld = harness.sent
           .getRange(pressIndex, releaseIndex)
-          .whereType<MouseMoveAbsolute>();
+          .whereType<MouseMove>();
       expect(movedWhileHeld, isNotEmpty);
     });
 

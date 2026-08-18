@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:remotelink_mobile/src/app/providers.dart';
@@ -28,6 +30,27 @@ void main() {
     view.devicePixelRatio = 3;
     addTearDown(view.resetPhysicalSize);
     addTearDown(view.resetDevicePixelRatio);
+
+    // Decoding a frame is real work on the engine, so the tests that assert a
+    // picture appeared have to run inside `runAsync` — and inside `runAsync`
+    // the provider graph's real futures run too, including the one that asks
+    // the platform where to store the identity. Unanswered, that throws a
+    // MissingPluginException and fails the test for a reason unrelated to
+    // anything it is testing.
+    const channel = MethodChannel('plugins.flutter.io/path_provider');
+    TestWidgetsFlutterBinding.ensureInitialized()
+        .defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          channel,
+          (call) async => Directory.systemTemp
+              .createTempSync('remotelink-viewer-test')
+              .path,
+        );
+    addTearDown(
+      () => TestWidgetsFlutterBinding.ensureInitialized()
+          .defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null),
+    );
   });
 
   testWidgets(
@@ -722,10 +745,9 @@ void main() {
       ),
     );
 
-    await tester.pump();
-    await tester.pump();
+    await _decodeFrame(tester);
 
-    expect(find.byType(Image), findsOneWidget);
+    _expectPictureOnScreen(tester);
     expect(find.text('1920×1080'), findsOneWidget);
   });
 
@@ -836,10 +858,9 @@ void main() {
       ),
     );
 
-    await tester.pump();
-    await tester.pump();
+    await _decodeFrame(tester);
 
-    expect(find.byType(Image), findsOneWidget);
+    _expectPictureOnScreen(tester);
     expect(
       find.byKey(const ValueKey<String>('screen-viewer-pointer-surface')),
       findsNothing,
@@ -848,7 +869,45 @@ void main() {
   });
 }
 
-/// A valid 4x2 JPEG, small enough to inline and real enough for `Image.memory`.
+/// Pumps until the frame has actually been decoded.
+///
+/// Decoding is real asynchronous work on the engine, which the test binding's
+/// fake clock will never advance on its own — so it has to happen inside
+/// [WidgetTester.runAsync]. Two plain pumps used to be enough only because
+/// `Image.memory` puts *something* in the tree before it has an image.
+Future<void> _decodeFrame(WidgetTester tester) async {
+  // Alternating, and that is the whole reason this helper exists. Decoding
+  // walks a chain of real engine calls — buffer, descriptor, codec, frame —
+  // and the two halves of each step live in different worlds: the engine's
+  // callback only fires while `runAsync` lets real time pass, and the `await`
+  // that resumes afterwards is a microtask in the binding's fake zone, which
+  // only `pump` drains. One of either is a deadlock; alternating walks the
+  // chain one link per turn.
+  for (var attempt = 0; attempt < 20; attempt++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 5)),
+    );
+    await tester.pump();
+    if (find.byType(RawImage).evaluate().isNotEmpty) return;
+  }
+}
+
+/// Asserts a decoded picture is on screen, not merely a placeholder for one.
+///
+/// The old assertion — one `Image` widget exists — would have passed against a
+/// frame that failed to decode, because the widget is in the tree either way.
+void _expectPictureOnScreen(WidgetTester tester) {
+  final raw = tester.widget<RawImage>(find.byType(RawImage));
+  // A decoded image, not a placeholder standing in for one. The old assertion
+  // — that an `Image` widget exists — would have passed against a frame the
+  // engine rejected, because the widget goes into the tree either way.
+  expect(raw.image, isNotNull, reason: 'the frame never finished decoding');
+  // Never `fill`: a desk stretched to a phone's aspect ratio is unusable, and
+  // it is the kind of thing that looks almost right in a screenshot.
+  expect(raw.fit, BoxFit.contain);
+}
+
+/// A valid 4x2 JPEG, small enough to inline and real enough for the engine's own decoder.
 ScreenFrame _tinyFrame() => ScreenFrame(
       sequence: 1,
       ptsMicros: 0,
@@ -920,7 +979,7 @@ Future<RemoteLinkClient> _connectedClient(WidgetTester tester) async {
   return client;
 }
 
-/// A valid 4x2 JPEG: small enough to inline, real enough for `Image.memory`.
+/// A valid 4x2 JPEG: small enough to inline, real enough for the engine's own decoder.
 const List<int> _jpegBytes = <int>[
   0xFF,
   0xD8,

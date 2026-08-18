@@ -20,10 +20,19 @@ const double kSwipeThreshold = 40;
 /// the desk advertising [Capabilities.gestures] exactly as the touchpad gates
 /// them.
 ///
-/// The one deliberate difference is what a single finger means. On the touchpad
-/// it is a *relative* nudge, because there is nothing under the finger. Here the
-/// finger is on the desk itself, so it is *absolute*: the pointer goes where you
-/// touched. Everything else is unchanged.
+/// A single finger moves the pointer *relatively*, exactly as on the touchpad.
+/// The obvious alternative — treat the picture as a touchscreen and put the
+/// pointer wherever the finger lands — was tried and is worse in practice. A
+/// finger is several millimetres wide and hides what it is aiming at, so on a
+/// desk scaled down to fit a phone one finger-width covers a whole row of menu
+/// items: you can see roughly where you are going and never land on it. Moving
+/// the pointer instead means the fine positioning is done by the *pointer*,
+/// which is a few pixels wide and drawn on top of the picture rather than under
+/// a thumb, and the finger only has to supply direction. It also makes the far
+/// corner of a 4K desk reachable by swiping repeatedly, rather than requiring a
+/// touch inside a two-pixel target.
+///
+/// Everything else is unchanged.
 ///
 /// Separate from the widget, and free of Flutter's widget layer, because this is
 /// where the behaviour actually lives — which finger count means which button,
@@ -33,8 +42,6 @@ const double kSwipeThreshold = 40;
 final class StreamedViewGestures {
   StreamedViewGestures({
     required this.send,
-    required this.monitorId,
-    required this.toNormalised,
     required PointerSettings settings,
     this.gesturesAvailable = false,
   })  : _settings = settings,
@@ -43,12 +50,6 @@ final class StreamedViewGestures {
   /// Where a message goes. Never awaited by this class — see the viewer's
   /// `_unawaitedSend` for why a pointer stream must not queue on round trips.
   final void Function(Message) send;
-
-  final int monitorId;
-
-  /// Maps a position in the widget to 0..1 within the drawn picture, or null
-  /// for a touch in a letterbox bar.
-  final Offset? Function(Offset) toNormalised;
 
   final bool gesturesAvailable;
 
@@ -91,11 +92,8 @@ final class StreamedViewGestures {
 
     if (_pointers.length == 1) {
       _travelled = 0;
-      // Aim first. Every button this gesture might end up sending acts at the
-      // pointer's current position, so the position has to be right before any
-      // of them go out — not after, when the click has already landed wherever
-      // the pointer happened to be.
-      _moveTo(event.localPosition);
+      // Nothing is sent yet. The pointer is already somewhere, and a tap acts
+      // where it is — putting a finger down is not itself a movement.
     } else if (_pointers.length == 2) {
       _lastSpan = _spanBetweenPointers();
       _lastAngle = _angleBetweenPointers();
@@ -117,7 +115,7 @@ final class StreamedViewGestures {
       return;
     }
 
-    _moveTo(event.localPosition);
+    _move(event);
   }
 
   void onPointerUp(PointerUpEvent event) {
@@ -183,20 +181,15 @@ final class StreamedViewGestures {
     );
   }
 
-  void _moveTo(Offset local) {
-    final normalised = toNormalised(local);
-    // Null means the touch landed in a letterbox bar. Dropping it is right:
-    // the bars are not part of the desk, and clamping would pile every edge
-    // touch onto the same row of pixels.
-    if (normalised == null) return;
-
-    send(
-      MouseMoveAbsolute(
-        x: normalised.dx,
-        y: normalised.dy,
-        monitorId: monitorId,
-      ),
-    );
+  void _move(PointerMoveEvent event) {
+    // Through the same controller the touchpad uses, so the user's sensitivity
+    // and acceleration settings mean one thing across the app, and so the
+    // sub-pixel remainder is carried between events rather than truncated away
+    // — dropping a 0.4-pixel fraction sixty times a second is movement the
+    // finger made and the pointer did not.
+    final delta = _pointer.translatePan(event.delta, event.timeStamp);
+    if (delta == null) return;
+    send(MouseMove(deltaX: delta.$1, deltaY: delta.$2));
   }
 
   void _scroll(Offset delta) {

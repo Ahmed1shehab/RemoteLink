@@ -148,6 +148,7 @@ final class Session {
   }
 
   void _enqueueRecord(Uint8List record) {
+    _lastInboundMicros = _clock.monotonicMicros();
     _readChain = _readChain.then((_) => _onRecord(record)).then((_) {},
         onError: (Object error, StackTrace stack) {
       _log.error('record handling failed', error: error, stackTrace: stack);
@@ -206,6 +207,23 @@ final class Session {
   Timer? _heartbeat;
   int _lastPingMicros = 0;
   int _lastPongMicros = 0;
+
+  /// When anything at all last arrived from the peer.
+  ///
+  /// Separate from [_lastPongMicros] because they answer different questions.
+  /// A pong says "the peer is responsive"; this says "the peer is there". The
+  /// two come apart under load, and the connection dies on the difference: one
+  /// TCP stream carries both the screen frames and the pongs, so a queued
+  /// 200 kB frame sits in front of the pong and delays it by however long that
+  /// frame takes to cross the link. Judged on pongs alone, a computer sending
+  /// thirty frames a second — visibly, continuously alive — gets declared
+  /// silent and hung up on, which is exactly what a real session did: torn down
+  /// every fifteen seconds while streaming.
+  ///
+  /// Recorded before decryption, in [_enqueueRecord], because the question is
+  /// whether bytes are still flowing, not whether they parse.
+  int _lastInboundMicros = 0;
+
   int _missedHeartbeats = 0;
 
   final List<int> _rttSamples = <int>[];
@@ -538,7 +556,12 @@ final class Session {
     if (_state == SessionState.closed) return;
 
     final now = _clock.monotonicMicros();
-    final silentFor = now - _lastPongMicros;
+    // The later of the two: a peer that is still delivering records has not
+    // gone anywhere, whatever its pongs are doing.
+    final lastHeard = _lastPongMicros > _lastInboundMicros
+        ? _lastPongMicros
+        : _lastInboundMicros;
+    final silentFor = now - lastHeard;
 
     if (_lastPingMicros > 0 && silentFor > kHeartbeatTimeout.inMicroseconds) {
       _missedHeartbeats++;
