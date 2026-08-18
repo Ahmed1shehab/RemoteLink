@@ -123,6 +123,22 @@ abstract interface class ScreenCaptureBackend {
     double quality = kDefaultScreenJpegQuality,
   });
 
+  /// Where the pointer is inside [monitorId], in 0..1, or null if elsewhere.
+  ///
+  /// Separate from [captureFrame], and synchronous, because the two cost
+  /// nothing like the same amount. A capture grabs, scales and encodes the
+  /// display — around thirty milliseconds and a couple of hundred kilobytes.
+  /// Reading the pointer is two calls into the window server: measured at
+  /// 10.3 microseconds on an M-series Mac, or 0.6 ms of CPU per second if
+  /// polled at 60 Hz.
+  ///
+  /// That gap is the whole reason this exists. While the cursor travelled on
+  /// the frame, every pointer movement cost a full frame, so the drawn cursor
+  /// could only move as fast as the link could carry pictures.
+  ({double x, double y})? cursorPosition({
+    int monitorId = kWholeVirtualDesktopMonitorId,
+  });
+
   void dispose();
 }
 
@@ -149,6 +165,12 @@ final class UnsupportedScreenCaptureBackend implements ScreenCaptureBackend {
     int maxHeight = 0,
     double quality = kDefaultScreenJpegQuality,
   }) async =>
+      null;
+
+  @override
+  ({double x, double y})? cursorPosition({
+    int monitorId = kWholeVirtualDesktopMonitorId,
+  }) =>
       null;
 
   @override

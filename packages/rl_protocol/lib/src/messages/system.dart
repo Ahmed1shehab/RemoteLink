@@ -436,6 +436,7 @@ enum PermissionTier {
             MessageType.screenStreamStart ||
             MessageType.screenStreamStop ||
             MessageType.screenFrame ||
+            MessageType.screenCursor ||
             MessageType.screenConfigure =>
               canViewScreen,
             _ => wireValue >= readOnly.wireValue,

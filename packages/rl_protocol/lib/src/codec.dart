@@ -184,6 +184,7 @@ final class MessageCodec {
         MessageType.screenStreamStop => ScreenStreamStop.readFrom(reader),
         MessageType.screenFrame => ScreenFrame.readFrom(reader),
         MessageType.screenConfigure => ScreenConfigure.readFrom(reader),
+        MessageType.screenCursor => ScreenCursor.readFrom(reader),
         MessageType.screenTopology => ScreenTopology.readFrom(reader),
 
         // Device management.

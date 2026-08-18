@@ -440,7 +440,35 @@ per monitor:
   name       length-prefixed UTF-8, through `sanitiseDeviceName` on the way in
 ```
 
-### 11.2 Addressing a monitor
+### 11.2 The pointer
+
+`screenCursor` (`0x0606`) carries the pointer's position on its own: a
+`monitorId`, a presence bit, and — when present — two float32s normalised to
+`[0.0, 1.0]` within that monitor. Thirty-four bytes on the wire including the
+frame header.
+
+Screen-capture APIs do not composite the cursor into the image, so it has to be
+read alongside the picture and sent beside it. It used to be sent *inside* it,
+on `screenFrame`, and that made every pointer movement cost a whole encoded
+frame: measured on a 1440x900 stream at the default quality, 213,622 bytes to
+report that an arrow had moved a few pixels. No home network carries that at a
+useful rate, so the drawn cursor updated five to ten times a second — the one
+thing on screen a user is guaranteed to be watching was the jerkiest.
+
+Sent separately it can be sampled far faster than the screen is captured, and
+frame deduplication starts working: a still desk with a moving mouse now sends
+no frames at all, which also clears the queue the phone's own input messages
+were waiting behind.
+
+The absent state is transmitted rather than merely omitted — it is how a viewer
+learns to stop drawing a pointer that has moved to another monitor. A position
+outside `[0.0, 1.0]` is dropped rather than clamped, because an arrow pinned to
+an edge it is not on looks like a stuck cursor rather than an absent one.
+
+`screenFrame` keeps its own cursor fields. They are what a peer predating this
+message reads, and removing them would leave it with no pointer at all.
+
+### 11.3 Addressing a monitor
 
 `mouseMoveAbsolute` and `screenStreamStart` carry `monitorId`.
 
@@ -460,7 +488,7 @@ desktop, which is recoverable; addressing the wrong screen is not.
 Normalisation is against `extent - 1`, so `1.0` is the last addressable pixel of
 that monitor rather than the first pixel of its neighbour.
 
-### 11.3 Stream lifecycle and payloads
+### 11.4 Stream lifecycle and payloads
 
 #### Codecs
 

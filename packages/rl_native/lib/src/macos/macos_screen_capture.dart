@@ -150,6 +150,20 @@ final class MacosScreenCaptureBackend implements ScreenCaptureBackend {
     return frame;
   }
 
+  /// Reads the pointer on the calling isolate, never through the worker.
+  ///
+  /// The worker exists to keep a thirty-millisecond encode off the event loop.
+  /// This is ten microseconds, so a round trip through a port would cost more
+  /// than the work — and it would queue behind whatever frame the worker is
+  /// encoding, which is exactly the coupling this call exists to break.
+  @override
+  ({double x, double y})? cursorPosition({
+    int monitorId = kWholeVirtualDesktopMonitorId,
+  }) {
+    if (!isAvailable) return null;
+    return _capturer.cursorPosition(monitorId: monitorId);
+  }
+
   @override
   void dispose() {
     _disposed = true;

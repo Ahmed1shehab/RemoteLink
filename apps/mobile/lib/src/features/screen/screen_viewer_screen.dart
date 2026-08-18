@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:meta/meta.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
@@ -23,6 +24,60 @@ final screenFrameProvider =
     if (message is ScreenFrame) yield message;
   }
 });
+
+/// Where the desk's pointer is, on its own stream.
+///
+/// Separate from [screenFrameProvider] because that is the whole point of
+/// `ScreenCursor`. The pointer used to arrive on the frame, which meant it
+/// could only move as often as a couple of hundred kilobytes of picture could
+/// cross the link — five to ten times a second on real Wi-Fi, and the one
+/// thing on screen the user is certain to be watching was the jerkiest.
+///
+/// A frame's own cursor fields are still read, as a fallback: a desktop built
+/// before `ScreenCursor` sends nothing here, and a viewer that ignored the
+/// frame would show it no pointer at all. A current desktop sends both, and the
+/// dedicated message simply arrives far more often.
+final screenCursorProvider = StreamProvider.autoDispose<Offset?>((ref) async* {
+  final client = await ref.watch(clientProvider.future);
+  yield null;
+  await for (final message in client.messages) {
+    final update = screenCursorUpdate(message);
+    if (update != null) yield update.position;
+  }
+});
+
+/// What [message] says about where the desk's pointer is.
+///
+/// Three answers, not two, which is why this returns a record rather than an
+/// `Offset?`: `null` means the message says nothing about the pointer, while a
+/// record carrying a null [position] means the pointer has left the display and
+/// the arrow must stop being drawn. Collapsing those two would either freeze a
+/// departed cursor against an edge or blank a live one on every unrelated
+/// message.
+///
+/// A function rather than logic inside the provider so it can be tested against
+/// real messages. A widget test that overrides the provider proves the overlay
+/// draws what it is handed and nothing about what produces it.
+@visibleForTesting
+({Offset? position})? screenCursorUpdate(Message message) {
+  if (message is ScreenCursor) {
+    final x = message.x;
+    final y = message.y;
+    return (position: x == null || y == null ? null : Offset(x, y));
+  }
+  // The fallback for a desktop built before `ScreenCursor` existed, which
+  // reports the pointer only on the frame. A current desktop sends both; the
+  // dedicated message simply arrives far more often, so this rarely decides
+  // anything. Absence here is *not* treated as the pointer leaving — an older
+  // desktop omits these fields whenever it cannot read the pointer, and
+  // blanking the arrow on that would make it flicker.
+  if (message is ScreenFrame) {
+    final x = message.cursorX;
+    final y = message.cursorY;
+    if (x != null && y != null) return (position: Offset(x, y));
+  }
+  return null;
+}
 
 /// Live screen viewer screen showing desktop frames and controls.
 class ScreenViewerScreen extends ConsumerStatefulWidget {
@@ -149,6 +204,7 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
 
     final frameAsync = ref.watch(screenFrameProvider);
     final frame = frameAsync.valueOrNull;
+    final cursor = ref.watch(screenCursorProvider).valueOrNull;
     final canSendInput =
         ref.watch(currentPermissionTierProvider).valueOrNull?.canSendInput ??
             false;
@@ -173,6 +229,7 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
             if (frame != null)
               _ControllableFrame(
                 frame: frame,
+                cursor: cursor,
                 canSendInput: canSendInput,
                 onSend: _unawaitedSend,
                 pointerSettings: pointerSettings,
@@ -262,6 +319,7 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
         child: frame != null
             ? _ControllableFrame(
                 frame: frame,
+                cursor: cursor,
                 // Input is a separate grant from watching, and the desktop
                 // refuses out-of-tier messages in silence by design. Passing
                 // the answer down rather than letting the frame widget guess
@@ -314,6 +372,7 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
 class _ControllableFrame extends StatefulWidget {
   const _ControllableFrame({
     required this.frame,
+    required this.cursor,
     required this.canSendInput,
     required this.onSend,
     required this.pointerSettings,
@@ -321,6 +380,11 @@ class _ControllableFrame extends StatefulWidget {
   });
 
   final ScreenFrame frame;
+
+  /// The desk's pointer, from its own stream. Null when it has left this
+  /// display, or before the first report.
+  final Offset? cursor;
+
   final bool canSendInput;
   final void Function(Message) onSend;
 
@@ -371,19 +435,6 @@ class _ControllableFrameState extends State<_ControllableFrame> {
       );
     }
     return Size(image.width.toDouble(), image.height.toDouble());
-  }
-
-  /// The desk's pointer position, if this frame reported one.
-  ///
-  /// Read from the newest frame rather than from the drawn one, deliberately.
-  /// The pointer is what the user is steering, so it should be as current as
-  /// the phone can make it even when the picture behind it is a frame or two
-  /// old.
-  Offset? get _cursor {
-    final x = widget.frame.cursorX;
-    final y = widget.frame.cursorY;
-    if (x == null || y == null) return null;
-    return Offset(x, y);
   }
 
   @override
@@ -482,7 +533,7 @@ class _ControllableFrameState extends State<_ControllableFrame> {
               children: <Widget>[
                 picture,
                 RemoteCursor(
-                  normalised: _cursor,
+                  normalised: widget.cursor,
                   containerSize: _containerSize,
                   imageSize: _imageSize,
                 ),
@@ -505,7 +556,7 @@ class _ControllableFrameState extends State<_ControllableFrame> {
           children: <Widget>[
             picture,
             RemoteCursor(
-              normalised: _cursor,
+              normalised: widget.cursor,
               containerSize: Size(constraints.maxWidth, constraints.maxHeight),
               imageSize: _imageSize,
             ),

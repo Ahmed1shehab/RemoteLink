@@ -585,3 +585,83 @@ final class ScreenConfigure extends Message {
       'ScreenConfigure(fps: $targetFps, bitrate: $targetBitrateKbps, '
       'max: ${maxWidth}x$maxHeight, monitorId: $monitorId)';
 }
+
+/// Server → client. Where the desk's pointer is, on its own.
+///
+/// The cursor used to ride on [ScreenFrame], which is where it is produced —
+/// the capture APIs do not composite it, so it has to be read alongside the
+/// picture. Carrying it *in* the picture made every pointer movement cost a
+/// whole encoded frame: on a still desk, moving the mouse re-sent 213,622
+/// bytes to report that an arrow had moved a few pixels. The link could not
+/// carry that at any useful rate, so the drawn cursor updated five to ten
+/// times a second and the one moving thing on screen was the jerkiest.
+///
+/// Sent on its own it is 34 bytes on the wire, so the pointer can be sampled
+/// far faster than the screen is captured, and a still desk with a moving mouse
+/// now sends no frames at all. That second effect matters as much as the first:
+/// the frames it stops sending were also what the phone's own input messages
+/// were queueing behind.
+///
+/// [ScreenFrame] keeps its cursor fields. They are what an older phone reads,
+/// and a peer that predates this message would otherwise lose its pointer
+/// entirely.
+@immutable
+final class ScreenCursor extends Message {
+  const ScreenCursor({
+    required this.monitorId,
+    this.x,
+    this.y,
+  });
+
+  /// Which display these coordinates are normalised against, matching
+  /// [ScreenStreamStart.monitorId].
+  final int monitorId;
+
+  /// Position in `[0.0, 1.0]` within that display, or null when the pointer is
+  /// somewhere else on a multi-monitor desk.
+  ///
+  /// Null is a real state and has to be sent, not merely omitted: it is how the
+  /// viewer learns to stop drawing a cursor that has left the picture. Left to
+  /// the last known position it would sit frozen against an edge, which reads
+  /// as the stream having hung.
+  final double? x;
+  final double? y;
+
+  bool get isOnScreen => x != null && y != null;
+
+  @override
+  MessageType get type => MessageType.screenCursor;
+
+  @override
+  void writeTo(ByteWriter writer) {
+    final px = x;
+    final py = y;
+    writer.writeVarUint(monitorId);
+    writer.writeBool(px != null && py != null);
+    if (px != null && py != null) {
+      writer
+        ..writeFloat32(px)
+        ..writeFloat32(py);
+    }
+  }
+
+  static ScreenCursor readFrom(ByteReader reader) {
+    final monitorId = reader.readVarUint();
+    if (!reader.readBool()) return ScreenCursor(monitorId: monitorId);
+
+    final x = reader.readFloat32();
+    final y = reader.readFloat32();
+    // A position outside the picture is dropped rather than clamped. Clamping
+    // would pin the arrow to an edge it is not actually on, which looks like a
+    // stuck cursor rather than an absent one.
+    if (!x.isFinite || !y.isFinite || x < 0 || x > 1 || y < 0 || y > 1) {
+      return ScreenCursor(monitorId: monitorId);
+    }
+    return ScreenCursor(monitorId: monitorId, x: x, y: y);
+  }
+
+  @override
+  String toString() => isOnScreen
+      ? 'ScreenCursor($monitorId, $x, $y)'
+      : 'ScreenCursor($monitorId, off-screen)';
+}

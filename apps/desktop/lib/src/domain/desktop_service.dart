@@ -100,6 +100,16 @@ String? phoneControlBlockedReason(ConnectedDevice device) {
   return null;
 }
 
+/// How often the pointer is sampled while a screen stream is running.
+///
+/// 60 Hz, which is fast enough that the drawn cursor tracks the real one rather
+/// than trailing it. Affordable only because the pointer travels on its own:
+/// the read costs about ten microseconds and the message is 34 bytes, so this
+/// is 0.6 ms of CPU and 16 kbps. The same rate carried on frames would be
+/// 102 Mbps, which is why the cursor used to move at five to ten frames a
+/// second whatever the capture rate said.
+const Duration kCursorPollInterval = Duration(milliseconds: 16);
+
 /// A live connection as the desktop UI sees it.
 final class ConnectedDevice {
   ConnectedDevice({
@@ -2396,6 +2406,47 @@ final class DesktopService {
   void _startScreenCaptureTimer(_ActiveScreenStream stream) {
     stream.cancel();
     _scheduleNextCapture(stream);
+    stream.cursorTimer = Timer.periodic(
+      kCursorPollInterval,
+      (_) => screenCursorTick(stream.session.peerId),
+    );
+  }
+
+  /// Sends the pointer's position when it has moved.
+  ///
+  /// Periodic rather than self-rescheduling, unlike the capture loop, because
+  /// there is nothing here to fall behind: the read is about ten microseconds
+  /// and the message is 34 bytes, so a tick can never overrun its interval the
+  /// way a capture can.
+  ///
+  /// Deliberately *not* awaiting the send. The point of this poll is that a
+  /// pointer update never waits on anything, least of all on the screen frames
+  /// it used to be trapped inside.
+  @visibleForTesting
+  void screenCursorTick(DeviceId peerId) {
+    final stream = _screenStreams[peerId.value];
+    if (stream == null) return;
+
+    final device = _devices[peerId.value];
+    if (device == null || !device.serverSession.session.isEstablished) return;
+
+    final position = _screenCapture.cursorPosition(monitorId: stream.monitorId);
+    // Most polls land here: a hand resting on a trackpad moves the pointer for
+    // a fraction of the time the stream is open, and sending an unchanged
+    // position would put the cursor back on the same footing as the frames.
+    if (!stream.cursorMoved(position)) return;
+    stream.rememberCursor(position);
+    stream.cursorUpdates++;
+
+    unawaited(
+      device.serverSession.session.send(
+        ScreenCursor(
+          monitorId: stream.monitorId,
+          x: position?.x,
+          y: position?.y,
+        ),
+      ),
+    );
   }
 
   void _scheduleNextCapture(_ActiveScreenStream stream) {
@@ -2463,6 +2514,16 @@ final class DesktopService {
   /// Total frames skipped for [peerId] due to backpressure.
   int screenStreamSkippedCount(DeviceId peerId) =>
       _screenStreams[peerId.value]?.skippedFrames ?? 0;
+
+  /// Pointer updates actually put on the wire for [peerId].
+  ///
+  /// Counted before the session's lossy queue, which is the only place the
+  /// difference is visible: that queue collapses same-type messages sent in one
+  /// turn into the newest, so a poll that sent unconditionally and one that
+  /// sends only on movement are indistinguishable from the receiving end.
+  @visibleForTesting
+  int screenCursorUpdateCount(DeviceId peerId) =>
+      _screenStreams[peerId.value]?.cursorUpdates ?? 0;
 
   /// Total frames not sent for [peerId] because the desk had not changed.
   ///
@@ -2532,9 +2593,9 @@ final class DesktopService {
         width: frame.width,
         height: frame.height,
         data: frame.data,
-        // The capture APIs leave the cursor out of the picture, so it travels
-        // beside it. Without this the viewer shows a desk with no pointer on
-        // it and the user is aiming blind.
+        // Still carried, though `ScreenCursor` is what a current phone acts on.
+        // A peer built before that message exists reads the pointer only from
+        // here, and dropping these fields would leave it aiming blind.
         cursorX: frame.cursorX,
         cursorY: frame.cursorY,
       );
@@ -2585,8 +2646,17 @@ final class _ActiveScreenStream {
   int skippedFrames = 0;
   int capturedFrames = 0;
   int unchangedFrames = 0;
+  int cursorUpdates = 0;
   bool isFrameInFlight = false;
   Timer? timer;
+
+  /// Polls the pointer, independently of the capture loop.
+  ///
+  /// Its own timer rather than a faster capture loop, because the two jobs have
+  /// nothing in common: capturing is expensive and worth doing rarely, reading
+  /// the pointer is free and worth doing often. Tying them together meant the
+  /// cursor could only be as smooth as the screen was cheap to send.
+  Timer? cursorTimer;
 
   /// The last frame actually sent, for telling "nothing changed" from "the
   /// desk moved".
@@ -2597,8 +2667,15 @@ final class _ActiveScreenStream {
   /// bug to be told about second-hand. A couple of hundred kilobytes per
   /// viewer is not worth that.
   Uint8List? _lastSentData;
+
+  /// The pointer position last sent, so an unmoved pointer sends nothing.
+  ///
+  /// Sampled far more often than the screen is captured — the read costs about
+  /// ten microseconds against thirty milliseconds for a capture — so most polls
+  /// find it exactly where it was and send nothing at all.
   double? _lastSentCursorX;
   double? _lastSentCursorY;
+  bool _hasSentCursor = false;
 
   /// How many captures in a row have found nothing new.
   int idleRun = 0;
@@ -2635,17 +2712,16 @@ final class _ActiveScreenStream {
 
   /// Whether [frame] would tell the phone anything it does not already know.
   ///
-  /// The cursor is part of the comparison even though it is not part of the
-  /// picture. It travels as its own fields on `ScreenFrame`, so a pointer
-  /// moving across a still desktop produces byte-identical image data — and
-  /// comparing only the image would freeze the drawn cursor exactly when the
-  /// user is moving it. That is the one motion on screen they are guaranteed
-  /// to be watching.
+  /// The picture only. The cursor used to be part of this comparison, because
+  /// it travelled on the frame and comparing only the image would have frozen
+  /// the drawn pointer exactly when the user was moving it. The cost was that a
+  /// pointer crossing a still desktop re-sent the whole encoded frame — 213,622
+  /// bytes to report that an arrow had moved a few pixels, which no home
+  /// network carries at any useful rate. The pointer now has [ScreenCursor] to
+  /// itself, so a still desk with a moving mouse sends no frames at all.
   bool isUnchanged(CapturedFrame frame) {
     final previous = _lastSentData;
     if (previous == null) return false;
-    if (frame.cursorX != _lastSentCursorX) return false;
-    if (frame.cursorY != _lastSentCursorY) return false;
     if (previous.length != frame.data.length) return false;
 
     for (var i = 0; i < previous.length; i++) {
@@ -2656,9 +2732,19 @@ final class _ActiveScreenStream {
 
   void remember(CapturedFrame frame) {
     _lastSentData = frame.data;
-    _lastSentCursorX = frame.cursorX;
-    _lastSentCursorY = frame.cursorY;
     idleRun = 0;
+  }
+
+  /// Whether [position] is somewhere the phone has not been told about.
+  bool cursorMoved(({double x, double y})? position) =>
+      !_hasSentCursor ||
+      position?.x != _lastSentCursorX ||
+      position?.y != _lastSentCursorY;
+
+  void rememberCursor(({double x, double y})? position) {
+    _lastSentCursorX = position?.x;
+    _lastSentCursorY = position?.y;
+    _hasSentCursor = true;
   }
 
   /// Forgets the last frame, so the next capture is always sent.
@@ -2671,6 +2757,7 @@ final class _ActiveScreenStream {
     _lastSentData = null;
     _lastSentCursorX = null;
     _lastSentCursorY = null;
+    _hasSentCursor = false;
     idleRun = 0;
   }
 
@@ -2706,5 +2793,7 @@ final class _ActiveScreenStream {
   void cancel() {
     timer?.cancel();
     timer = null;
+    cursorTimer?.cancel();
+    cursorTimer = null;
   }
 }

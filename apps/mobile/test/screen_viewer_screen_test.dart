@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:remotelink_mobile/src/app/providers.dart';
 import 'package:remotelink_mobile/src/features/control/control_screen.dart';
+import 'package:remotelink_mobile/src/features/screen/remote_cursor.dart';
 import 'package:remotelink_mobile/src/features/screen/screen_viewer_screen.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
@@ -866,6 +867,166 @@ void main() {
       findsNothing,
       reason: 'a read-only viewer must not wire up pointer handling at all',
     );
+  });
+
+  testWidgets('the pointer follows its own stream, not the frames',
+      (tester) async {
+    // The whole point of `ScreenCursor`. While the pointer arrived on the
+    // frame it could only move as often as a couple of hundred kilobytes of
+    // picture could cross the link — five to ten times a second — so the one
+    // thing on screen the user is certainly watching was the jerkiest. Here
+    // the frame never changes and the cursor still moves.
+    late RemoteLinkClient client;
+    await tester.runAsync(() async {
+      client = await _connectedClient(tester);
+    });
+
+    final cursors = StreamController<Offset?>();
+    addTearDown(cursors.close);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          identityProvider.overrideWith(
+            (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+          ),
+          clientStateProvider.overrideWith(
+            (ref) => Stream<ClientState>.value(ClientState.connected),
+          ),
+          clientProvider.overrideWith((ref) async => client),
+          screenFrameProvider.overrideWith(
+            (ref) => Stream<ScreenFrame?>.value(_tinyFrame()),
+          ),
+          screenCursorProvider.overrideWith((ref) => cursors.stream),
+        ],
+        child: const MaterialApp(home: ScreenViewerScreen()),
+      ),
+    );
+    await _decodeFrame(tester);
+
+    cursors.add(const Offset(0.2, 0.2));
+    await tester.pump();
+    final first = tester.widget<RemoteCursor>(find.byType(RemoteCursor));
+    expect(first.normalised, const Offset(0.2, 0.2));
+
+    cursors.add(const Offset(0.8, 0.6));
+    await tester.pump();
+    final second = tester.widget<RemoteCursor>(find.byType(RemoteCursor));
+    expect(
+      second.normalised,
+      const Offset(0.8, 0.6),
+      reason: 'the pointer did not move without a new frame behind it',
+    );
+  });
+
+  testWidgets('the pointer disappears when it leaves the display',
+      (tester) async {
+    // Left at its last position the arrow sits frozen against an edge, which
+    // reads as the stream having hung rather than as the pointer being on
+    // another monitor.
+    late RemoteLinkClient client;
+    await tester.runAsync(() async {
+      client = await _connectedClient(tester);
+    });
+
+    final cursors = StreamController<Offset?>();
+    addTearDown(cursors.close);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          identityProvider.overrideWith(
+            (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+          ),
+          clientStateProvider.overrideWith(
+            (ref) => Stream<ClientState>.value(ClientState.connected),
+          ),
+          clientProvider.overrideWith((ref) async => client),
+          screenFrameProvider.overrideWith(
+            (ref) => Stream<ScreenFrame?>.value(_tinyFrame()),
+          ),
+          screenCursorProvider.overrideWith((ref) => cursors.stream),
+        ],
+        child: const MaterialApp(home: ScreenViewerScreen()),
+      ),
+    );
+    await _decodeFrame(tester);
+
+    cursors.add(const Offset(0.2, 0.2));
+    await tester.pump();
+    expect(
+      tester.widget<RemoteCursor>(find.byType(RemoteCursor)).normalised,
+      isNotNull,
+    );
+
+    cursors.add(null);
+    await tester.pump();
+    expect(
+      tester.widget<RemoteCursor>(find.byType(RemoteCursor)).normalised,
+      isNull,
+    );
+  });
+
+  group('screenCursorUpdate', () {
+    test('a cursor message moves the pointer', () {
+      final update = screenCursorUpdate(
+        const ScreenCursor(monitorId: 1, x: 0.25, y: 0.75),
+      );
+      expect(update, isNotNull);
+      expect(update!.position, const Offset(0.25, 0.75));
+    });
+
+    test('a cursor message with no position takes the pointer away', () {
+      // The distinction a plain `Offset?` cannot carry: this is an instruction
+      // to stop drawing, not an absence of news. Confused for the latter the
+      // arrow stays frozen against whichever edge it left by, which reads as
+      // the stream having hung.
+      final update = screenCursorUpdate(const ScreenCursor(monitorId: 1));
+      expect(update, isNotNull);
+      expect(update!.position, isNull);
+    });
+
+    test('a frame still carries the pointer, for an older desktop', () {
+      // A desktop built before `ScreenCursor` reports the pointer only here.
+      // Ignoring it would leave anyone on an older build with no cursor at all.
+      final update = screenCursorUpdate(
+        ScreenFrame(
+          sequence: 1,
+          ptsMicros: 0,
+          isKeyframe: true,
+          width: 4,
+          height: 2,
+          data: Uint8List(0),
+          cursorX: 0.5,
+          cursorY: 0.5,
+        ),
+      );
+      expect(update, isNotNull);
+      expect(update!.position, const Offset(0.5, 0.5));
+    });
+
+    test('a frame without a pointer says nothing rather than blanking it', () {
+      // An older desktop omits these fields whenever it could not read the
+      // pointer, so treating absence as departure would make the arrow flicker
+      // on and off through every stream.
+      expect(
+        screenCursorUpdate(
+          ScreenFrame(
+            sequence: 1,
+            ptsMicros: 0,
+            isKeyframe: true,
+            width: 4,
+            height: 2,
+            data: Uint8List(0),
+          ),
+        ),
+        isNull,
+      );
+    });
+
+    test('an unrelated message says nothing about the pointer', () {
+      expect(screenCursorUpdate(const ClipboardRequest()), isNull);
+    });
   });
 }
 

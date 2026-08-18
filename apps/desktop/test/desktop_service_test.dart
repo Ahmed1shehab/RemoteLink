@@ -40,6 +40,20 @@ final class ControllableScreenCaptureBackend implements ScreenCaptureBackend {
   int? lastMonitorId;
   double? lastQuality;
 
+  /// Where the fake pointer is. Moved by tests to drive the cursor poll.
+  ({double x, double y})? cursor;
+  int cursorReadCount = 0;
+  int? lastCursorMonitorId;
+
+  @override
+  ({double x, double y})? cursorPosition({
+    int monitorId = kWholeVirtualDesktopMonitorId,
+  }) {
+    cursorReadCount++;
+    lastCursorMonitorId = monitorId;
+    return cursor;
+  }
+
   @override
   bool checkPermission() => isAvailable;
 
@@ -139,6 +153,17 @@ final class ThrowingNetworkAdapterBackend implements NetworkAdapterBackend {
 
   @override
   void dispose() {}
+}
+
+/// Lets an unawaited send cross a real loopback socket and come back.
+///
+/// The cursor path deliberately does not await its send — the whole point is
+/// that a pointer update never queues behind anything — so a test has to give
+/// the round trip somewhere to happen.
+Future<void> _settle() async {
+  for (var i = 0; i < 20; i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
 }
 
 void main() {
@@ -737,12 +762,16 @@ void main() {
       await service.stop();
     });
 
-    test('still sends when only the cursor moved', () async {
-      // The trap. The cursor is not in the picture — it travels as its own
-      // fields — so a pointer crossing a still desktop produces byte-identical
-      // image data. Comparing only the image freezes the drawn cursor exactly
-      // while the user is moving it, which is the one thing on screen they are
-      // certain to be watching.
+    test('sends nothing when only the cursor moved', () async {
+      // This used to be the opposite assertion, and the reversal is the whole
+      // fix. The cursor is not in the picture, so a pointer crossing a still
+      // desktop produces byte-identical image data — and while the cursor rode
+      // on the frame, keeping the drawn pointer alive meant re-sending 213,622
+      // bytes to report that an arrow had moved a few pixels. No home network
+      // carries that, so the pointer updated five to ten times a second.
+      //
+      // It has `ScreenCursor` to itself now, at 34 bytes, so these captures
+      // are correctly recognised as showing nothing new.
       const identicalPixels = <int>[0xFF, 0xD8, 0x01, 0xFF, 0xD9];
       final (service, pair, _) = await streamingService(
         frames: <CapturedFrame>[
@@ -759,10 +788,184 @@ void main() {
 
       expect(
         service.screenStreamCapturedCount(peerId),
-        3,
-        reason: 'the pointer moved and the phone was not told',
+        1,
+        reason: 'a moving pointer must not drag whole frames along with it',
       );
-      expect(service.screenStreamUnchangedCount(peerId), 0);
+      expect(service.screenStreamUnchangedCount(peerId), 2);
+
+      await pair.client.disconnect();
+      await pair.server.stop();
+      await service.stop();
+    });
+
+    test('reports the pointer without capturing anything', () async {
+      // The other half. The frame loop is paused for the whole test, so every
+      // cursor update below happens with no capture running at all — which is
+      // the decoupling stated as an assertion.
+      final (service, pair, backend) = await streamingService(
+        frames: <CapturedFrame>[
+          frame(<int>[0xFF, 0xD8, 0x01, 0xFF, 0xD9])
+        ],
+      );
+      final peerId = pair.session.peerId;
+      final seen = <ScreenCursor>[];
+      final subscription = pair.client.messages
+          .where((m) => m is ScreenCursor)
+          .cast<ScreenCursor>()
+          .listen(seen.add);
+
+      backend.cursor = (x: 0.25, y: 0.5);
+      service.screenCursorTick(peerId);
+      await _settle();
+      backend.cursor = (x: 0.75, y: 0.5);
+      service.screenCursorTick(peerId);
+      await _settle();
+
+      expect(seen, hasLength(2));
+      expect(seen.first.x, closeTo(0.25, 1e-6));
+      expect(seen.last.x, closeTo(0.75, 1e-6));
+      expect(
+        backend.captureCallCount,
+        0,
+        reason: 'moving the pointer must not cost a capture',
+      );
+
+      await subscription.cancel();
+      await pair.client.disconnect();
+      await pair.server.stop();
+      await service.stop();
+    });
+
+    test('a burst of movement arrives as the position it ended at', () async {
+      // `screenCursor` is lossy, so several positions queued in one turn
+      // collapse to the newest. Right for a pointer: replaying the path late
+      // would drag the drawn arrow along a trail the real one has left, which
+      // is worse than simply arriving where it is.
+      final (service, pair, backend) = await streamingService(
+        frames: <CapturedFrame>[
+          frame(<int>[0xFF, 0xD8, 0x01, 0xFF, 0xD9])
+        ],
+      );
+      final peerId = pair.session.peerId;
+      final seen = <ScreenCursor>[];
+      final subscription = pair.client.messages
+          .where((m) => m is ScreenCursor)
+          .cast<ScreenCursor>()
+          .listen(seen.add);
+
+      for (var i = 1; i <= 5; i++) {
+        backend.cursor = (x: i / 10, y: 0.5);
+        service.screenCursorTick(peerId);
+      }
+      await _settle();
+
+      expect(seen, hasLength(1));
+      expect(seen.single.x, closeTo(0.5, 1e-6));
+
+      await subscription.cancel();
+      await pair.client.disconnect();
+      await pair.server.stop();
+      await service.stop();
+    });
+
+    test('says nothing while the pointer is still', () async {
+      // Polled at 60 Hz, and a hand rests far more than it moves. Sending an
+      // unchanged position every tick would put the cursor straight back on the
+      // same footing as the frames it was rescued from.
+      final (service, pair, backend) = await streamingService(
+        frames: <CapturedFrame>[
+          frame(<int>[0xFF, 0xD8, 0x01, 0xFF, 0xD9])
+        ],
+      );
+      final peerId = pair.session.peerId;
+      final seen = <ScreenCursor>[];
+      final subscription = pair.client.messages
+          .where((m) => m is ScreenCursor)
+          .cast<ScreenCursor>()
+          .listen(seen.add);
+
+      backend.cursor = (x: 0.25, y: 0.5);
+      for (var i = 0; i < 10; i++) {
+        service.screenCursorTick(peerId);
+      }
+
+      await _settle();
+
+      expect(seen, hasLength(1));
+      expect(
+        backend.cursorReadCount,
+        10,
+        reason: 'the read is cheap; it is the send that must be conditional',
+      );
+      // Counted at the source. The lossy queue collapses same-turn messages
+      // into the newest, so from the receiving end a poll that sends every
+      // tick looks exactly like one that sends only on movement — which is how
+      // a missing guard would sail through the assertion above.
+      expect(
+        service.screenCursorUpdateCount(peerId),
+        1,
+        reason: 'the pointer had not moved; nine of those were noise',
+      );
+
+      await subscription.cancel();
+      await pair.client.disconnect();
+      await pair.server.stop();
+      await service.stop();
+    });
+
+    test('reports the pointer leaving the display, exactly once', () async {
+      // A real state that has to be sent. Left at its last position the arrow
+      // sits frozen against an edge, which reads as the stream having hung
+      // rather than as the pointer being on another monitor.
+      final (service, pair, backend) = await streamingService(
+        frames: <CapturedFrame>[
+          frame(<int>[0xFF, 0xD8, 0x01, 0xFF, 0xD9])
+        ],
+      );
+      final peerId = pair.session.peerId;
+      final seen = <ScreenCursor>[];
+      final subscription = pair.client.messages
+          .where((m) => m is ScreenCursor)
+          .cast<ScreenCursor>()
+          .listen(seen.add);
+
+      backend.cursor = (x: 0.25, y: 0.5);
+      service.screenCursorTick(peerId);
+      await _settle();
+      backend.cursor = null;
+      service.screenCursorTick(peerId);
+      service.screenCursorTick(peerId);
+      await _settle();
+
+      expect(seen, hasLength(2));
+      expect(seen.first.isOnScreen, isTrue);
+      expect(seen.last.isOnScreen, isFalse);
+
+      await subscription.cancel();
+      await pair.client.disconnect();
+      await pair.server.stop();
+      await service.stop();
+    });
+
+    test('asks about the display being watched', () async {
+      // On a two-monitor desk a pointer normalised against the wrong screen
+      // lands nowhere near where it is, and nothing else in the picture would
+      // look wrong.
+      final (service, pair, backend) = await streamingService(
+        frames: <CapturedFrame>[
+          frame(<int>[0xFF, 0xD8, 0x01, 0xFF, 0xD9])
+        ],
+      );
+      final peerId = pair.session.peerId;
+
+      await service.handleMessageForTesting(
+        pair.session,
+        const ScreenConfigure(monitorId: 69733248),
+      );
+      service.pauseScreenCaptureLoop(peerId);
+      service.screenCursorTick(peerId);
+
+      expect(backend.lastCursorMonitorId, 69733248);
 
       await pair.client.disconnect();
       await pair.server.stop();

@@ -650,4 +650,86 @@ void main() {
       expect(decoded.monitorId, 1);
     });
   });
+
+  group('ScreenCursor', () {
+    test('round trips a position on screen', () {
+      const sample = ScreenCursor(monitorId: 69733248, x: 0.25, y: 0.75);
+      final decoded = ScreenCursor.readFrom(ByteReader(encode(sample)));
+
+      expect(decoded.monitorId, 69733248);
+      expect(decoded.x, closeTo(0.25, 1e-6));
+      expect(decoded.y, closeTo(0.75, 1e-6));
+      expect(decoded.isOnScreen, isTrue);
+      expect(decoded.type, MessageType.screenCursor);
+    });
+
+    test('round trips a pointer that has left the display', () {
+      // A real state, and one that has to be *sent* rather than merely not
+      // sent: it is how the viewer learns to stop drawing an arrow that is no
+      // longer there. Left at its last position it would sit frozen against an
+      // edge, which reads as the stream having hung.
+      const sample = ScreenCursor(monitorId: 4);
+      final decoded = ScreenCursor.readFrom(ByteReader(encode(sample)));
+
+      expect(decoded.monitorId, 4);
+      expect(decoded.isOnScreen, isFalse);
+      expect(decoded.x, isNull);
+      expect(decoded.y, isNull);
+    });
+
+    test('is far smaller than the frame it used to travel on', () {
+      // The entire reason this message exists. Measured on a real desk, a
+      // frame at the default quality is 213,622 bytes; a pointer moving across
+      // a still desktop used to cost one of those per position.
+      const sample = ScreenCursor(monitorId: 1, x: 0.5, y: 0.5);
+      expect(
+        encode(sample).length,
+        lessThan(32),
+        reason: 'a cursor update must stay cheap enough to send at 60 Hz',
+      );
+    });
+
+    test('a position outside the picture is dropped, not clamped', () {
+      // Clamping would pin the arrow to an edge it is not on, which looks like
+      // a stuck cursor rather than an absent one.
+      final writer = ByteWriter()
+        ..writeVarUint(1)
+        ..writeBool(true)
+        ..writeFloat32(1.4)
+        ..writeFloat32(0.5);
+      final decoded = ScreenCursor.readFrom(ByteReader(writer.toBytes()));
+
+      expect(decoded.isOnScreen, isFalse);
+    });
+
+    test('a non-finite position is dropped rather than drawn', () {
+      final writer = ByteWriter()
+        ..writeVarUint(1)
+        ..writeBool(true)
+        ..writeFloat32(double.nan)
+        ..writeFloat32(0.5);
+      final decoded = ScreenCursor.readFrom(ByteReader(writer.toBytes()));
+
+      expect(decoded.isOnScreen, isFalse);
+    });
+
+    test('is lossy, so a stale position never delays a fresh one', () {
+      // Only the newest position means anything. Queued rather than coalesced,
+      // a burst of movement would replay the whole path late.
+      expect(MessageType.screenCursor.isLossy, isTrue);
+    });
+
+    test('is gated with the rest of the stream, not below it', () {
+      // Where the pointer is is information about the screen. A tier refused
+      // the picture must not be handed a live readout of what the user is
+      // pointing at instead.
+      for (final tier in PermissionTier.values) {
+        expect(
+          tier.allows(MessageType.screenCursor),
+          tier.allows(MessageType.screenFrame),
+          reason: '${tier.name} treats the cursor and the picture differently',
+        );
+      }
+    });
+  });
 }

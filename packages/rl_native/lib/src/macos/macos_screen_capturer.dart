@@ -130,6 +130,16 @@ final class MacosScreenCapturer {
     }
   }
 
+  /// Where the pointer is inside [monitorId], in 0..1, or null if elsewhere.
+  ///
+  /// Public and separate from [capture] because it is thousands of times
+  /// cheaper — two window-server calls against a grab-scale-encode — and the
+  /// stream samples it far more often than it captures.
+  ({double x, double y})? cursorPosition({int monitorId = 0}) {
+    final displayId = monitorId == 0 ? _bindings.mainDisplayId() : monitorId;
+    return _cursorWithin(displayId);
+  }
+
   /// Where the pointer is inside [displayId], in 0..1, or null if elsewhere.
   ///
   /// `CGDisplayCreateImage` composites windows but not the cursor, so this is

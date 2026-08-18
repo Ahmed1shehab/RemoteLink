@@ -154,6 +154,16 @@ enum MessageType {
   /// would send, and splitting it would have meant two sources of truth.
   screenTopology(0x0605),
 
+  /// Server → client. Where the pointer is, on its own.
+  ///
+  /// Separate from [screenFrame] because the two move at completely different
+  /// rates and sizes. The capture APIs do not composite the cursor, so it has
+  /// to travel beside the picture — but carrying it *inside* the picture meant
+  /// a pointer moving across a still desk re-sent the whole encoded frame to
+  /// say the arrow had moved four pixels. Measured on this desk: 213,622 bytes
+  /// against 34, and 102 Mbps against 16 kbps to animate a cursor at 60 Hz.
+  screenCursor(0x0606),
+
   // ── 0x07xx file transfer ──────────────────────────────────────────────────
   /// Announces an incoming file: name, size, hash.
   fileOffer(0x0701),
@@ -290,6 +300,7 @@ enum MessageType {
         MessageType.gestureRotate ||
         MessageType.penInput ||
         MessageType.screenFrame ||
+        MessageType.screenCursor ||
         MessageType.gamepadState ||
         MessageType.motionState ||
         MessageType.laserPointer ||
