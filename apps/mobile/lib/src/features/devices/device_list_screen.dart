@@ -37,7 +37,17 @@ class _Entry {
 
   final DeviceId? id;
   final String name;
-  final String host;
+
+  /// Where to dial, or null when this computer has been paired with but never
+  /// reached at a remembered address.
+  ///
+  /// Nullable rather than absent from the list. A paired computer with no
+  /// address used to be dropped entirely, so the one thing the user was sure
+  /// they had set up was the one thing the screen would not show them — and on
+  /// a network where discovery finds nothing, that left the list permanently
+  /// empty. Showing the row and asking for the address when it is tapped is
+  /// strictly better than pretending the pairing does not exist.
+  final String? host;
   final int port;
 
   /// In the trust store, so the handshake verifies against a stored key.
@@ -69,6 +79,15 @@ class _Entry {
 
 /// Lists computers and connects to one.
 ///
+/// How long the screen keeps a spinner up before admitting it found nothing.
+///
+/// Beacons arrive every couple of seconds and Bonjour resolution adds a round
+/// trip, so anything shorter would give up while an answer was in flight. Much
+/// longer and the spinner stops being feedback and becomes a wait with no end
+/// in sight — which is the state that sent a user looking for a bug rather than
+/// tapping the button that would have worked.
+const Duration kDiscoveryPatience = Duration(seconds: 6);
+
 /// The app's first screen, and its job is to have as little on it as possible:
 /// open RemoteLink, see your computer, tap it, be in control. Manual entry
 /// exists as a fallback, not as the path — it is one tap away, not in the way.
@@ -80,6 +99,18 @@ class DeviceListScreen extends ConsumerStatefulWidget {
 }
 
 class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
+  /// Whether the search has run long enough to stop claiming it is working.
+  ///
+  /// Discovery reports itself "operational" whenever the platform API accepted
+  /// the request — which is not the same as finding anything, and on the two
+  /// networks where this matters most it is exactly wrong. A Wi-Fi network that
+  /// filters multicast, or an iPhone whose local-network permission was denied
+  /// once and never asked about again, both leave a browse running happily and
+  /// silently empty. The screen then spins forever, which tells the user their
+  /// setup is fine and they should keep waiting. It is not, and they should not.
+  bool _searchExhausted = false;
+  Timer? _searchTimer;
+
   @override
   void initState() {
     super.initState();
@@ -89,6 +120,22 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(ref.read(autoConnectProvider.notifier).attempt());
     });
+    _beginSearchWindow();
+  }
+
+  /// Restarts the "are we still looking?" clock.
+  void _beginSearchWindow() {
+    _searchTimer?.cancel();
+    if (_searchExhausted) setState(() => _searchExhausted = false);
+    _searchTimer = Timer(kDiscoveryPatience, () {
+      if (mounted) setState(() => _searchExhausted = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -139,6 +186,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
             icon: const Icon(Icons.refresh),
             tooltip: 'Search again',
             onPressed: () async {
+              _beginSearchWindow();
               final backend = await ref.read(discoveryProvider.future);
               await backend.refresh();
             },
@@ -163,6 +211,12 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
           ? _Searching(
               discoveryWorks:
                   ref.watch(discoveryOperationalProvider).valueOrNull ?? true,
+              stillLooking: !_searchExhausted,
+              onSearchAgain: () async {
+                _beginSearchWindow();
+                final backend = await ref.read(discoveryProvider.future);
+                await backend.refresh();
+              },
             )
           : RefreshIndicator(
               onRefresh: () async {
@@ -230,7 +284,6 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     for (final peer in paired) {
       if (seen.contains(peer.id.value)) continue;
       final address = peer.lastAddress;
-      if (address == null) continue;
       entries.add(
         _Entry(
           id: peer.id,
@@ -254,12 +307,35 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     return entries;
   }
 
-  Future<void> _promptForAddress(BuildContext context) async {
-    final entry = await showDialog<_Entry>(
+  /// Asks for an address, optionally to reach an already-paired computer.
+  ///
+  /// [forEntry] carries the pairing through, so typing the address of a
+  /// computer already in the trust store still verifies against its stored key
+  /// rather than dropping back to trust-on-first-use.
+  Future<void> _promptForAddress(
+    BuildContext context, {
+    _Entry? forEntry,
+  }) async {
+    final typed = await showDialog<_Entry>(
       context: context,
-      builder: (context) => const _ManualAddressDialog(),
+      builder: (context) => _ManualAddressDialog(knownName: forEntry?.name),
     );
-    if (entry == null || !context.mounted) return;
+    if (typed == null || !context.mounted) return;
+
+    final entry = forEntry == null
+        ? typed
+        : _Entry(
+            id: forEntry.id,
+            name: forEntry.name,
+            host: typed.host,
+            port: typed.port,
+            isPaired: forEntry.isPaired,
+            isLive: false,
+            platform: forEntry.platform,
+            publicKey: forEntry.publicKey,
+            macAddress: forEntry.macAddress,
+          );
+    if (!context.mounted) return;
     await _connect(context, entry);
   }
 
@@ -268,6 +344,15 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     _Entry entry, {
     bool freshPairing = false,
   }) async {
+    // A paired computer we have no address for. Asking is the only thing that
+    // can help, and it is what the user would have to do anyway — the
+    // alternative was hiding the row, which taught them nothing.
+    final host = entry.host;
+    if (host == null) {
+      await _promptForAddress(context, forEntry: entry);
+      return;
+    }
+
     final client = await ref.read(clientProvider.future);
     if (!context.mounted) return;
 
@@ -277,13 +362,19 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     // over the address would want the user to see.
     await client.connect(
       ConnectionTarget(
-        host: entry.host,
+        host: host,
         port: entry.port,
         deviceId: entry.id,
         serverPublicKey: freshPairing ? null : entry.publicKey,
         displayName: entry.name,
       ),
     );
+
+    // Remember where it answered. Only pairing and the automatic reconnect used
+    // to record this, so a computer reached from this list any other way — by
+    // typing its address, or after a DHCP lease moved it — left the stored
+    // address stale or absent, and the next launch had nothing to dial.
+    unawaited(_rememberAddress(entry.id, host));
 
     if (!context.mounted) return;
     await Navigator.of(context).push(
@@ -292,11 +383,27 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
             ? const ControlScreen()
             : PairingScreen(
                 deviceName: entry.name,
-                address: entry.host,
+                address: host,
                 platform: entry.platform,
               ),
       ),
     );
+  }
+
+  /// Stores the address a computer just answered at, for the next launch.
+  Future<void> _rememberAddress(DeviceId? id, String host) async {
+    if (id == null) return;
+    final store = await ref.read(trustStoreProvider.future);
+    final peer = await store.findById(id);
+    if (peer == null) return;
+    if (peer.lastAddress == host) return;
+
+    await store.upsert(peer.copyWith(lastAddress: host));
+    await persistTrustStore(
+      store,
+      await ref.read(identityStoreProvider.future),
+    );
+    ref.invalidate(trustedPeersProvider);
   }
 
   Future<void> _pairAgain(BuildContext context, _Entry entry) async {
@@ -401,7 +508,14 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
 /// the multicast entitlement Apple grants by application. Not a debug affordance
 /// — it is the documented fallback, so it is built to be used.
 class _ManualAddressDialog extends StatefulWidget {
-  const _ManualAddressDialog();
+  const _ManualAddressDialog({this.knownName});
+
+  /// The computer this address is for, when it is already paired.
+  ///
+  /// Only changes what the dialog says. Being told "Where is Ahmed's MacBook?"
+  /// rather than "Connect by address" is the difference between answering a
+  /// question about a machine you own and being asked to configure something.
+  final String? knownName;
 
   @override
   State<_ManualAddressDialog> createState() => _ManualAddressDialogState();
@@ -446,7 +560,11 @@ class _ManualAddressDialogState extends State<_ManualAddressDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Connect by address'),
+        title: Text(
+          widget.knownName == null
+              ? 'Connect by address'
+              : 'Where is ${widget.knownName}?',
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -556,10 +674,12 @@ class _DeviceTile extends StatelessWidget {
         wasRevoked
             ? 'This computer removed your access'
             : switch ((entry.isPaired, entry.isLive)) {
+                _ when entry.host == null =>
+                  'Paired · tap to enter its address',
                 (true, true) => 'Paired · ${entry.host}',
                 (true, false) => 'Paired · not seen right now · ${entry.host}',
                 (false, true) => 'Tap to pair · ${entry.host}',
-                (false, false) => entry.host,
+                (false, false) => entry.host!,
               },
       ),
       trailing: wasRevoked
@@ -762,7 +882,11 @@ class _Reconnecting extends StatelessWidget {
 }
 
 class _Searching extends StatelessWidget {
-  const _Searching({required this.discoveryWorks});
+  const _Searching({
+    required this.discoveryWorks,
+    required this.stillLooking,
+    required this.onSearchAgain,
+  });
 
   /// False once the platform has actually refused the discovery traffic.
   ///
@@ -772,15 +896,28 @@ class _Searching extends StatelessWidget {
   /// failure mode this flag exists to prevent.
   final bool discoveryWorks;
 
+  /// Whether the search is still within the window worth waiting out.
+  ///
+  /// The flag above only catches discovery that *failed loudly*. Discovery that
+  /// succeeds and finds nothing — a network filtering multicast, an iPhone
+  /// whose local-network permission was denied — looks identical to discovery
+  /// that has not finished yet, and the difference is only ever time. Past the
+  /// window this stops being a spinner and becomes an answer.
+  final bool stillLooking;
+
+  final Future<void> Function() onSearchAgain;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final searching = discoveryWorks && stillLooking;
+
     return ListView(
       // A scrollable, so pull-to-refresh still works with an empty list.
       padding: const EdgeInsets.all(32),
       children: <Widget>[
         const SizedBox(height: 64),
-        if (discoveryWorks)
+        if (searching)
           const Center(child: CircularProgressIndicator())
         else
           ExcludeSemantics(
@@ -792,24 +929,48 @@ class _Searching extends StatelessWidget {
           ),
         const SizedBox(height: 24),
         Text(
-          discoveryWorks
-              ? 'Looking for computers'
-              : 'This device can’t search automatically',
+          switch ((discoveryWorks, stillLooking)) {
+            (false, _) => 'This device can\u2019t search automatically',
+            (true, true) => 'Looking for computers',
+            (true, false) => 'No computers found',
+          },
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 8),
         Text(
-          discoveryWorks
-              ? 'Make sure RemoteLink is running on your computer and both '
-                  'devices are on the same Wi-Fi network.'
-              : 'iPhones need a special Apple permission to search the local '
-                  'network, and some Wi-Fi networks block it entirely.\n\n'
-                  'Tap “Connect by address” and enter the address shown on '
-                  'your computer. Everything else works exactly the same.',
+          switch ((discoveryWorks, stillLooking)) {
+            (false, _) => 'iPhones need a special Apple permission to search '
+                'the local network, and some Wi-Fi networks block it '
+                'entirely.\n\nTap \u201cConnect by address\u201d and enter the '
+                'address shown on your computer. Everything else works exactly '
+                'the same.',
+            (true, true) => 'Make sure RemoteLink is running on your computer '
+                'and both devices are on the same Wi-Fi network.',
+            // Said plainly, because after this long the honest answer is that
+            // searching is not going to work here and the user needs the other
+            // route. Leaving the spinner up implies waiting will help.
+            (true, false) =>
+              'Check that RemoteLink is running on your computer and that both '
+                  'devices are on the same Wi-Fi.\n\nSome networks — guest '
+                  'Wi-Fi in particular — block the traffic that finds '
+                  'computers automatically. If yours does, tap \u201cConnect by '
+                  'address\u201d and enter the address shown on your computer. '
+                  'It is remembered afterwards.',
+          },
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodySmall,
         ),
+        if (!searching) ...<Widget>[
+          const SizedBox(height: 24),
+          Center(
+            child: TextButton.icon(
+              onPressed: onSearchAgain,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Search again'),
+            ),
+          ),
+        ],
       ],
     );
   }
