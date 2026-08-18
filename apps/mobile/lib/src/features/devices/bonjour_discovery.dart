@@ -63,6 +63,9 @@ final class BonjourDiscoveryBackend implements DiscoveryBackend {
   StreamSubscription<BonsoirDiscoveryEvent>? _subscription;
   bool _failed = false;
 
+  /// Guards against a restart storm: the new browse can fail the same way.
+  bool _restarting = false;
+
   @override
   Stream<List<DiscoveredDevice>> get devices => _controller.stream;
 
@@ -85,8 +88,14 @@ final class BonjourDiscoveryBackend implements DiscoveryBackend {
 
       _subscription = discovery.eventStream?.listen(
         _onEvent,
+        // Not a debug line. A browse that errors is a browse that has stopped
+        // finding things, and the observed one — `-65569 DefunctConnection`,
+        // mDNSResponder dropping the connection on a network change or a
+        // sleep/wake — leaves the subscription alive and permanently silent.
+        // Logged and ignored, that is a phone that says it is searching and
+        // never will again, for the rest of the app's life.
         onError: (Object error, StackTrace stack) =>
-            _log.debug(() => 'bonjour stream error: $error'),
+            unawaited(_onStreamError(error)),
         cancelOnError: false,
       );
 
@@ -183,6 +192,46 @@ final class BonjourDiscoveryBackend implements DiscoveryBackend {
       return Uint8List.fromList(base64Url.decode(base64Url.normalize(encoded)));
     } on FormatException {
       return Uint8List(0);
+    }
+  }
+
+  /// Restarts a browse that the platform tore down, once.
+  ///
+  /// `DefunctConnection` and its relatives are ordinary on a phone: the daemon
+  /// restarts, the Wi-Fi changes, the device wakes. They are recoverable by
+  /// starting a new browse, which is why this tries rather than giving up — but
+  /// only once per failure, because a browse that cannot be re-established is a
+  /// platform saying no, and retrying it forever would be a background loop
+  /// nobody asked for.
+  Future<void> _onStreamError(Object error) async {
+    _log.warn('bonjour discovery stopped', error: error);
+    if (_restarting || _failed) return;
+    _restarting = true;
+
+    try {
+      await _subscription?.cancel();
+      _subscription = null;
+      try {
+        await _discovery?.stop();
+      } on Object catch (_) {
+        // Already gone; that is the situation being recovered from.
+      }
+      _discovery = null;
+
+      // A moment for the daemon to come back. Immediately re-asking a
+      // responder that just died reliably fails again.
+      await Future<void>.delayed(const Duration(seconds: 2));
+      await start();
+
+      if (_discovery == null) {
+        _markFailed(error);
+      } else {
+        _log.info('bonjour discovery restarted after an error');
+      }
+    } on Object catch (e) {
+      _markFailed(e);
+    } finally {
+      _restarting = false;
     }
   }
 

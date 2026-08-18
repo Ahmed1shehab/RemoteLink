@@ -157,3 +157,48 @@ final autoConnectProvider =
     StateNotifierProvider<AutoConnectController, AutoConnectStage>(
   AutoConnectController.new,
 );
+
+/// Keeps the connection supervisor aimed at where the computer actually is.
+///
+/// The supervisor retries a target it was given once, forever, on a backoff
+/// curve. That is right when the computer is asleep or the Wi-Fi dropped, and
+/// useless when the address itself is wrong — a laptop that took a new DHCP
+/// lease is not going to appear at its old address no matter how patiently the
+/// phone asks. Observed on a real device: sixteen attempts over two minutes to
+/// an address nothing was listening on, while the computer was announcing its
+/// real one over Bonjour throughout.
+///
+/// So discovery, which knows the real address, tells the supervisor. Watching
+/// rather than polling: the beacons already arrive, and this only has to act on
+/// the ones that disagree with where the phone is currently dialling.
+final connectionRetargetProvider = Provider<void>((ref) {
+  ref.listen<AsyncValue<List<DiscoveredDevice>>>(
+    discoveredDevicesProvider,
+    (previous, next) {
+      final devices = next.valueOrNull;
+      if (devices == null || devices.isEmpty) return;
+
+      final client = ref.read(clientProvider).valueOrNull;
+      final current = client?.target;
+      if (client == null || current == null) return;
+
+      final id = current.deviceId;
+      if (id == null) return;
+
+      for (final device in devices) {
+        if (device.id != id) continue;
+        client.retarget(
+          ConnectionTarget(
+            host: device.address,
+            port: device.port,
+            deviceId: id,
+            serverPublicKey: current.serverPublicKey,
+            displayName: current.displayName,
+          ),
+        );
+        return;
+      }
+    },
+    fireImmediately: true,
+  );
+});

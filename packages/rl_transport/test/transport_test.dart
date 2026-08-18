@@ -526,6 +526,121 @@ void main() {
           reason: 'only the newest frame is worth sending');
     });
 
+    test('a stale address is abandoned once discovery finds the real one',
+        () async {
+      // The bug, from a real device log: the supervisor was given an address
+      // the computer had since moved off, and retried it sixteen times over two
+      // minutes while the machine announced its actual address over Bonjour the
+      // whole time. Retrying harder cannot fix a wrong address.
+      await trustStore.upsert(
+        TrustedPeer(
+          id: phoneIdentity.id,
+          publicKey: phoneIdentity.publicKey,
+          name: 'Test Phone',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: 2,
+        ),
+      );
+
+      final deadPort = await _closedLoopbackPort();
+
+      await client.connect(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: deadPort,
+          deviceId: desktopIdentity.id,
+          serverPublicKey: desktopIdentity.publicKey,
+        ),
+      );
+
+      // Let it fail at least once, so the retarget lands mid-backoff rather
+      // than before the supervisor has even tried.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+
+      final moved = client.retarget(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: server.boundPort,
+          deviceId: desktopIdentity.id,
+        ),
+      );
+      expect(moved, isTrue);
+
+      await client.waitUntilConnected(timeout: const Duration(seconds: 10));
+      expect(client.target?.port, server.boundPort);
+    });
+
+    test('retargeting keeps the stored key rather than the beacon\'s',
+        () async {
+      // The new address arrives from a discovery beacon, which anyone on the
+      // network can send. The address is safe to believe because the handshake
+      // verifies the identity afterwards — but only if the *stored* key is
+      // still what it is verified against.
+      // Two closed loopback ports, so the supervisor stays in its ordinary
+      // retry path throughout and never reaches a live peer. Pointing it at an
+      // unroutable address instead produces a socket error outside that path,
+      // which fails the test for a reason that has nothing to do with the
+      // property being checked.
+      final closed = await _closedLoopbackPort();
+      final alsoClosed = await _closedLoopbackPort();
+
+      await client.connect(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: closed,
+          deviceId: desktopIdentity.id,
+          serverPublicKey: desktopIdentity.publicKey,
+        ),
+      );
+
+      final impostor = (await DeviceIdentity.generate()).publicKey;
+      client.retarget(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: alsoClosed,
+          deviceId: desktopIdentity.id,
+          serverPublicKey: impostor,
+        ),
+      );
+
+      expect(client.target?.port, alsoClosed);
+      expect(
+        client.target?.serverPublicKey,
+        desktopIdentity.publicKey,
+        reason: 'a beacon replaced the key the handshake verifies against',
+      );
+      await client.disconnect();
+    });
+
+    test('refuses to be aimed at a different computer', () async {
+      // Otherwise anyone who can broadcast on this network could walk the
+      // phone onto a machine of their choosing.
+      final closed = await _closedLoopbackPort();
+      await client.connect(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: closed,
+          deviceId: desktopIdentity.id,
+          serverPublicKey: desktopIdentity.publicKey,
+        ),
+      );
+
+      final stranger = await DeviceIdentity.generate();
+      expect(
+        client.retarget(
+          ConnectionTarget(
+            host: '127.0.0.1',
+            port: closed + 1,
+            deviceId: stranger.id,
+          ),
+        ),
+        isFalse,
+      );
+      expect(client.target?.port, closed);
+      await client.disconnect();
+    });
+
     test('a client with the wrong server key refuses to connect', () async {
       final impostorKey = (await DeviceIdentity.generate()).publicKey;
 
@@ -886,4 +1001,16 @@ final class ServerSocketHarness {
     }
     await _server.close();
   }
+}
+
+/// A loopback port nothing is listening on.
+///
+/// Bound and immediately released rather than guessed: an arbitrary port number
+/// is occasionally in use on a developer's machine, and a test that connects to
+/// something real by accident fails in a way that looks like a protocol bug.
+Future<int> _closedLoopbackPort() async {
+  final probe = await ServerSocket.bind('127.0.0.1', 0);
+  final port = probe.port;
+  await probe.close();
+  return port;
 }

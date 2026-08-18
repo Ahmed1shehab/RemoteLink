@@ -171,6 +171,54 @@ final class RemoteLinkClient {
     unawaited(_runSupervisor());
   }
 
+  /// Points the supervisor at a new address for the *same* computer.
+  ///
+  /// The reconnect loop reads [_target] afresh on every pass, so this takes
+  /// effect on the next attempt without disturbing a live session or resetting
+  /// the backoff.
+  ///
+  /// It exists because a remembered address goes stale and nothing else here
+  /// notices. A laptop takes a new DHCP lease and the supervisor keeps dialling
+  /// the old one — observed on a real device as sixteen attempts over two
+  /// minutes to an address nothing was listening on, while the machine was
+  /// announcing its real address over Bonjour the whole time. Retrying harder
+  /// cannot fix a wrong address; only a better one can.
+  ///
+  /// Refuses a target for a different computer. Redirecting a live supervisor
+  /// to another machine on the strength of a discovery beacon would let anyone
+  /// on the network aim this phone wherever they liked; the identity is what
+  /// makes the new address safe to believe, and it is still verified by the
+  /// handshake afterwards.
+  bool retarget(ConnectionTarget target) {
+    final current = _target;
+    if (current == null) return false;
+    if (current.deviceId == null || current.deviceId != target.deviceId) {
+      return false;
+    }
+    if (current.host == target.host && current.port == target.port) {
+      return false;
+    }
+
+    _log.info(
+      'the computer moved; aiming at its new address',
+      fields: <String, Object?>{
+        'was': '${current.host}:${current.port}',
+        'now': '${target.host}:${target.port}',
+      },
+    );
+    _target = ConnectionTarget(
+      host: target.host,
+      port: target.port,
+      deviceId: current.deviceId,
+      // Kept from the original, never taken from the new target: the stored key
+      // is what turns trust-on-first-use into strict verification, and letting
+      // a discovery beacon replace it would undo exactly that.
+      serverPublicKey: current.serverPublicKey,
+      displayName: current.displayName,
+    );
+    return true;
+  }
+
   /// Completes once a session is established, or throws if it cannot be.
   ///
   /// Exists because [connect] returning does not mean the handshake finished —
