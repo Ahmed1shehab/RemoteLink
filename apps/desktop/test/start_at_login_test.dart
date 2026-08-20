@@ -20,6 +20,59 @@ void main() {
 
   tearDown(() => directory.deleteSync(recursive: true));
 
+  group('the identifier the login item is filed under', () {
+    // Renaming the bundle to `com.remotelink.*` for the App Store moved this
+    // label with it. The old plist does not disappear because the name changed:
+    // it sits in ~/Library/LaunchAgents pointing at a binary that has moved, so
+    // launchd reports a failure at every login, for a login item the user
+    // cannot find under the app's name because it is filed under `com.example`.
+    AutoStart subject() => AutoStart(
+          label: 'com.remotelink.desktop',
+          executablePath: '/bin/true',
+          launchAgentsDirectory: launchAgents,
+          legacyLabels: const <String>['com.example.remotelinkDesktop'],
+        );
+
+    File legacyPlist() =>
+        File('${launchAgents.path}/com.example.remotelinkDesktop.plist');
+
+    test('an entry under a previous label is removed when enabling', () async {
+      legacyPlist().writeAsStringSync('<plist>stale</plist>');
+
+      await subject().enable();
+
+      expect(legacyPlist().existsSync(), isFalse);
+      expect(
+        File('${launchAgents.path}/com.remotelink.desktop.plist').existsSync(),
+        isTrue,
+        reason: 'the new label is registered in its place',
+      );
+    });
+
+    test('and when disabling, so opting out cleans up too', () async {
+      // The path that would otherwise strand it forever: someone who turns the
+      // setting off never calls enable again, so a sweep that only ran there
+      // would leave the stale entry running at every login.
+      legacyPlist().writeAsStringSync('<plist>stale</plist>');
+
+      await subject().disable();
+
+      expect(legacyPlist().existsSync(), isFalse);
+    });
+
+    test('a missing legacy entry is not an error', () async {
+      await subject().enable();
+      expect(legacyPlist().existsSync(), isFalse);
+    });
+
+    test('the shipped label matches the bundle identifier', () {
+      // Both are read by the OS and neither is derived from the other, so
+      // nothing but this catches them drifting apart.
+      expect(kAutoStartLabel, 'com.remotelink.desktop');
+      expect(kLegacyAutoStartLabels, contains('com.example.remotelinkDesktop'));
+    });
+  });
+
   group('DesktopPreferences', () {
     test('starts empty when there is no file yet', () async {
       final preferences = DesktopPreferences.open(file);

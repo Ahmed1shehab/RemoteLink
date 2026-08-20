@@ -61,7 +61,7 @@ Name: "{autodesktop}\Remote Link"; Filename: "{app}\remotelink_desktop.exe"; Tas
 ; the installer's choice and the app's own setting describe one thing rather
 ; than fighting each other.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
-  ValueType: string; ValueName: "com.example.remotelinkDesktop"; \
+  ValueType: string; ValueName: "com.remotelink.desktop"; \
   ValueData: """{app}\remotelink_desktop.exe"" --minimised"; \
   Flags: uninsdeletevalue; Tasks: startup
 

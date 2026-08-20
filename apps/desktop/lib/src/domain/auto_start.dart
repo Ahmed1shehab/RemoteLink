@@ -6,10 +6,28 @@ import 'desktop_preferences.dart';
 
 /// The reverse-DNS name of the login item, and the plist's filename on macOS.
 ///
-/// Kept as it is through the rename to "Remote Link": it is an identifier the
-/// OS already has on file, and changing it leaves the old login item registered
-/// with nothing to remove it.
-const String kAutoStartLabel = 'com.example.remotelinkDesktop';
+/// Matches the bundle identifier, which is the convention launchd and the
+/// Windows `Run` key both expect. It was `com.example.remotelinkDesktop`
+/// through the rename to "Remote Link" — deliberately, because an identifier
+/// the OS already holds cannot be changed without stranding what it registered.
+///
+/// That reasoning still stands, which is why [kLegacyAutoStartLabels] exists
+/// rather than the old name simply being deleted. What changed is that the
+/// placeholder was about to ship: a login item under `com.example` is visible
+/// to the user in System Settings, and the bundle identifier it was mirroring
+/// no longer exists.
+const String kAutoStartLabel = 'com.remotelink.desktop';
+
+/// Labels this app registered under before [kAutoStartLabel] settled.
+///
+/// Removed whenever the login item is touched. Without this an installation
+/// that ran an earlier build keeps a LaunchAgent pointing at a binary that has
+/// moved, and launchd reports a failure at every login — for a login item the
+/// user cannot find under the app's own name, because it is filed under
+/// `com.example`.
+const List<String> kLegacyAutoStartLabels = <String>[
+  'com.example.remotelinkDesktop',
+];
 
 /// Registers the companion to start when the user logs in.
 ///
@@ -36,12 +54,16 @@ final class AutoStart {
     required this.label,
     required this.executablePath,
     Directory? launchAgentsDirectory,
+    this.legacyLabels = kLegacyAutoStartLabels,
   }) : _launchAgents = launchAgentsDirectory;
 
   /// Reverse-DNS identifier, also the plist filename on macOS.
   final String label;
 
   final String executablePath;
+
+  /// Identifiers this app used to register under. See [kLegacyAutoStartLabels].
+  final List<String> legacyLabels;
 
   /// Where the macOS LaunchAgent goes.
   ///
@@ -55,9 +77,11 @@ final class AutoStart {
   /// Flag passed to the launched copy so it starts without a window.
   static const String minimisedFlag = '--minimised';
 
-  File get _agentFile => File(
+  File get _agentFile => _agentFileFor(label);
+
+  File _agentFileFor(String name) => File(
         '${_launchAgents?.path ?? '${Platform.environment['HOME']}'
-            '/Library/LaunchAgents'}/$label.plist',
+            '/Library/LaunchAgents'}/$name.plist',
       );
 
   /// Whether login registration is currently in place.
@@ -75,7 +99,38 @@ final class AutoStart {
     return false;
   }
 
+  /// Deletes anything left behind by a label this app no longer uses.
+  ///
+  /// Best effort by design. A legacy entry that cannot be removed is untidy;
+  /// failing the launch over it would be worse, and there is nothing the user
+  /// could do about it either way.
+  Future<void> removeLegacyEntries() async {
+    for (final legacy in legacyLabels) {
+      if (legacy == label) continue;
+      try {
+        if (Platform.isMacOS) {
+          final file = _agentFileFor(legacy);
+          if (file.existsSync()) {
+            await file.delete();
+            _log.info('removed a login item registered under $legacy');
+          }
+        } else if (Platform.isWindows) {
+          await Process.run('reg', <String>[
+            'delete',
+            r'HKCU\Software\Microsoft\Windows\CurrentVersion\Run',
+            '/v',
+            legacy,
+            '/f',
+          ]);
+        }
+      } on Object catch (e) {
+        _log.debug(() => 'could not remove the legacy entry $legacy: $e');
+      }
+    }
+  }
+
   Future<void> enable() async {
+    await removeLegacyEntries();
     try {
       if (Platform.isMacOS) {
         await _writeLaunchAgent();
@@ -103,6 +158,7 @@ final class AutoStart {
   }
 
   Future<void> disable() async {
+    await removeLegacyEntries();
     try {
       if (Platform.isMacOS) {
         if (_agentFile.existsSync()) await _agentFile.delete();
