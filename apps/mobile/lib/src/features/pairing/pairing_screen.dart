@@ -55,7 +55,14 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
 
   Future<void> _watchSession() async {
     final client = await ref.read(clientProvider.future);
-    final session = await client.sessions.first;
+
+    // The session already in hand comes first, and `sessions` is only awaited
+    // when there is none. `sessions` is a broadcast stream, so it replays
+    // nothing: if the handshake finished before this screen mounted — a fast
+    // LAN, a reconnect, a rebuild — `first` waits for a *second* session that
+    // is never coming, and the screen stays on "Connecting securely…" with a
+    // perfectly good connection underneath it.
+    final session = client.session ?? await client.sessions.first;
     if (!mounted) return;
 
     // The SAS is derived locally from the shared secret, not read out of
@@ -96,6 +103,27 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
       trustStore,
       await ref.read(identityStoreProvider.future),
     );
+
+    // Unblocks the session, and it is not a formality.
+    //
+    // A session that needed pairing starts in `SessionState.pairing`, and in
+    // that state `Session` silently drops every message outside subsystems
+    // 0x00 and 0x01 — the permission grant, media state, system status, the
+    // clipboard, and every byte of a file transfer. Only the desktop was
+    // calling this; the phone wrote its trust record, navigated to the
+    // controls, and left its own session pairing forever.
+    //
+    // The result was an app that looked connected and did nothing. The touchpad
+    // read "Not connected", the Media tab showed "Nothing playing" against a
+    // computer that was playing, and a file offer was answered by a desktop
+    // whose reply the phone then discarded. Every one of those reads as a
+    // separate bug and all of them were this line.
+    //
+    // A reconnect to an already-paired computer never hit it: the desktop
+    // finds the peer in its trust store, does not ask for pairing, and the
+    // session starts established. So this only ever broke the *first* session
+    // with a computer — which is every user's first impression of the app.
+    session.completePairing();
 
     if (!mounted) return;
     await Navigator.of(context).pushReplacement(

@@ -413,15 +413,27 @@ void main() {
       expect(PermissionTier.readOnly.canViewScreen, isFalse);
     });
 
-    test('standard covers input and clipboard but not power', () {
+    test('standard covers input, clipboard and files but not launching', () {
       const tier = PermissionTier.standard;
       expect(tier.allows(MessageType.mouseMove), isTrue);
       expect(tier.allows(MessageType.clipboardUpdate), isTrue);
-      expect(tier.allows(MessageType.fileChunk), isFalse);
+      // The tier a device is granted when it pairs, which is why file
+      // transfer has to be reachable from it: gated a tier higher, every
+      // offer a freshly paired phone made was refused with no way for the
+      // user to see why.
+      expect(tier.allows(MessageType.fileOffer), isTrue);
+      expect(tier.allows(MessageType.fileChunk), isTrue);
+      expect(tier.allows(MessageType.launchApplication), isFalse);
       expect(tier.allows(MessageType.powerCommand), isFalse);
     });
 
-    test('extended adds files and launching but still not power', () {
+    test('readOnly is refused files', () {
+      const tier = PermissionTier.readOnly;
+      expect(tier.allows(MessageType.fileOffer), isFalse);
+      expect(tier.allows(MessageType.fileChunk), isFalse);
+    });
+
+    test('extended adds launching but still not power', () {
       const tier = PermissionTier.extended;
       expect(tier.allows(MessageType.fileChunk), isTrue);
       expect(tier.allows(MessageType.launchApplication), isTrue);

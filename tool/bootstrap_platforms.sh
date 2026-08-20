@@ -47,6 +47,13 @@ for app in desktop mobile; do
     [ -f "$file" ] || continue
     set_plist "$file" "com.apple.security.network.server" bool true
     set_plist "$file" "com.apple.security.network.client" bool true
+    # Apple events, for reading the current track out of a music player or a
+    # browser tab. Under the hardened runtime this entitlement and the
+    # NSAppleEventsUsageDescription string below are both required — either one
+    # alone gets the event refused, which surfaces as `osascript` exiting
+    # non-zero and the desktop reporting "nothing playing" while a song is
+    # audibly playing.
+    set_plist "$file" "com.apple.security.automation.apple-events" bool true
     echo "  patched $file"
   done
 done
@@ -63,6 +70,11 @@ MAC_PLIST=apps/desktop/macos/Runner/Info.plist
 if [ -f "$MAC_PLIST" ]; then
   set_plist "$MAC_PLIST" "NSLocalNetworkUsageDescription" string \
     "RemoteLink lets your phone find and control this computer over your local network."
+  # The other half of the Apple-events pair. Without this key macOS refuses the
+  # event before the user is ever asked, so the Automation checkbox the fix
+  # depends on never appears in System Settings at all.
+  set_plist "$MAC_PLIST" "NSAppleEventsUsageDescription" string \
+    "RemoteLink asks your music player or browser what is playing, so your phone can show the track and control it."
   # LSUIElement hides the Dock icon: this is a menu-bar service, and a bouncing
   # Dock icon for something that runs all day is wrong.
   set_plist "$MAC_PLIST" "LSUIElement" bool true

@@ -761,7 +761,7 @@ class _ConnectedDevicesCard extends StatelessWidget {
   static String _tierLabel(PermissionTier tier) => switch (tier) {
         PermissionTier.readOnly => 'View only',
         PermissionTier.standard => 'Control',
-        PermissionTier.extended => 'Control + files',
+        PermissionTier.extended => 'Control + apps',
         PermissionTier.admin => 'Full access',
       };
 }

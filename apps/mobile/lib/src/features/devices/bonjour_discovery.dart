@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:bonsoir/bonsoir.dart';
+import 'package:meta/meta.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
@@ -22,6 +24,28 @@ const String _txtCapabilities = 'cap';
 const String _txtPlatform = 'plat';
 const String _txtProtocol = 'pv';
 const String _txtPairing = 'pair';
+
+/// How long a Bonjour service may go unconfirmed before it is dropped.
+///
+/// Much longer than the UDP backend's [kDeviceTimeout], and for a reason that
+/// is easy to get wrong: DNS-SD *pushes*. Nothing re-announces on a timer, so
+/// there is no stream of beacons to measure staleness against, and applying the
+/// UDP timeout here would delete every service seven seconds after resolving it
+/// however healthy it was. What refreshes the clock instead is
+/// [kBonjourProbeInterval] — an actual connection to the address the service
+/// advertised.
+const Duration kBonjourDeviceTimeout = Duration(seconds: 20);
+
+/// How often an unconfirmed service is re-checked.
+const Duration kBonjourProbeInterval = Duration(seconds: 6);
+
+/// How long one probe waits before calling an address unreachable.
+///
+/// Generous for a LAN, where a live machine answers in single-digit
+/// milliseconds. The cost of being wrong is asymmetric: an impatient timeout
+/// removes a computer that is simply busy, and the user then cannot see the one
+/// device they were looking for.
+const Duration kBonjourProbeTimeout = Duration(milliseconds: 1200);
 
 /// Discovery over Bonjour / DNS-SD.
 ///
@@ -44,13 +68,31 @@ const String _txtPairing = 'pair';
 final class BonjourDiscoveryBackend implements DiscoveryBackend {
   BonjourDiscoveryBackend({
     required Clock clock,
-    this.deviceTimeout = kDeviceTimeout,
+    this.deviceTimeout = kBonjourDeviceTimeout,
+    this.probeInterval = kBonjourProbeInterval,
+    this.probeTimeout = kBonjourProbeTimeout,
     this.isTrusted,
-  }) : _clock = clock;
+    Future<bool> Function(String host, int port, Duration timeout)? probe,
+  })  : _clock = clock,
+        _probe = probe ?? _connectProbe;
 
   final Clock _clock;
+
+  /// How long a service may go unconfirmed before it is dropped.
   final Duration deviceTimeout;
+
+  /// How often unconfirmed services are re-checked.
+  final Duration probeInterval;
+
+  /// How long one probe waits for the far end to answer.
+  final Duration probeTimeout;
+
   final bool Function(Uint8List fingerprint)? isTrusted;
+
+  /// Asks whether something is listening at an address.
+  ///
+  /// Injected so a test can decide what is alive without opening sockets.
+  final Future<bool> Function(String host, int port, Duration timeout) _probe;
 
   final Log _log = Log.scoped('mobile.discovery.bonjour');
   final Map<String, DiscoveredDevice> _devices = <String, DiscoveredDevice>{};
@@ -61,6 +103,8 @@ final class BonjourDiscoveryBackend implements DiscoveryBackend {
 
   BonsoirDiscovery? _discovery;
   StreamSubscription<BonsoirDiscoveryEvent>? _subscription;
+  Timer? _liveness;
+  bool _probing = false;
   bool _failed = false;
 
   /// Guards against a restart storm: the new browse can fail the same way.
@@ -101,6 +145,7 @@ final class BonjourDiscoveryBackend implements DiscoveryBackend {
 
       await discovery.start();
       _discovery = discovery;
+      _startLivenessChecks();
       _log.info('browsing for $kBonjourServiceType');
     } on Object catch (e) {
       // Never fatal. A missing or misbehaving plugin must degrade to the UDP
@@ -235,6 +280,102 @@ final class BonjourDiscoveryBackend implements DiscoveryBackend {
     }
   }
 
+  /// Begins confirming that resolved services are still answering.
+  ///
+  /// The reason this exists at all: a `discoveryServiceLost` event is the only
+  /// thing that used to remove a row, and it is not reliable. mDNS announces a
+  /// departure with a goodbye packet, which a process that was killed, crashed,
+  /// or had its Wi-Fi pulled never gets to send — so the record sits in the
+  /// responder's cache for its full TTL and the phone kept offering a computer
+  /// that had been off for an hour. Tapping it produced a connection attempt
+  /// that hung, which is the worst of both worlds: the list looked right and
+  /// the app looked broken.
+  ///
+  /// [deviceTimeout] was already a field here and was read by nothing.
+  void _startLivenessChecks() {
+    _liveness?.cancel();
+    _liveness = Timer.periodic(probeInterval, (_) => unawaited(_confirm()));
+  }
+
+  /// Re-checks every service that has not been heard from recently.
+  ///
+  /// One TCP connect, immediately closed. That is a deliberate choice over
+  /// re-resolving through mDNS: a resolve consults the same responder cache
+  /// that produced the stale answer in the first place, so it will happily
+  /// confirm a computer that is switched off. Opening the port the service
+  /// advertised asks the only question that matters — is anything there.
+  ///
+  /// The server treats the closed connection as an aborted handshake and logs
+  /// it at debug. A live computer is probed at most once per [deviceTimeout],
+  /// since a successful probe refreshes the clock.
+  Future<void> _confirm() async {
+    if (_probing || _devices.isEmpty) return;
+    _probing = true;
+    try {
+      final now = _clock.now();
+      final due = _devices.values
+          .where((device) => now.difference(device.lastSeen) >= probeInterval)
+          .toList(growable: false);
+
+      var changed = false;
+      for (final device in due) {
+        final alive = await _probe(device.address, device.port, probeTimeout);
+        // Re-read rather than reusing `device`: a resolve may have landed while
+        // the probe was in flight, and writing the pre-probe record back would
+        // undo it.
+        final current = _devices[device.id.value];
+        if (current == null) continue;
+
+        if (alive) {
+          _devices[device.id.value] = current.copyWith(lastSeen: _clock.now());
+          continue;
+        }
+        if (_clock.now().difference(current.lastSeen) > deviceTimeout) {
+          _devices.remove(device.id.value);
+          changed = true;
+          _log.info(
+            'dropping a service that stopped answering',
+            fields: <String, Object?>{
+              'device': device.id.value,
+              'address': '${device.address}:${device.port}',
+            },
+          );
+        }
+      }
+      if (changed) _publish();
+    } finally {
+      _probing = false;
+    }
+  }
+
+  /// Places a resolved service into the cache without a live browse.
+  ///
+  /// The browse itself needs the platform plugin, which does not exist in a
+  /// widget test binding — so without this there is no way to reach the code
+  /// that decides when a service has gone away, which is the part that was
+  /// missing and the part worth a test.
+  @visibleForTesting
+  void seedForTesting(DiscoveredDevice device) {
+    _devices[device.id.value] = device;
+  }
+
+  /// Whether anything accepts a connection at [host]:[port].
+  static Future<bool> _connectProbe(
+    String host,
+    int port,
+    Duration timeout,
+  ) async {
+    try {
+      final socket = await Socket.connect(host, port, timeout: timeout);
+      // `destroy` rather than `close`: nothing is going to be written, and a
+      // graceful close would wait on a peer that has no reason to reply.
+      socket.destroy();
+      return true;
+    } on Object {
+      return false;
+    }
+  }
+
   void _markFailed(Object error) {
     if (_failed) return;
     _failed = true;
@@ -251,13 +392,19 @@ final class BonjourDiscoveryBackend implements DiscoveryBackend {
 
   @override
   Future<void> refresh() async {
-    // DNS-SD pushes changes rather than answering polls, so there is nothing to
-    // re-request. Restarting the browse would drop and re-add every service,
-    // making the list flicker for no benefit.
+    // Used to do nothing, on the grounds that DNS-SD pushes rather than polls.
+    // True, and beside the point: the user reaching for Search again is telling
+    // us the list is wrong, and the only thing that has ever been wrong is a
+    // service still listed after its computer went away. So the refresh asks
+    // every listed address whether it is still there, right now, instead of
+    // waiting for the next scheduled round.
+    await _confirm();
   }
 
   @override
   Future<void> stop() async {
+    _liveness?.cancel();
+    _liveness = null;
     await _subscription?.cancel();
     _subscription = null;
     try {
@@ -298,9 +445,15 @@ final class CompositeDiscoveryBackend implements DiscoveryBackend {
     final merged = <String, DiscoveredDevice>{};
     for (final backend in backends) {
       for (final device in backend.current) {
-        // First writer wins, and backends are ordered by preference, so a
-        // Bonjour result does not overwrite a UDP one that already resolved.
-        merged.putIfAbsent(device.id.value, () => device);
+        // Freshest wins, not first. Order used to decide this, which meant a
+        // Bonjour entry left over from a computer that had gone away masked the
+        // UDP backend's live view of the same device — and the UDP backend is
+        // the one that expires things on a timer. Preferring the more recent
+        // sighting means either backend can correct the other.
+        final existing = merged[device.id.value];
+        if (existing == null || device.lastSeen.isAfter(existing.lastSeen)) {
+          merged[device.id.value] = device;
+        }
       }
     }
     final list = merged.values.toList()

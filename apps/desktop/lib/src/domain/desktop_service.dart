@@ -35,7 +35,12 @@ Capabilities buildCapabilities({
     Capabilities.powerControl |
         Capabilities.launchApps |
         Capabilities.compression |
-        Capabilities.sessionResumption,
+        Capabilities.sessionResumption |
+        // Unconditional, unlike its neighbours below. File transfer needs no
+        // OS permission and no native backend — it is a stream of encrypted
+        // chunks written to a directory this app already owns — so there is no
+        // runtime condition that could make it unavailable.
+        Capabilities.fileTransfer,
   );
   if (inputAvailable) {
     capabilities = capabilities

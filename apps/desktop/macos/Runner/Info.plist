@@ -32,6 +32,17 @@
 	     prompt is generic, and on recent macOS an app that cannot explain itself
 	     is simply refused — which would surface on the sending phone as a
 	     transfer that aborts for no stated reason. -->
+	<!-- Required before this app may send a single Apple event, and its absence
+	     is what silently broke media metadata. Reading the current track from
+	     Spotify, Music, or a browser tab is an Apple event; since macOS 10.14
+	     an app without this string is refused outright, and the refusal arrives
+	     as an ordinary non-zero exit from `osascript` — so the desktop reported
+	     "nothing playing" while a song was audibly playing, and the phone had
+	     no way to know the difference. Volume and the transport keys do not go
+	     through here: they use CoreAudio and synthesised HID events, which is
+	     why those keep working with this permission denied. -->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Remote Link asks your music player or browser what is playing, so your phone can show the track and control it.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>Remote Link saves the files your phone sends into your Downloads folder.</string>
 	<key>NSLocalNetworkUsageDescription</key>

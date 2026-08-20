@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'motion.dart';
 
@@ -12,14 +13,110 @@ import 'motion.dart';
 /// than an oversight: `packages/` may not import Flutter (CONTRIBUTING §1), so
 /// there is nowhere below `apps/` for a `ThemeData` to live, and inventing a
 /// shared Flutter package to hold thirty lines of colour would be the larger
-/// mistake. The seed is the thing that has to match, and it is one constant in
-/// each.
-const Color kSeedColor = Color(0xFF5B5CE2);
+/// mistake. The palette is the thing that has to match, and it is written out
+/// identically in each.
+/// The navy the logo is drawn on, and the colour the whole app is built from.
+///
+/// Sampled from `assets/brand/logo.png` rather than picked to taste: the mark
+/// is a white monitor-and-phone glyph on this field, and the app that opens
+/// underneath it should look like the icon the user tapped. What shipped before
+/// was `#5B5CE2`, an indigo that appears nowhere in the artwork, so every
+/// accent in both apps disagreed with the icon on the Dock and the home screen.
+const Color kBrandNavy = Color(0xFF1B2438);
 
-/// Material 3 derives every `on*` pair from the seed to meet 4.5:1, which is
-/// why the app sticks to scheme roles instead of literal colours.
+/// The other half of the mark.
+const Color kBrandWhite = Color(0xFFFFFFFF);
+
+/// Light: navy ink and navy accents on white paper.
+///
+/// Written out rather than generated with `ColorScheme.fromSeed`. Material's
+/// tonal palette takes the hue and discards the rest, so seeding it with the
+/// navy produced a mid-blue at the tones the roles actually use — a scheme in
+/// the right family and the wrong key, which is the failure the seed was
+/// supposed to prevent. Every pair below is measured by `test/contrast_test.dart`
+/// against the 4.5:1 minimum in both themes.
+const ColorScheme _light = ColorScheme(
+  brightness: Brightness.light,
+  primary: kBrandNavy,
+  onPrimary: kBrandWhite,
+  primaryContainer: Color(0xFFD7E0EF),
+  onPrimaryContainer: Color(0xFF101827),
+  secondary: Color(0xFF3B4761),
+  onSecondary: kBrandWhite,
+  secondaryContainer: Color(0xFFDFE5F0),
+  onSecondaryContainer: Color(0xFF161E2E),
+  tertiary: Color(0xFF2F5480),
+  onTertiary: kBrandWhite,
+  tertiaryContainer: Color(0xFFD6E4F5),
+  onTertiaryContainer: Color(0xFF0E2942),
+  error: Color(0xFFB3261E),
+  onError: kBrandWhite,
+  errorContainer: Color(0xFFF9DEDC),
+  onErrorContainer: Color(0xFF410E0B),
+  surface: kBrandWhite,
+  onSurface: Color(0xFF111827),
+  onSurfaceVariant: Color(0xFF4A5568),
+  surfaceContainerLowest: kBrandWhite,
+  surfaceContainerLow: Color(0xFFF7F9FC),
+  surfaceContainer: Color(0xFFF1F4F9),
+  surfaceContainerHigh: Color(0xFFE9EDF5),
+  surfaceContainerHighest: Color(0xFFE1E7F1),
+  outline: Color(0xFF6B7688),
+  outlineVariant: Color(0xFFC8D0DE),
+  inverseSurface: kBrandNavy,
+  onInverseSurface: Color(0xFFF1F4F9),
+  inversePrimary: Color(0xFFB6C8E6),
+  shadow: Color(0xFF000000),
+  scrim: Color(0xFF000000),
+);
+
+/// Dark: white ink on the logo's own navy.
+///
+/// The surfaces are the brand colour here, so `primary` cannot also be the
+/// navy — it would vanish into the page. It becomes a light tint of the same
+/// hue, which is what Material expects of a dark scheme and keeps filled
+/// buttons legible without introducing a second colour family.
+const ColorScheme _dark = ColorScheme(
+  brightness: Brightness.dark,
+  primary: Color(0xFFB6C8E6),
+  onPrimary: Color(0xFF121E33),
+  primaryContainer: Color(0xFF2A3852),
+  onPrimaryContainer: Color(0xFFD9E3F5),
+  secondary: Color(0xFFB2BED4),
+  onSecondary: kBrandNavy,
+  secondaryContainer: Color(0xFF333F55),
+  onSecondaryContainer: Color(0xFFDCE4F2),
+  tertiary: Color(0xFF9FC2E8),
+  onTertiary: Color(0xFF0E2942),
+  tertiaryContainer: Color(0xFF2B4763),
+  onTertiaryContainer: Color(0xFFD3E4F8),
+  error: Color(0xFFF2B8B5),
+  onError: Color(0xFF601410),
+  errorContainer: Color(0xFF8C1D18),
+  onErrorContainer: Color(0xFFF9DEDC),
+  surface: Color(0xFF111A2B),
+  onSurface: Color(0xFFE7ECF5),
+  onSurfaceVariant: Color(0xFFB3BDCE),
+  surfaceContainerLowest: Color(0xFF0A101C),
+  surfaceContainerLow: Color(0xFF161F32),
+  surfaceContainer: Color(0xFF1A2539),
+  surfaceContainerHigh: Color(0xFF212D43),
+  surfaceContainerHighest: Color(0xFF28354D),
+  outline: Color(0xFF8894A8),
+  outlineVariant: Color(0xFF414D63),
+  inverseSurface: Color(0xFFE7ECF5),
+  onInverseSurface: kBrandNavy,
+  inversePrimary: Color(0xFF3B4761),
+  shadow: Color(0xFF000000),
+  scrim: Color(0xFF000000),
+);
+
+/// The page behind the cards, a shade off the card surface in both themes.
+const Color _lightCanvas = Color(0xFFF4F6FA);
+const Color _darkCanvas = Color(0xFF0B121F);
+
 ColorScheme remoteLinkColorScheme(Brightness brightness) =>
-    ColorScheme.fromSeed(seedColor: kSeedColor, brightness: brightness);
+    brightness == Brightness.dark ? _dark : _light;
 
 ThemeData remoteLinkTheme(Brightness brightness) {
   final scheme = remoteLinkColorScheme(brightness);
@@ -34,9 +131,8 @@ ThemeData remoteLinkTheme(Brightness brightness) {
     colorScheme: scheme,
     useMaterial3: true,
     brightness: brightness,
-    scaffoldBackgroundColor:
-        dark ? const Color(0xFF0B0D14) : const Color(0xFFF6F7FB),
-    canvasColor: dark ? const Color(0xFF0B0D14) : const Color(0xFFF6F7FB),
+    scaffoldBackgroundColor: dark ? _darkCanvas : _lightCanvas,
+    canvasColor: dark ? _darkCanvas : _lightCanvas,
     textTheme: base.textTheme.copyWith(
       headlineMedium: base.textTheme.headlineMedium?.copyWith(
         fontWeight: FontWeight.w700,
@@ -68,6 +164,22 @@ ThemeData remoteLinkTheme(Brightness brightness) {
       centerTitle: false,
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
+      // Stated rather than inferred. Flutter derives the status bar style from
+      // the app bar's own background, and this one is transparent — so on iOS
+      // it guessed from a colour nothing is painted in, and the clock and
+      // battery came out dark navy on a dark navy page. What sits behind the
+      // bar is the scaffold, so the brightness that matters is the theme's.
+      systemOverlayStyle: dark
+          ? SystemUiOverlayStyle.light.copyWith(
+              statusBarColor: Colors.transparent,
+              systemNavigationBarColor: _darkCanvas,
+              systemNavigationBarIconBrightness: Brightness.light,
+            )
+          : SystemUiOverlayStyle.dark.copyWith(
+              statusBarColor: Colors.transparent,
+              systemNavigationBarColor: _lightCanvas,
+              systemNavigationBarIconBrightness: Brightness.dark,
+            ),
       titleTextStyle: base.textTheme.titleLarge?.copyWith(
         color: scheme.onSurface,
         fontWeight: FontWeight.w700,
@@ -188,10 +300,14 @@ ThemeData remoteLinkTheme(Brightness brightness) {
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
+      // The brand navy in the light theme, where a snack bar is meant to read
+      // as a dark slab against the page; a raised surface in the dark theme,
+      // where a darker slab would disappear into it.
       backgroundColor:
-          dark ? scheme.surfaceContainerHighest : const Color(0xFF20222C),
-      contentTextStyle:
-          TextStyle(color: dark ? scheme.onSurface : Colors.white),
+          dark ? scheme.surfaceContainerHighest : scheme.inverseSurface,
+      contentTextStyle: TextStyle(
+        color: dark ? scheme.onSurface : scheme.onInverseSurface,
+      ),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
     dialogTheme: DialogThemeData(

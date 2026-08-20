@@ -602,7 +602,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
                     DropdownMenuItem<String>(
                       value: d.id.value,
                       child: Text(
-                        '${d.name} (${d.tier == PermissionTier.extended || d.tier == PermissionTier.admin ? "Transfers enabled" : "Tier: ${d.tier.name}"})',
+                        '${d.name}${d.tier.canTransferFiles ? "" : " · transfers not permitted"}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1244,7 +1244,7 @@ class PermissionRequestDialog extends StatelessWidget {
   static String _tierTitle(PermissionTier tier) => switch (tier) {
         PermissionTier.readOnly => 'View Only',
         PermissionTier.standard => 'Control',
-        PermissionTier.extended => 'Control + File Transfer',
+        PermissionTier.extended => 'Control + Launch Apps',
         PermissionTier.admin => 'Administrator (Full Access)',
       };
 
@@ -1259,9 +1259,11 @@ class PermissionRequestDialog extends StatelessWidget {
               'but not the contents of the screen.',
         PermissionTier.standard =>
           'Allows sending keyboard and mouse input, synchronizing clipboard, '
-              'controlling media, and viewing this screen.',
+              'controlling media, viewing this screen, and transferring files '
+              '— every transfer is still confirmed here before it starts.',
         PermissionTier.extended =>
-          'Allows transferring files, launching applications, and running pre-registered commands.',
+          'Allows launching applications and running pre-registered commands '
+              'without a further prompt.',
         PermissionTier.admin =>
           'Allows controlling power (shutdown, restart, sleep, lock) and managing paired devices.',
       };
@@ -1748,7 +1750,7 @@ class _DeviceTile extends StatelessWidget {
   static String _tierLabel(PermissionTier tier) => switch (tier) {
         PermissionTier.readOnly => 'View only',
         PermissionTier.standard => 'Control',
-        PermissionTier.extended => 'Control + files',
+        PermissionTier.extended => 'Control + apps',
         PermissionTier.admin => 'Full access',
       };
 }

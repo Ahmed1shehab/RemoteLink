@@ -473,7 +473,8 @@ void main() {
       expect(find.text('Standard'), findsOneWidget);
       expect(
         find.text(
-          'Allows sending keyboard and mouse input, synchronizing clipboard, and controlling media.',
+          'Allows sending keyboard and mouse input, synchronizing clipboard, '
+          'controlling media, viewing this screen, and transferring files.',
         ),
         findsOneWidget,
       );
@@ -482,7 +483,7 @@ void main() {
       expect(find.text('What Extended allows:'), findsOneWidget);
       expect(
         find.text(
-          'Allows transferring files, launching applications, and running pre-registered commands.',
+          'Allows launching applications and running pre-registered commands.',
         ),
         findsOneWidget,
       );
