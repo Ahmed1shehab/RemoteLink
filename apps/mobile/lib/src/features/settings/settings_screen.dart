@@ -560,9 +560,10 @@ class _RequestPermissionDialogState
         PermissionTier.readOnly =>
           'Allows viewing system status, media state, and screen stream.',
         PermissionTier.standard =>
-          'Allows sending keyboard and mouse input, synchronizing clipboard, and controlling media.',
+          'Allows sending keyboard and mouse input, synchronizing clipboard, '
+              'controlling media, viewing this screen, and transferring files.',
         PermissionTier.extended =>
-          'Allows transferring files, launching applications, and running pre-registered commands.',
+          'Allows launching applications and running pre-registered commands.',
         PermissionTier.admin =>
           'Allows controlling power (shutdown, restart, sleep, lock) and managing paired devices.',
       };

@@ -229,7 +229,13 @@ void main() {
     expect(clientSession.isEstablished, isTrue);
   });
 
-  test('standard-tier peer is refused before storage is prepared', () async {
+  test('a read-only peer is refused before storage is prepared', () async {
+    // `readOnly` rather than `standard`: file transfer sits at `standard`
+    // because that is what a device is granted when it pairs, and gating it
+    // above that refused every offer from a normally paired phone. Below it
+    // the refusal still has to happen, and still has to happen before any
+    // storage is touched — an untrusted peer must not be able to make the
+    // desk allocate anything.
     final store = _MemoryStore();
     final offer = await _offer('denied-transfer', _patternBytes(32));
     final receiver = FileTransferReceiver(
@@ -239,7 +245,7 @@ void main() {
     );
 
     final decision =
-        await receiver.acceptOffer(offer, tier: PermissionTier.standard);
+        await receiver.acceptOffer(offer, tier: PermissionTier.readOnly);
 
     expect(decision.accept.fileTokens, isEmpty);
     expect(decision.abort?.reason, FileAbortReason.declined);

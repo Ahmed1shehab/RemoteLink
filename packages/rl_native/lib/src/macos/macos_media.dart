@@ -233,7 +233,10 @@ final class MacosMediaBackend implements MediaBackend {
   Future<String?> _osascript(String script) async {
     try {
       final result = await Process.run('osascript', <String>['-e', script]);
-      if (result.exitCode != 0) return null;
+      if (result.exitCode != 0) {
+        _noteScriptFailure('${result.stderr}');
+        return null;
+      }
       return (result.stdout as String).trim();
     } on ProcessException catch (e) {
       _log.debug(() => 'osascript failed: ${e.message}');
@@ -241,31 +244,69 @@ final class MacosMediaBackend implements MediaBackend {
     }
   }
 
-  @override
-  Future<VolumeState> volume() async {
-    final output = await _osascript(
-      'set v to get volume settings\n'
-      'return (output volume of v as text) & "," & '
-      '(output muted of v as text)',
-    );
-    if (output == null) return const VolumeState(level: 0, muted: false);
+  /// Whether macOS has refused this app permission to drive other apps.
+  ///
+  /// Surfaced rather than swallowed because it is not a bug the user can see
+  /// any other way. A denied Apple event is an ordinary non-zero exit, so every
+  /// caller here reads it as "nothing is playing" — the exact symptom that made
+  /// the Media tab look broken while the desktop was working perfectly. The
+  /// answer is a checkbox in System Settings → Privacy & Security → Automation,
+  /// and nothing said so.
+  bool get automationDenied => _automationDenied;
+  bool _automationDenied = false;
 
-    final parts = output.split(',');
-    final level = double.tryParse(parts.first.trim()) ?? 0;
-    return VolumeState(
-      level: (level / 100).clamp(0.0, 1.0),
-      muted: parts.length > 1 && parts[1].trim().toLowerCase() == 'true',
+  /// Logged once, not per call: this is polled every two seconds.
+  void _noteScriptFailure(String stderr) {
+    // -1743 is `errAEEventNotPermitted`; the text form appears when the user
+    // has denied the prompt, and the numeric one when the app was never
+    // allowed to ask.
+    final denied = stderr.contains('-1743') ||
+        stderr.contains('Not authorized to send Apple events');
+    if (!denied || _automationDenied) return;
+
+    _automationDenied = true;
+    _log.warn(
+      'macOS refused permission to read other applications. Track titles and '
+      'play state will be unavailable until Remote Link is enabled under '
+      'System Settings > Privacy & Security > Automation. Volume, mute, and '
+      'the transport buttons are unaffected.',
     );
   }
 
+  /// Reads the system output volume from CoreAudio.
+  ///
+  /// This used to be `osascript -e 'get volume settings'`, and that is the
+  /// single line that broke the whole Media tab. Running an AppleScript sends
+  /// an Apple event, and since macOS 10.14 an app may not send one until the
+  /// user has granted Automation for the target — a permission this app never
+  /// asked for, because the Info.plist had no `NSAppleEventsUsageDescription`.
+  /// Without the string macOS refuses the event outright, `osascript` exits
+  /// non-zero, [_osascript] returns null, and this method reported "volume 0,
+  /// not muted". The phone drew a slider pinned at 0% that moved nothing, and
+  /// nothing was logged.
+  ///
+  /// CoreAudio is not gated behind any permission, is an order of magnitude
+  /// faster than spawning a process, and reports what the hardware actually
+  /// holds. See `CoreAudioBindings.volume`.
+  @override
+  Future<VolumeState> volume() async => VolumeState(
+        level: _audio.volume ?? 0,
+        muted: _audio.isMuted ?? false,
+      );
+
   @override
   Future<void> setVolume(double level) async {
+    if (_audio.setVolume(level)) return;
+    // Only reached on a device that exposes no volume control of its own —
+    // some HDMI outputs and USB interfaces. AppleScript can still drive the
+    // system slider there, so it stays as a fallback rather than the default.
     final percent = (level.clamp(0.0, 1.0) * 100).round();
     await _osascript('set volume output volume $percent');
   }
 
   @override
   Future<void> setMuted({required bool muted}) async {
+    if (_audio.setMuted(muted: muted)) return;
     await _osascript('set volume ${muted ? 'with' : 'without'} output muted');
   }
 
@@ -303,13 +344,58 @@ final class MacosMediaBackend implements MediaBackend {
     ),
   };
 
-  Future<bool> _isRunning(String app) async {
-    final running = await _osascript(
-      'tell application "System Events" to return '
-      '(exists (processes where name is "$app")) as text',
-    );
-    return running?.toLowerCase() == 'true';
+  /// Names of the applications currently running, cached briefly.
+  ///
+  /// This replaced one `osascript` per application — eight of them on a machine
+  /// with a few browsers open, every two seconds, each spawning a process and
+  /// each an Apple event to System Events. Two things were wrong with that. It
+  /// was slow enough to overrun the two-second poll it was called from, and
+  /// System Events is itself an automation target: without the Automation
+  /// permission every one of those queries answered "not running", so no player
+  /// and no browser was ever found and the phone showed "Nothing playing"
+  /// forever, whatever was on screen.
+  ///
+  /// `ps` needs no permission and answers for every app at once. The paths look
+  /// like `/Applications/Safari.app/Contents/MacOS/Safari`, so the executable
+  /// name is the last segment.
+  Future<Set<String>> _runningApplications() async {
+    final now = DateTime.now();
+    final cached = _runningCache;
+    if (cached != null &&
+        now.difference(_runningCachedAt) < _runningCacheLifetime) {
+      return cached;
+    }
+
+    final names = <String>{};
+    try {
+      final result = await Process.run('ps', <String>['-Ao', 'comm=']);
+      if (result.exitCode == 0) {
+        for (final line in (result.stdout as String).split('\n')) {
+          final path = line.trim();
+          if (!path.contains('.app/Contents/MacOS/')) continue;
+          final name = path.substring(path.lastIndexOf('/') + 1);
+          if (name.isNotEmpty) names.add(name);
+        }
+      }
+    } on ProcessException catch (e) {
+      _log.debug(() => 'could not list processes: ${e.message}');
+    }
+
+    _runningCache = names;
+    _runningCachedAt = now;
+    return names;
   }
+
+  /// How long a process listing is reused.
+  ///
+  /// Shorter than the desktop's two-second media poll, so a player that was
+  /// just opened is noticed on the next tick rather than the one after — but
+  /// long enough that the several lookups within a single [nowPlaying] share
+  /// one `ps`.
+  static const Duration _runningCacheLifetime = Duration(milliseconds: 1500);
+
+  Set<String>? _runningCache;
+  DateTime _runningCachedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// Reads the front tab of whichever supported browser is running.
   ///
@@ -319,8 +405,9 @@ final class MacosMediaBackend implements MediaBackend {
   /// and it is right in the case that matters: one video, one browser, one
   /// person watching it.
   Future<NowPlaying?> _browserNowPlaying() async {
+    final running = await _runningApplications();
     for (final entry in _browsers.entries) {
-      if (!await _isRunning(entry.key)) continue;
+      if (!running.contains(entry.key)) continue;
 
       final info = await _osascript(
         'tell application "${entry.key}"\n'
@@ -366,8 +453,9 @@ final class MacosMediaBackend implements MediaBackend {
     // Only applications already running are asked — `tell application "Spotify"`
     // would otherwise *launch* Spotify, which is a spectacular way to fail at
     // reading metadata.
+    final running = await _runningApplications();
     for (final player in <String>['Spotify', 'Music']) {
-      if (!await _isRunning(player)) continue;
+      if (!running.contains(player)) continue;
 
       final info = await _osascript('''
 tell application "$player"

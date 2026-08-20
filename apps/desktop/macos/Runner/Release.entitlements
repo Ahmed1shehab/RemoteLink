@@ -30,6 +30,13 @@
 	     One migration consequence: application support moves out of the container
 	     to `~/Library/Application Support/RemoteLink`, so an installation that
 	     ran a sandboxed build has to pair its phones once more. -->
+	<!-- Under the hardened runtime, the Info.plist usage string alone is not
+	     enough: an app also needs this entitlement before it may send an Apple
+	     event at all. Both halves are required, which is why one without the
+	     other looks like the permission "not working". It buys the now-playing
+	     title and nothing else. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
 	<key>com.apple.security.network.server</key>

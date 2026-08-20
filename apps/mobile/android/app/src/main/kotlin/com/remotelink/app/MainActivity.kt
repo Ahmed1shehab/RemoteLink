@@ -1,4 +1,4 @@
-package com.example.remotelink_mobile
+package com.remotelink.app
 
 import io.flutter.embedding.android.FlutterActivity
 

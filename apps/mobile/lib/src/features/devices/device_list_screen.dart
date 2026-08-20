@@ -174,6 +174,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     final entries = _merge(discovered, paired, wakeAddresses);
     final clientState = ref.watch(clientStateProvider).valueOrNull;
     final client = ref.watch(clientProvider).valueOrNull;
+    final connectedId = ref.watch(connectedDeviceIdProvider);
     final revokedPeerId = clientState == ClientState.failed &&
             client?.failureCode == ProtocolErrorCode.revoked
         ? client?.target?.deviceId
@@ -238,12 +239,24 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
                 itemBuilder: (context, index) {
                   final entry = entries[index];
                   final wasRevoked = entry.id == revokedPeerId;
+                  final isConnected =
+                      entry.id != null && entry.id == connectedId;
                   return _DeviceTile(
                     entry: entry,
                     wasRevoked: wasRevoked,
-                    onTap: wasRevoked ? null : () => _connect(context, entry),
+                    isConnected: isConnected,
+                    onTap: wasRevoked
+                        ? null
+                        : isConnected
+                            ? () => _resume(context)
+                            : () => _connect(
+                                  context,
+                                  entry,
+                                  replacing: connectedId != null,
+                                ),
                     onPairAgain:
                         wasRevoked ? () => _pairAgain(context, entry) : null,
+                    onDisconnect: isConnected ? _disconnect : null,
                     onRename: entry.isPaired && entry.id != null
                         ? () => _renameComputer(context, entry)
                         : null,
@@ -347,10 +360,67 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     await _connect(context, entry);
   }
 
+  /// Goes back to the computer already connected, without reconnecting.
+  ///
+  /// Tapping the connected row used to run the full [_connect] path, which
+  /// dials a socket that is already up. The client replaces the session, the
+  /// desktop logs a replaced connection, and the user watches a working link go
+  /// down and come back for no reason.
+  Future<void> _resume(BuildContext context) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const ControlScreen()),
+    );
+  }
+
+  /// Drops the current session and stays on the list.
+  ///
+  /// The app could reach a connected state and offer no way out of it short of
+  /// force-quitting: auto-connect reconnects on launch, and leaving the
+  /// touchpad only cancels auto-connect for that one attempt.
+  Future<void> _disconnect() async {
+    // Cancelled first. Without this the supervisor treats the close as a drop
+    // and dials straight back in, so the button appears to do nothing.
+    ref.read(autoConnectProvider.notifier).cancel();
+    final client = await ref.read(clientProvider.future);
+    await client.disconnect();
+  }
+
+  /// Asks before replacing a live connection with a different computer.
+  ///
+  /// The transport holds one session at a time, so connecting elsewhere ends
+  /// the current one. That is worth a sentence rather than a surprise: the
+  /// phone may be mid-transfer, and the person tapping may simply have meant to
+  /// look at the other computer's row.
+  Future<bool> _confirmSwitch(BuildContext context, String name) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Switch computers?'),
+        content: Text(
+          'This phone talks to one computer at a time, so connecting to $name '
+          'will disconnect the one you are on. Anything still transferring '
+          'will stop.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Stay'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Switch to $name'),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
+  }
+
   Future<void> _connect(
     BuildContext context,
     _Entry entry, {
     bool freshPairing = false,
+    bool replacing = false,
   }) async {
     // A paired computer we have no address for. Asking is the only thing that
     // can help, and it is what the user would have to do anyway — the
@@ -359,6 +429,13 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     if (host == null) {
       await _promptForAddress(context, forEntry: entry);
       return;
+    }
+
+    if (replacing) {
+      if (!await _confirmSwitch(context, entry.name)) return;
+      if (!context.mounted) return;
+      await _disconnect();
+      if (!context.mounted) return;
     }
 
     final client = await ref.read(clientProvider.future);
@@ -630,20 +707,72 @@ class _ManualAddressDialogState extends State<_ManualAddressDialog> {
       );
 }
 
+/// The "this is the one you are on" marker.
+///
+/// Worth calling out rather than leaving to a colour: with several paired
+/// computers in the list, which one is live is the single most useful fact on
+/// the screen, and it was not represented at all — every row looked equally
+/// available, so tapping the wrong one silently replaced a working session.
+class _ConnectedSubtitle extends StatelessWidget {
+  const _ConnectedSubtitle();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      children: <Widget>[
+        Container(
+          width: 7,
+          height: 7,
+          decoration: const BoxDecoration(
+            color: Color(0xFF22A06B),
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 7),
+        Text(
+          'Connected',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: scheme.primary,
+                fontWeight: FontWeight.w700,
+              ),
+        ),
+        Flexible(
+          child: Text(
+            ' · tap for the controls',
+            style: Theme.of(context).textTheme.bodySmall,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _DeviceTile extends StatelessWidget {
   const _DeviceTile({
     required this.entry,
     required this.wasRevoked,
     required this.onTap,
     required this.onPairAgain,
+    this.isConnected = false,
+    this.onDisconnect,
     this.onRename,
     this.onWake,
   });
 
   final _Entry entry;
   final bool wasRevoked;
+
+  /// Whether this is the computer the phone is talking to right now.
+  final bool isConnected;
+
   final VoidCallback? onTap;
   final VoidCallback? onPairAgain;
+
+  /// Present only on the connected row.
+  final VoidCallback? onDisconnect;
+
   final VoidCallback? onRename;
 
   /// Null unless this computer is paired, absent, and has a known hardware
@@ -662,7 +791,7 @@ class _DeviceTile extends StatelessWidget {
           height: 48,
           decoration: BoxDecoration(
             color: (entry.isLive ? scheme.primary : scheme.onSurfaceVariant)
-                .withValues(alpha: 0.10),
+                .withValues(alpha: isConnected ? 0.18 : 0.10),
             borderRadius: BorderRadius.circular(15),
           ),
           child: Icon(
@@ -689,53 +818,65 @@ class _DeviceTile extends StatelessWidget {
                 : scheme.onSurfaceVariant.withValues(alpha: 0.5),
           ),
         ),
-        title: Text(entry.name),
-        subtitle: Text(
-          wasRevoked
-              ? 'This computer removed your access'
-              : switch ((entry.isPaired, entry.isLive)) {
-                  _ when entry.host == null =>
-                    'Paired · tap to enter its address',
-                  (true, true) => 'Paired · ${entry.host}',
-                  (true, false) =>
-                    'Paired · not seen right now · ${entry.host}',
-                  (false, true) => 'Tap to pair · ${entry.host}',
-                  (false, false) => entry.host!,
-                },
-        ),
+        // The badge sits on the second line rather than beside the name.
+        // Sharing the title row with it cost about a third of the width, and
+        // computer names are long — a Mac is called `Ahmeds-MacBook-Air.local`
+        // out of the box, so the row that mattered most was the one whose name
+        // was clipped to `Ahmeds-…`.
+        title: Text(entry.name, overflow: TextOverflow.ellipsis),
+        subtitle: isConnected
+            ? const _ConnectedSubtitle()
+            : Text(
+                wasRevoked
+                    ? 'This computer removed your access'
+                    : switch ((entry.isPaired, entry.isLive)) {
+                        _ when entry.host == null =>
+                          'Paired · tap to enter its address',
+                        (true, true) => 'Paired · ${entry.host}',
+                        (true, false) =>
+                          'Paired · not seen right now · ${entry.host}',
+                        (false, true) => 'Tap to pair · ${entry.host}',
+                        (false, false) => entry.host!,
+                      },
+              ),
         trailing: wasRevoked
             ? TextButton(
                 onPressed: onPairAgain,
                 child: const Text('Pair again'),
               )
-            : entry.isPaired
-                ? Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      if (onWake != null)
-                        TextButton(
-                          onPressed: onWake,
-                          child: const Text('Wake'),
-                        ),
-                      if (onRename != null)
-                        IconButton(
-                          icon: const Icon(Icons.edit_outlined),
-                          tooltip: 'Rename computer',
-                          onPressed: onRename,
-                        ),
-                      // Both of these repeat what the subtitle already says —
-                      // "Paired · 192.168.1.4", or that the row is tappable.
-                      // Excluded rather than labelled: the fix for an unlabelled
-                      // icon is not always a label.
-                      ExcludeSemantics(
-                        child:
-                            Icon(Icons.verified_rounded, color: scheme.primary),
-                      ),
-                    ],
+            : isConnected
+                ? TextButton(
+                    onPressed: onDisconnect,
+                    child: const Text('Disconnect'),
                   )
-                : const ExcludeSemantics(
-                    child: Icon(Icons.chevron_right_rounded),
-                  ),
+                : entry.isPaired
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          if (onWake != null)
+                            TextButton(
+                              onPressed: onWake,
+                              child: const Text('Wake'),
+                            ),
+                          if (onRename != null)
+                            IconButton(
+                              icon: const Icon(Icons.edit_outlined),
+                              tooltip: 'Rename computer',
+                              onPressed: onRename,
+                            ),
+                          // Both of these repeat what the subtitle already says —
+                          // "Paired · 192.168.1.4", or that the row is tappable.
+                          // Excluded rather than labelled: the fix for an unlabelled
+                          // icon is not always a label.
+                          ExcludeSemantics(
+                            child: Icon(Icons.verified_rounded,
+                                color: scheme.primary),
+                          ),
+                        ],
+                      )
+                    : const ExcludeSemantics(
+                        child: Icon(Icons.chevron_right_rounded),
+                      ),
         onTap: onTap,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       ),

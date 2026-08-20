@@ -38,6 +38,7 @@ const Capabilities kMobileCapabilities = Capabilities(
   Capabilities.mouse |
       Capabilities.keyboard |
       Capabilities.clipboardText |
+      Capabilities.fileTransfer |
       Capabilities.mediaControl |
       Capabilities.mediaMetadata |
       Capabilities.presentation |
@@ -399,6 +400,23 @@ final clientStateProvider = StreamProvider<ClientState>((ref) async* {
   final client = await ref.watch(clientProvider.future);
   yield client.state;
   yield* client.states;
+});
+
+/// The computer this phone is connected to right now, or null.
+///
+/// Derived from the connection state rather than read straight off the client,
+/// because `client.session` is a plain field: nothing rebuilds when it changes.
+/// Watching the state stream is what makes a screen notice a connection coming
+/// up or going away, and the session is only meaningful while that state says
+/// connected.
+///
+/// The transport holds one session at a time, so this is a single value rather
+/// than a list — connecting to a second computer replaces the first, and the
+/// device list says so instead of implying otherwise.
+final connectedDeviceIdProvider = Provider<DeviceId?>((ref) {
+  final state = ref.watch(clientStateProvider).valueOrNull;
+  if (state != ClientState.connected) return null;
+  return ref.watch(clientProvider).valueOrNull?.session?.peerId;
 });
 
 /// Link quality of the current session, refreshed each heartbeat.

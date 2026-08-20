@@ -257,18 +257,34 @@ void main() {
       ],
     );
 
-    test('refuses a standard-tier offer on the receiving boundary', () {
+    test('refuses a read-only offer on the receiving boundary', () {
       var called = false;
       final dispatcher = createTestDispatcher(
         onFileTransferMessage: (_) => called = true,
       );
 
       expect(
-        dispatcher.dispatch(offer, PermissionTier.standard),
+        dispatcher.dispatch(offer, PermissionTier.readOnly),
         isFalse,
       );
       expect(called, isFalse);
       expect(dispatcher.deniedCount, 1);
+    });
+
+    test('routes a standard-tier offer', () {
+      // The tier pairing grants. Gated a tier higher, this boundary refused
+      // every offer a normally paired phone made, and the send failed with
+      // nothing on either screen to explain it.
+      Message? routed;
+      final dispatcher = createTestDispatcher(
+        onFileTransferMessage: (message) => routed = message,
+      );
+
+      expect(
+        dispatcher.dispatch(offer, PermissionTier.standard),
+        isTrue,
+      );
+      expect(routed, same(offer));
     });
 
     test('routes an extended-tier offer', () {

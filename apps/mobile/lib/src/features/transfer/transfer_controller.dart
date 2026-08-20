@@ -967,6 +967,43 @@ String safeOutgoingFileName(
   return sanitiseFileName(fallback);
 }
 
+/// The computer a transfer would go to, or null when nothing is connected.
+///
+/// A record rather than a `DeviceId`, because the send path needs a name to put
+/// on the transfer row and the two come from different places while a
+/// connection is settling.
+typedef TransferTarget = ({DeviceId id, String name});
+
+/// The only computer this phone can send to: the one it is connected to.
+///
+/// The identity message is preferred and the trust store is the fallback, in
+/// that order, because `DeviceInfoMessage` arrives a moment *after* the session
+/// is established. Watching only the message left the Send tab with no target
+/// for the first second of every connection; watching only the trust store
+/// would show a stale name after a rename.
+final transferTargetProvider = Provider<TransferTarget?>((ref) {
+  // The state stream is watched first, and it is not decoration. `session` is a
+  // plain field on the client, so nothing about reading it makes Riverpod
+  // recompute — without this line the provider is evaluated once, on the build
+  // where there is no session yet, and caches "no target" for the life of the
+  // app. The Send tab then reads "Not connected" against a live connection.
+  final state = ref.watch(clientStateProvider).valueOrNull;
+  if (state != ClientState.connected) return null;
+
+  final client = ref.watch(clientProvider).valueOrNull;
+  final session = client?.session;
+  if (session == null || !session.isEstablished) return null;
+
+  final reported = ref.watch(connectedPeerProvider).valueOrNull;
+  if (reported != null && reported.id == session.peerId) {
+    return (id: reported.id, name: reported.name);
+  }
+
+  final peers = ref.watch(trustedPeersProvider).valueOrNull;
+  final known = peers?.where((peer) => peer.id == session.peerId).firstOrNull;
+  return (id: session.peerId, name: known?.name ?? session.peerId.short);
+});
+
 /// Provider for mobile transfer state.
 final transferControllerProvider =
     StateNotifierProvider<MobileTransferController, TransferState>(

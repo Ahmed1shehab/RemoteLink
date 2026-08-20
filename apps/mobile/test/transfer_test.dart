@@ -227,6 +227,14 @@ void main() {
             identityProvider.overrideWith(
               (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
             ),
+            // The screen sends to the connected computer and only that one,
+            // so this is the seam that decides whether Send is live.
+            // Overridden directly rather than by faking a session: the
+            // provider it reads needs an established `Session`, which cannot
+            // be built in a widget test without a socket.
+            transferTargetProvider.overrideWithValue(
+              (id: targetPeer.id, name: targetPeer.name),
+            ),
             clientStateProvider.overrideWith(
               (ref) => Stream<ClientState>.value(ClientState.connected),
             ),
@@ -317,6 +325,14 @@ void main() {
             identityProvider.overrideWith(
               (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
             ),
+            // The screen sends to the connected computer and only that one,
+            // so this is the seam that decides whether Send is live.
+            // Overridden directly rather than by faking a session: the
+            // provider it reads needs an established `Session`, which cannot
+            // be built in a widget test without a socket.
+            transferTargetProvider.overrideWithValue(
+              (id: targetPeer.id, name: targetPeer.name),
+            ),
             clientStateProvider.overrideWith(
               (ref) => Stream<ClientState>.value(ClientState.connected),
             ),
@@ -402,6 +418,14 @@ void main() {
         final container = ProviderContainer(
           overrides: <Override>[
             clientProvider.overrideWith((ref) async => client),
+            // The screen sends to the connected computer and only that one,
+            // so this is the seam that decides whether Send is live.
+            // Overridden directly rather than by faking a session: the
+            // provider it reads needs an established `Session`, which cannot
+            // be built in a widget test without a socket.
+            transferTargetProvider.overrideWithValue(
+              (id: const DeviceId('desktop-1'), name: 'Work Mac'),
+            ),
             clientStateProvider.overrideWith(
               (ref) => Stream<ClientState>.value(ClientState.connected),
             ),
@@ -478,6 +502,14 @@ void main() {
             identityProvider.overrideWith(
               (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
             ),
+            // The screen sends to the connected computer and only that one,
+            // so this is the seam that decides whether Send is live.
+            // Overridden directly rather than by faking a session: the
+            // provider it reads needs an established `Session`, which cannot
+            // be built in a widget test without a socket.
+            transferTargetProvider.overrideWithValue(
+              (id: const DeviceId('desktop-1'), name: 'Work Mac'),
+            ),
             clientStateProvider.overrideWith(
               (ref) => Stream<ClientState>.value(ClientState.connected),
             ),
@@ -543,6 +575,14 @@ void main() {
           overrides: <Override>[
             identityProvider.overrideWith(
               (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+            ),
+            // The screen sends to the connected computer and only that one,
+            // so this is the seam that decides whether Send is live.
+            // Overridden directly rather than by faking a session: the
+            // provider it reads needs an established `Session`, which cannot
+            // be built in a widget test without a socket.
+            transferTargetProvider.overrideWithValue(
+              (id: const DeviceId('desktop-1'), name: 'Work Mac'),
             ),
             clientStateProvider.overrideWith(
               (ref) => Stream<ClientState>.value(ClientState.connected),

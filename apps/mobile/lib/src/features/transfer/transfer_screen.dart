@@ -3,8 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:rl_core/rl_core.dart';
-import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/modern_ui.dart';
@@ -32,7 +30,6 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
   /// True while a picker is open, so a second tap cannot stack two of them.
   bool _isPicking = false;
 
-  String? _selectedTargetId;
   String? _statusError;
 
   @override
@@ -42,49 +39,16 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
 
     final clientState = ref.watch(clientStateProvider).valueOrNull;
     final isConnected = clientState == ClientState.connected;
-    final connectedPeer = ref.watch(connectedPeerProvider).valueOrNull;
 
-    final discoveredList = ref.watch(discoveredDevicesProvider).valueOrNull ??
-        <DiscoveredDevice>[];
-    final trustedList =
-        ref.watch(trustedPeersProvider).valueOrNull ?? <TrustedPeer>[];
-
-    // Combine targets into a deduplicated list
-    final targetMap = <String, ({DeviceId id, String name, bool isLive})>{};
-    for (final d in discoveredList) {
-      targetMap[d.id.value] = (
-        id: d.id,
-        name: d.name,
-        isLive: true,
-      );
-    }
-    for (final p in trustedList) {
-      targetMap.putIfAbsent(
-        p.id.value,
-        () => (id: p.id, name: p.name, isLive: false),
-      );
-    }
-    if (connectedPeer != null) {
-      targetMap[connectedPeer.id.value] = (
-        id: connectedPeer.id,
-        name: connectedPeer.name,
-        isLive: true,
-      );
-    }
-
-    final targets = targetMap.values.toList();
-    // Re-checked against the current list every build rather than filled in
-    // once. `DropdownButtonFormField` asserts when its value names no item, and
-    // this list changes underneath it constantly: a computer drops off the
-    // network, discovery reshuffles, a peer is forgotten in settings. Holding
-    // an id that has gone would take down the whole Send tab.
-    if (!targets.any((t) => t.id.value == _selectedTargetId)) {
-      _selectedTargetId = switch ((connectedPeer, targets.isEmpty)) {
-        (final peer?, _) => peer.id.value,
-        (null, false) => targets.first.id.value,
-        (null, true) => null,
-      };
-    }
+    // The one computer this phone can send to: the one it is talking to.
+    //
+    // This used to be a dropdown over every discovered and paired computer,
+    // which was a promise the transport cannot keep. `sendFiles` puts the offer
+    // on `client.session`, and there is exactly one of those — so choosing any
+    // other row sent the file to the connected computer under another
+    // computer's name, or, with nothing connected, threw. Offering one target
+    // that is real beats offering five where four are decoration.
+    final target = ref.watch(transferTargetProvider);
 
     // Show incoming dialog if pending
     if (transferState.pendingIncoming != null) {
@@ -141,56 +105,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
                 ],
               ),
               const SizedBox(height: 18),
-              if (targets.isEmpty)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: scheme.errorContainer,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(
-                    'No paired or discovered computers found.',
-                    style: TextStyle(color: scheme.onErrorContainer),
-                  ),
-                )
-              else
-                DropdownButtonFormField<String>(
-                  isExpanded: true,
-                  initialValue: _selectedTargetId,
-                  decoration: const InputDecoration(
-                    labelText: 'Send to',
-                    prefixIcon: Icon(Icons.computer_rounded),
-                  ),
-                  items: <DropdownMenuItem<String>>[
-                    for (final t in targets)
-                      DropdownMenuItem<String>(
-                        value: t.id.value,
-                        child: Row(
-                          children: <Widget>[
-                            Container(
-                              width: 7,
-                              height: 7,
-                              decoration: BoxDecoration(
-                                color: t.isLive
-                                    ? const Color(0xFF22A06B)
-                                    : scheme.outline,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: 9),
-                            Expanded(
-                              child: Text(
-                                t.name,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                  onChanged: (val) => setState(() => _selectedTargetId = val),
-                ),
+              _TargetRow(target: target, isConnected: isConnected),
               const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
@@ -247,10 +162,9 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed:
-                      isConnected && targets.isNotEmpty && _picked.isNotEmpty
-                          ? () => _send(controller, targets)
-                          : null,
+                  onPressed: isConnected && target != null && _picked.isNotEmpty
+                      ? () => _send(controller, target)
+                      : null,
                   icon: const Icon(Icons.arrow_upward_rounded),
                   label: Text(_sendLabel),
                 ),
@@ -327,15 +241,9 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
 
   Future<void> _send(
     MobileTransferController controller,
-    List<({DeviceId id, String name, bool isLive})> targets,
+    TransferTarget target,
   ) async {
     setState(() => _statusError = null);
-    final target =
-        targets.where((t) => t.id.value == _selectedTargetId).firstOrNull;
-    if (target == null) {
-      setState(() => _statusError = 'Please select a target device');
-      return;
-    }
 
     try {
       if (_picked.isEmpty) {
@@ -412,6 +320,82 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
         unawaited(controller.declineIncomingTransfer(request));
       }
     });
+  }
+}
+
+/// Who the files are going to, or why nobody is.
+///
+/// Replaces a dropdown that listed every computer the phone had ever seen. The
+/// list was honest about discovery and dishonest about sending: only the
+/// connected computer can receive anything, so every other row was a choice
+/// that could not be honoured.
+class _TargetRow extends StatelessWidget {
+  const _TargetRow({required this.target, required this.isConnected});
+
+  final TransferTarget? target;
+  final bool isConnected;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final ready = isConnected && target != null;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      decoration: BoxDecoration(
+        color: ready
+            ? scheme.primary.withValues(alpha: 0.07)
+            : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: ready
+              ? scheme.primary.withValues(alpha: 0.28)
+              : scheme.outlineVariant,
+        ),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            ready ? Icons.computer_rounded : Icons.link_off_rounded,
+            size: 20,
+            color: ready ? scheme.primary : scheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  ready ? target!.name : 'Not connected',
+                  style: Theme.of(context).textTheme.titleSmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  ready
+                      ? 'Connected — files go here'
+                      : 'Connect to a computer to send anything',
+                  style: Theme.of(context).textTheme.bodySmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          if (ready)
+            Container(
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(
+                color: Color(0xFF22A06B),
+                shape: BoxShape.circle,
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }
 

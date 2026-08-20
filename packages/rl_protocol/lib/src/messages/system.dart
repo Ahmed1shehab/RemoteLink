@@ -384,11 +384,11 @@ enum PermissionTier {
   /// less access, not for a window onto their screen.
   readOnly(1),
 
-  /// Input, clipboard, media, and screen viewing. The default for a newly
-  /// paired device.
+  /// Input, clipboard, media, screen viewing, and file transfer. The default
+  /// for a newly paired device.
   standard(2),
 
-  /// Adds file transfer, application launching, and registered commands.
+  /// Adds application launching and registered commands.
   extended(3),
 
   /// Adds power control and the ability to manage other paired devices.
@@ -413,7 +413,24 @@ enum PermissionTier {
   /// been gated here. Monitor *topology* stays below this line — a layout is
   /// geometry, and the phone needs it to aim the touchpad.
   bool get canViewScreen => wireValue >= standard.wireValue;
-  bool get canTransferFiles => wireValue >= extended.wireValue;
+
+  /// Whether this tier may offer files to, or accept them from, the desk.
+  ///
+  /// Set at `standard` rather than `extended`, which is where it started. The
+  /// tier was never the gate that mattered: both ends prompt the user to accept
+  /// every individual transfer before a byte is written, so a device at this
+  /// tier can offer a file and still be refused by a human.
+  ///
+  /// What the old placement actually did was break the feature. A newly paired
+  /// device is granted `standard`, so every offer it made was denied by
+  /// [allows] and answered with `FileAbort(declined)` — a send that failed with
+  /// no explanation the user could act on, on every fresh install.
+  ///
+  /// It also protected nothing. `standard` already carries `canSendInput`,
+  /// which is a keyboard aimed at the desk: anything that can type can open a
+  /// terminal and write a file anyway. Launching applications and running
+  /// commands stay at `extended` because those genuinely act without asking.
+  bool get canTransferFiles => wireValue >= standard.wireValue;
   bool get canLaunchApplications => wireValue >= extended.wireValue;
   bool get canRunCommands => wireValue >= extended.wireValue;
   bool get canControlPower => wireValue >= admin.wireValue;

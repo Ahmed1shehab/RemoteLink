@@ -344,7 +344,8 @@ void main() {
       expect(find.text('What this allows:'), findsOneWidget);
       expect(
         find.text(
-          'Allows transferring files, launching applications, and running pre-registered commands.',
+          'Allows launching applications and running pre-registered commands '
+          'without a further prompt.',
         ),
         findsOneWidget,
       );
