@@ -91,6 +91,14 @@ IOS_PLIST=apps/mobile/ios/Runner/Info.plist
 if [ -f "$IOS_PLIST" ]; then
   set_plist "$IOS_PLIST" "NSLocalNetworkUsageDescription" string \
     "RemoteLink uses your local network to find and control your computer."
+  # Add-only photo access, for writing a received photo or video to the camera
+  # roll. iOS terminates an app that writes to the library without this string
+  # rather than denying the write, so a missing key is a crash on the first
+  # incoming photo.
+  set_plist "$IOS_PLIST" "NSPhotoLibraryAddUsageDescription" string \
+    "RemoteLink saves photos and videos your computer sends into your photo library."
+  set_plist "$IOS_PLIST" "NSPhotoLibraryUsageDescription" string \
+    "RemoteLink needs access to your photos so you can send them to your computer."
   "$PLIST" -c "Delete :NSBonjourServices" "$IOS_PLIST" 2>/dev/null || true
   "$PLIST" -c "Add :NSBonjourServices array" "$IOS_PLIST"
   "$PLIST" -c "Add :NSBonjourServices:0 string _remotelink._tcp" "$IOS_PLIST"

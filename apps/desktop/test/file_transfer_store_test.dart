@@ -173,6 +173,67 @@ void main() {
     expect(File('${sandbox.path}/traversal.sh').existsSync(), isFalse);
     expect(File('${sandbox.path}/evil').existsSync(), isFalse);
   });
+
+  group('choosing where files are saved', () {
+    // The folder is a setting rather than a constant, so the store has to be
+    // able to change its mind. Rebuilding it instead would have been simpler
+    // and worse: the service is constructed from the store, so replacing it
+    // closes the listening socket and drops every connected phone.
+    test('a new destination takes effect on the next transfer', () async {
+      final elsewhere = Directory('${sandbox.path}/elsewhere');
+      final store = FileTransferStore(
+        destination,
+        diskSpaceProbe: (_) async => 10 * 1024 * 1024,
+      );
+
+      store.destination = elsewhere;
+
+      final bytes = _patternBytes(64);
+      final file = (await store.prepare(
+        _offer('moved', bytes.length),
+        namespace: 'peer-1',
+      ))['file-1']!;
+      await file.write(0, bytes);
+      await file.commit();
+
+      expect(
+        File('${elsewhere.path}/report.bin').existsSync(),
+        isTrue,
+        reason: 'the file lands in the folder chosen before it started',
+      );
+      expect(
+        Directory(destination.path).existsSync() &&
+            File('${destination.path}/report.bin').existsSync(),
+        isFalse,
+        reason: 'and not in the one it would have used a moment earlier',
+      );
+    });
+
+    test('a transfer already under way finishes where it was promised',
+        () async {
+      // The case the capture of a canonical root exists for. Changing the
+      // setting mid-transfer must not leave a file half in each folder, or
+      // land it somewhere the free-space check was never run against.
+      final elsewhere = Directory('${sandbox.path}/elsewhere');
+      final store = FileTransferStore(
+        destination,
+        diskSpaceProbe: (_) async => 10 * 1024 * 1024,
+      );
+
+      final bytes = _patternBytes(64);
+      final file = (await store.prepare(
+        _offer('in-flight', bytes.length),
+        namespace: 'peer-1',
+      ))['file-1']!;
+      await file.write(0, bytes);
+
+      store.destination = elsewhere;
+      await file.commit();
+
+      expect(File('${destination.path}/report.bin').existsSync(), isTrue);
+      expect(File('${elsewhere.path}/report.bin').existsSync(), isFalse);
+    });
+  });
 }
 
 FileOffer _offer(String transferId, int size) => FileOffer(

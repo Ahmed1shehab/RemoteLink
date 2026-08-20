@@ -13,6 +13,17 @@ import 'file_picker.dart';
 import 'transfer_controller.dart';
 import 'transfer_model.dart';
 
+/// What happens to a file once it arrives, in one sentence.
+///
+/// Said before the user accepts rather than after, because the app has nowhere
+/// of its own to put anything: a photo goes to the camera roll and anything
+/// else goes wherever the share sheet is pointed. Someone who expects a folder
+/// inside the app to browse later would otherwise go looking for one that does
+/// not exist.
+const String kIncomingDestinationExplanation =
+    'Photos and videos are saved to your Photos library. Anything else opens '
+    'the share sheet so you can choose where it goes.';
+
 /// Send and receive media and file transfers on mobile.
 class TransferScreen extends ConsumerStatefulWidget {
   const TransferScreen({super.key});
@@ -602,11 +613,10 @@ class _IncomingTransferBanner extends StatelessWidget {
               '${request.offer.files.length} file(s) · ${formatBytes(request.totalBytes)}',
               style: TextStyle(color: scheme.onPrimaryContainer),
             ),
-            if (request.isFirstTransferFromDevice &&
-                request.destinationPath.isNotEmpty) ...<Widget>[
+            if (request.isFirstTransferFromDevice) ...<Widget>[
               const SizedBox(height: 6),
               Text(
-                'First transfer: files will be saved to ${request.destinationPath}',
+                kIncomingDestinationExplanation,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: scheme.onPrimaryContainer,
                     ),
@@ -683,8 +693,7 @@ class _IncomingTransferDialog extends StatelessWidget {
                   ),
                 ],
               ),
-              if (request.isFirstTransferFromDevice &&
-                  request.destinationPath.isNotEmpty) ...<Widget>[
+              if (request.isFirstTransferFromDevice) ...<Widget>[
                 const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.all(8),
@@ -694,7 +703,8 @@ class _IncomingTransferDialog extends StatelessWidget {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    'First transfer from this device.\nFiles will be saved in: ${request.destinationPath}',
+                    'First transfer from this device.\n'
+                    '$kIncomingDestinationExplanation',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),

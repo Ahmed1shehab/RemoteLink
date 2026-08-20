@@ -10,16 +10,32 @@ import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import 'file_exporter.dart';
+
 typedef DiskSpaceProbe = Future<int> Function(String canonicalPath);
 
 /// Mobile filesystem adapter for the transport-agnostic transfer engine.
+///
+/// [destination] is a staging area, not a home. This app keeps nothing: bytes
+/// have to land somewhere before a hash can be verified over them, so they land
+/// in a cache directory, and the moment a file is whole it is handed to
+/// [exporter] — the photo library for media, the share sheet for everything
+/// else — and the staged copy is deleted. That happens whether the export
+/// succeeded or not, so a refused permission or a dismissed share sheet cannot
+/// leave a file accumulating inside the app where the user cannot reach it.
 final class MobileTransferStore implements IncomingTransferStore {
   MobileTransferStore(
     this.destination, {
+    this.exporter = const SystemFileExporter(),
     DiskSpaceProbe? diskSpaceProbe,
   }) : _diskSpaceProbe = diskSpaceProbe ?? _availableDiskBytes;
 
   final Directory destination;
+
+  /// Where a finished file goes. Injected so a test can assert what was
+  /// exported without opening a share sheet on the machine running it.
+  final IncomingFileExporter exporter;
+
   final DiskSpaceProbe _diskSpaceProbe;
   final Map<String, int> _reservations = <String, int>{};
   Future<void> _prepareChain = Future<void>.value();
@@ -100,7 +116,8 @@ final class MobileTransferStore implements IncomingTransferStore {
     await manifest.persist();
     return <String, IncomingFile>{
       for (final entry in manifest.entries.entries)
-        entry.key: _MobileDiskIncomingFile(manifest, entry.value, root),
+        entry.key:
+            _MobileDiskIncomingFile(manifest, entry.value, root, exporter),
     };
   }
 
@@ -187,11 +204,17 @@ final class _MobileDiskEntry {
 }
 
 final class _MobileDiskIncomingFile implements IncomingFile {
-  _MobileDiskIncomingFile(this._manifest, this._entry, this._canonicalRoot);
+  _MobileDiskIncomingFile(
+    this._manifest,
+    this._entry,
+    this._canonicalRoot,
+    this._exporter,
+  );
 
   final _MobileDiskManifest _manifest;
   final _MobileDiskEntry _entry;
   final String _canonicalRoot;
+  final IncomingFileExporter _exporter;
 
   @override
   OfferedFile get offer => _entry.offer;
@@ -227,17 +250,37 @@ final class _MobileDiskIncomingFile implements IncomingFile {
   @override
   Stream<List<int>> read() => _entry.partial.openRead(0, offer.size);
 
+  /// Verifies the assembled file, hands it to the phone, and keeps nothing.
+  ///
+  /// The staged copy is deleted in a `finally`, so every path leaves the cache
+  /// empty: an export that worked, a permission the user refused, a share sheet
+  /// they dismissed, a photo library that rejected the format. This app is not
+  /// a place files live, and the only way to be sure of that is to delete
+  /// unconditionally rather than on the happy path.
+  ///
+  /// An export that fails rethrows, so the transfer is reported as failed. That
+  /// is the honest outcome: the file is gone, and a row claiming "completed"
+  /// over a file the user does not have is worse than one that says why not.
   @override
   Future<void> commit() async {
     await _verifyRegularFileInside(_entry.partial, _canonicalRoot);
-    final destination = await _reserveCollisionFreeFile(
+    final staged = await _reserveCollisionFreeFile(
       Directory(_canonicalRoot),
       offer.fileName,
     );
-    await _entry.partial.rename(destination.path);
-    await _verifyRegularFileInside(destination, _canonicalRoot);
-    _manifest.entries.remove(offer.fileId);
-    await _manifest.persist();
+    await _entry.partial.rename(staged.path);
+    await _verifyRegularFileInside(staged, _canonicalRoot);
+
+    try {
+      await _exporter.export(
+        staged,
+        mimeType: offer.fileType,
+      );
+    } finally {
+      if (staged.existsSync()) await staged.delete();
+      _manifest.entries.remove(offer.fileId);
+      await _manifest.persist();
+    }
   }
 
   @override

@@ -37,6 +37,13 @@
 	     older path image_picker still falls back to, where the prompt appears
 	     and an app without a usage description is terminated rather than
 	     denied. -->
+	<!-- Add-only access, which is the narrower of the two photo permissions and
+	     the only one this app needs: a file your computer sends is written to
+	     the camera roll, and nothing here ever reads an existing photo. iOS
+	     terminates an app that writes to the library without this string rather
+	     than denying the write, so its absence is a crash, not a refusal. -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Remote Link saves photos and videos your computer sends into your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Remote Link needs access to your photos so you can send them to your computer.</string>
 	<key>UIApplicationSceneManifest</key>

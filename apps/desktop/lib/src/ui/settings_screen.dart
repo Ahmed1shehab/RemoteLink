@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -33,6 +35,8 @@ class SettingsScreen extends ConsumerWidget {
               _WindowSection(),
               SizedBox(height: 24),
               _ThisComputerSection(),
+              SizedBox(height: 24),
+              _SavingSection(),
               SizedBox(height: 24),
               _SupportSection(),
             ],
@@ -133,6 +137,63 @@ class _WindowSection extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Where files your phone sends end up.
+///
+/// Worth a setting rather than a constant. Downloads is the right default and
+/// the wrong answer for plenty of people — anyone whose Downloads folder is a
+/// scratch space they empty weekly does not want the photos off their phone
+/// landing in it.
+class _SavingSection extends ConsumerWidget {
+  const _SavingSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final directory = ref.watch(downloadDirectoryProvider);
+
+    return _Section(
+      title: 'Saving received files',
+      children: <Widget>[
+        ListTile(
+          leading: const Icon(Icons.folder_outlined),
+          title: const Text('Folder'),
+          subtitle: Text(
+            switch (directory) {
+              AsyncData<Directory>(:final value) => value.path,
+              AsyncError() => 'Could not work out where to save files.',
+              _ => 'Checking…',
+            },
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              TextButton(
+                onPressed: () => unawaited(_reset(ref)),
+                child: const Text('Use Downloads'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonal(
+                onPressed: () => unawaited(_choose(ref)),
+                child: const Text('Change…'),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _choose(WidgetRef ref) async {
+    final path = await getDirectoryPath(
+      confirmButtonText: 'Save files here',
+    );
+    if (path == null) return;
+    await ref.read(downloadDirectoryControllerProvider).choose(Directory(path));
+  }
+
+  Future<void> _reset(WidgetRef ref) =>
+      ref.read(downloadDirectoryControllerProvider).reset();
 }
 
 class _ThisComputerSection extends ConsumerWidget {

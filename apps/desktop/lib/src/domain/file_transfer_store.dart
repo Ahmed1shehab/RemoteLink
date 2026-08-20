@@ -21,7 +21,18 @@ final class FileTransferStore implements IncomingTransferStore {
     DiskSpaceProbe? diskSpaceProbe,
   }) : _diskSpaceProbe = diskSpaceProbe ?? _availableDiskBytes;
 
-  final Directory destination;
+  /// Where completed files are put.
+  ///
+  /// Mutable, so choosing a new folder in Settings takes effect on the next
+  /// transfer instead of on the next launch. Rebuilding the store would have
+  /// been simpler to write and worse to use: the service is built from it, so
+  /// replacing it tears down the listening socket and drops every connected
+  /// phone — a heavy price for changing a folder.
+  ///
+  /// Transfers already in flight are unaffected. Each one captures the
+  /// canonical root it started under, so a file arriving while the setting
+  /// changes lands where it was promised rather than half in each folder.
+  Directory destination;
   final DiskSpaceProbe _diskSpaceProbe;
   final Map<String, int> _reservations = <String, int>{};
   Future<void> _prepareChain = Future<void>.value();
@@ -46,8 +57,9 @@ final class FileTransferStore implements IncomingTransferStore {
     FileOffer offer,
     String namespace,
   ) async {
-    await destination.create(recursive: true);
-    final root = await destination.resolveSymbolicLinks();
+    final target = destination;
+    await target.create(recursive: true);
+    final root = await target.resolveSymbolicLinks();
     final partialRoot = Directory(_join(root, '.remotelink-partials'));
     await _ensureDirectoryInside(partialRoot, root);
 

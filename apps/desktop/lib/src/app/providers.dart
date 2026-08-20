@@ -161,14 +161,74 @@ final deviceNameProvider =
 /// Injectable clock, so tests can drive timing without waiting.
 final clockProvider = Provider<Clock>((ref) => SystemClock());
 
-final incomingTransferStoreProvider =
-    FutureProvider<IncomingTransferStore>((ref) async {
+/// Where this computer keeps Downloads, or the app's own directory if it has
+/// none.
+///
+/// Resolved rather than stored, so a Downloads folder the user moves is
+/// followed instead of leaving the app pointing at where it used to be.
+Future<Directory> _defaultDestination(Ref ref) async {
   final downloads = await getDownloadsDirectory();
   final Directory base =
       downloads ?? await ref.watch(appDirectoryProvider.future);
-  final destination = Directory('${base.path}/RemoteLink');
+  return Directory('${base.path}/RemoteLink');
+}
+
+/// The folder incoming files are saved into.
+///
+/// The stored choice when there is one, and this machine's Downloads folder
+/// when there is not.
+final downloadDirectoryProvider = FutureProvider<Directory>((ref) async {
+  final preferences = await ref.watch(desktopPreferencesProvider.future);
+  final chosen = preferences.string(PreferenceKeys.downloadDirectory);
+  if (chosen != null) return Directory(chosen);
+  return _defaultDestination(ref);
+});
+
+final incomingTransferStoreProvider =
+    FutureProvider<IncomingTransferStore>((ref) async {
+  final destination = await ref.watch(downloadDirectoryProvider.future);
   return FileTransferStore(destination);
 });
+
+/// Changes where incoming files are saved.
+///
+/// Writes the store's destination in place rather than invalidating the
+/// provider. The service is built from that provider, so rebuilding it would
+/// close the listening socket and drop every connected phone — which is not a
+/// reasonable thing to do because someone picked a different folder.
+final class DownloadDirectoryController {
+  DownloadDirectoryController(this._ref);
+
+  final Ref _ref;
+
+  /// Points future transfers at [directory].
+  Future<void> choose(Directory directory) async {
+    final preferences = await _ref.read(desktopPreferencesProvider.future);
+    await preferences.setString(
+      PreferenceKeys.downloadDirectory,
+      directory.path,
+    );
+    _applyToStore(directory);
+  }
+
+  /// Goes back to this machine's Downloads folder.
+  Future<void> reset() async {
+    final preferences = await _ref.read(desktopPreferencesProvider.future);
+    await preferences.remove(PreferenceKeys.downloadDirectory);
+    _applyToStore(await _defaultDestination(_ref));
+  }
+
+  void _applyToStore(Directory directory) {
+    final store = _ref.read(incomingTransferStoreProvider).valueOrNull;
+    if (store is FileTransferStore) store.destination = directory;
+    // The provider is refreshed only so screens reading it redraw. It is
+    // already resolved, so this does not rebuild the service.
+    _ref.invalidate(downloadDirectoryProvider);
+  }
+}
+
+final downloadDirectoryControllerProvider =
+    Provider<DownloadDirectoryController>(DownloadDirectoryController.new);
 
 /// The last few things copied on this computer.
 ///
