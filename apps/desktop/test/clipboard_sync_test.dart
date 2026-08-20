@@ -116,6 +116,28 @@ Future<ClipboardUpdate> _makeImageUpdate(
   );
 }
 
+/// Waits until [condition] holds, or gives up after [timeout].
+///
+/// Replaces `await Future.delayed(25ms)` followed by an assertion about how
+/// many updates arrived. The service notices a local copy by polling, so that
+/// pattern was really "sleep long enough for a timer to fire on this machine" —
+/// which is true on a developer's laptop and not on a loaded CI runner, where
+/// it failed with `Expected: length 1, Actual: []`.
+///
+/// The timeout is generous because it is only ever reached when the test is
+/// about to fail anyway. A passing run leaves as soon as the condition holds,
+/// so this is faster than the fixed sleep it replaces, not slower.
+Future<void> waitUntil(
+  bool Function() condition, {
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) return;
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
 void main() {
   const localDeviceId = DeviceId('desktop-device-1');
   const testPollInterval = Duration(milliseconds: 10);
@@ -1132,7 +1154,7 @@ void main() {
 
       // Round 1: Desktop copies D1
       desktopBackend.copyLocally('D1');
-      await Future<void>.delayed(const Duration(milliseconds: 25));
+      await waitUntil(() => desktopOutbound.isNotEmpty);
       expect(desktopOutbound, hasLength(1));
       expect(desktopOutbound.last.originSequence, equals(1));
 
@@ -1143,7 +1165,7 @@ void main() {
 
       // Round 2: Peer copies P1
       peerBackend.copyLocally('P1');
-      await Future<void>.delayed(const Duration(milliseconds: 25));
+      await waitUntil(() => peerOutbound.isNotEmpty);
       expect(peerOutbound, hasLength(1));
       expect(peerOutbound.last.originSequence, equals(2));
 
@@ -1154,7 +1176,7 @@ void main() {
 
       // Round 3: Desktop copies D2
       desktopBackend.copyLocally('D2');
-      await Future<void>.delayed(const Duration(milliseconds: 25));
+      await waitUntil(() => desktopOutbound.length >= 2);
       expect(desktopOutbound, hasLength(2));
       expect(desktopOutbound.last.originSequence, equals(3));
 
@@ -1165,7 +1187,7 @@ void main() {
 
       // Round 4: Peer copies P2
       peerBackend.copyLocally('P2');
-      await Future<void>.delayed(const Duration(milliseconds: 25));
+      await waitUntil(() => peerOutbound.length >= 2);
       expect(peerOutbound, hasLength(2));
       expect(peerOutbound.last.originSequence, equals(4));
 
