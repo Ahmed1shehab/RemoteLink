@@ -110,10 +110,19 @@ final class TransferRecord {
 
   bool get canCancel => isActive;
 
+  /// Whether this computer can start this transfer again.
+  ///
+  /// Only outgoing ones. Retrying means re-sending the offer, and the offer
+  /// and its sources belong to whichever side chose the files — for an
+  /// incoming transfer this machine has neither, so the button offered nothing
+  /// but a silent failure. The phone has always had this check; the desktop
+  /// did not, and a cancelled photo arriving from a phone therefore grew a
+  /// Retry button that could not work.
   bool get canRetry =>
-      status == TransferStatus.failed ||
-      status == TransferStatus.cancelled ||
-      status == TransferStatus.declined;
+      direction == TransferDirection.outgoing &&
+      (status == TransferStatus.failed ||
+          status == TransferStatus.cancelled ||
+          status == TransferStatus.declined);
 
   TransferRecord copyWith({
     TransferStatus? status,

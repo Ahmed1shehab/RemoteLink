@@ -81,6 +81,26 @@ void main() {
         await tempDir.delete(recursive: true);
       }
     });
+
+    test('retry is offered only for outgoing recoverable transfers', () {
+      // The desktop was missing the direction check the phone has had all
+      // along, so a photo cancelled on its way in from a phone grew a Retry
+      // button that could only throw.
+      TransferRecord record(TransferDirection direction) => TransferRecord(
+            transferId: 'retry-1',
+            peerId: const DeviceId('phone-1'),
+            peerName: 'Pixel 8 Pro',
+            direction: direction,
+            status: TransferStatus.cancelled,
+            files: const <TransferFileProgress>[],
+            totalBytes: 0,
+            transferredBytes: 0,
+            createdAt: DateTime(2026),
+          );
+
+      expect(record(TransferDirection.outgoing).canRetry, isTrue);
+      expect(record(TransferDirection.incoming).canRetry, isFalse);
+    });
   });
 
   group('Desktop HomeScreen Widget Tests', () {
@@ -414,7 +434,56 @@ void main() {
       expect(find.text('image.png'), findsOneWidget);
       expect(find.text('Failed'), findsOneWidget);
       expect(find.text('Network timeout'), findsOneWidget);
-      expect(find.text('Retry'), findsOneWidget);
+      // Not on an incoming transfer, and this assertion used to say the
+      // opposite. Retrying re-sends the offer, and the offer belongs to
+      // whichever side chose the files — so on a file arriving from the phone
+      // the button had nothing behind it but a `StateError`.
+      expect(find.text('Retry'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a transfer waiting on this computer says so', (tester) async {
+      // "Awaiting response" on a file arriving from a phone describes the
+      // phone, which is not what is waiting — and sent the user looking for
+      // something to press on the wrong device.
+      final incoming = TransferRecord(
+        transferId: 't-prompting',
+        peerId: const DeviceId('phone-1'),
+        peerName: 'Pixel 8 Pro',
+        direction: TransferDirection.incoming,
+        status: TransferStatus.prompting,
+        files: const <TransferFileProgress>[
+          TransferFileProgress(
+            fileId: 'file-1',
+            fileName: 'holiday.jpg',
+            totalBytes: 1024,
+            transferredBytes: 0,
+          ),
+        ],
+        totalBytes: 1024,
+        transferredBytes: 0,
+        createdAt: DateTime.now(),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            ...desktopHomeOverrides,
+            transfersProvider.overrideWith(
+              (ref) => Stream<List<TransferRecord>>.value(
+                <TransferRecord>[incoming],
+              ),
+            ),
+          ],
+          child: const MaterialApp(home: HomeScreen()),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Waiting for you'), findsOneWidget);
+      expect(find.text('Awaiting response'), findsNothing);
       expect(tester.takeException(), isNull);
     });
 

@@ -405,7 +405,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Future<void> _retryTransfer(String transferId) async {
     final service = await ref.read(desktopServiceProvider.future);
-    await service.retryTransfer(transferId);
+    try {
+      await service.retryTransfer(transferId);
+    } on StateError catch (e) {
+      // Said out loud rather than swallowed. A retry can legitimately fail —
+      // the phone went away, or the offer is no longer held — and a button
+      // that appears to do nothing is the worst way to report it.
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not retry: ${e.message}')),
+      );
+    }
   }
 
   Future<void> _renameDevice(DeviceId deviceId, String currentName) async {
@@ -1000,7 +1010,11 @@ class _TransferTile extends StatelessWidget {
                     style: Theme.of(context).textTheme.titleSmall,
                   ),
                 ),
-                _TransferStatusChip(status: transfer.status),
+                _TransferStatusChip(
+                  status: transfer.status,
+                  isIncoming:
+                      transfer.direction == TransferDirection.incoming,
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -1146,9 +1160,15 @@ class _SavedFileName extends StatelessWidget {
 }
 
 class _TransferStatusChip extends StatelessWidget {
-  const _TransferStatusChip({required this.status});
+  const _TransferStatusChip({required this.status, this.isIncoming = false});
 
   final TransferStatus status;
+
+  /// Which end of the transfer this computer is on.
+  ///
+  /// Only [TransferStatus.prompting] reads differently from the two sides, but
+  /// it reads *backwards* from the wrong one, which is worse than vague.
+  final bool isIncoming;
 
   @override
   Widget build(BuildContext context) {
@@ -1160,8 +1180,12 @@ class _TransferStatusChip extends StatelessWidget {
     // measured about 2.7:1 on the light theme's surface, and every status drew
     // its text in the same hue as its own background.
     final (label, background, foreground) = switch (status) {
+      // Which way this is waiting depends on which end asked. On a transfer
+      // this computer is receiving, "Awaiting response" describes the phone —
+      // which is not what is happening, and left the user looking for
+      // something to do on the wrong device.
       TransferStatus.prompting => (
-          'Awaiting response',
+          isIncoming ? 'Waiting for you' : 'Awaiting response',
           scheme.tertiaryContainer,
           scheme.onTertiaryContainer,
         ),

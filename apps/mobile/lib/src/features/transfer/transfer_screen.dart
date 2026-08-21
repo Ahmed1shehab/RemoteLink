@@ -829,7 +829,7 @@ class _TransferCard extends StatelessWidget {
                   ],
                 ),
               ),
-              _StatusChip(status: transfer.status),
+              _StatusChip(status: transfer.status, isIncoming: isIncoming),
               if (!transfer.isActive) ...<Widget>[
                 const SizedBox(width: 2),
                 IconButton(
@@ -1013,9 +1013,15 @@ class _TransferFileRow extends StatelessWidget {
 }
 
 class _StatusChip extends StatelessWidget {
-  const _StatusChip({required this.status});
+  const _StatusChip({required this.status, this.isIncoming = false});
 
   final TransferStatus status;
+
+  /// Which end of the transfer this phone is on.
+  ///
+  /// Only [TransferStatus.prompting] reads differently from the two sides, but
+  /// it reads *backwards* from the wrong one, which is worse than vague.
+  final bool isIncoming;
 
   @override
   Widget build(BuildContext context) {
@@ -1028,8 +1034,11 @@ class _StatusChip extends StatelessWidget {
     // its text in the same hue as its own background.
     // Material 3 defines these pairs to meet 4.5:1 in both themes.
     final (label, background, foreground) = switch (status) {
+      // Which way this is waiting depends on which end asked. On a transfer
+      // this phone is receiving, "Awaiting response" describes the computer,
+      // which is not what is happening.
       TransferStatus.prompting => (
-          'Awaiting response',
+          isIncoming ? 'Waiting for you' : 'Awaiting response',
           scheme.tertiaryContainer,
           scheme.onTertiaryContainer,
         ),
