@@ -132,7 +132,11 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
           const SystemStatusStrip(),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.only(bottom: 88),
+              // The navigation floats over the body, so the body keeps its
+              // own bottom clear by exactly the room the bar takes.
+              padding: EdgeInsets.only(
+                bottom: LiquidNavigationBar.heightOf(context),
+              ),
               child: IndexedStack(
                 index: _index,
                 children: const <Widget>[

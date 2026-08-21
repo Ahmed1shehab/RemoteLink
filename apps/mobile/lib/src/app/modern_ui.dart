@@ -1,8 +1,10 @@
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
 import 'motion.dart';
+import 'theme.dart';
 
 /// A destination in the connected experience's floating glass tab bar.
 @immutable
@@ -35,13 +37,35 @@ class LiquidNavigationBar extends StatelessWidget {
   final ValueChanged<int> onDestinationSelected;
   final List<LiquidNavDestination> destinations;
 
+  /// Height of the bar including the inset it floats above.
+  ///
+  /// The bar is drawn over the content rather than beside it, so the content
+  /// has to reserve this much room at its bottom or its last row sits under
+  /// the glass. Measured rather than guessed at, because both terms move: the
+  /// bar grows with the text setting, and the inset is whatever the phone's
+  /// gesture bar or button row asks for.
+  static double heightOf(BuildContext context) =>
+      _barHeight(context) +
+      math.max(MediaQuery.viewPaddingOf(context).bottom, _floatInset);
+
+  static double _barHeight(BuildContext context) =>
+      72 * textScaleFactorOf(context).clamp(1.0, 1.5);
+
+  /// How far the bar floats above the bottom edge when the phone asks for less.
+  static const double _floatInset = 10;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final dark = scheme.brightness == Brightness.dark;
+    // The bar is a fixed-height box holding text, so it has to grow with the
+    // user's text setting the way the keycaps do. Clamped, because past this
+    // the labels scale down inside instead (see [_LiquidDestination]) rather
+    // than the bar eating the screen.
+    final height = _barHeight(context);
 
     return SafeArea(
-      minimum: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      minimum: const EdgeInsets.fromLTRB(12, 0, 12, _floatInset),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(28),
         child: BackdropFilter(
@@ -64,18 +88,27 @@ class LiquidNavigationBar extends StatelessWidget {
               ],
             ),
             child: SizedBox(
-              height: 72,
-              child: Row(
-                children: <Widget>[
-                  for (var index = 0; index < destinations.length; index++)
-                    Expanded(
-                      child: _LiquidDestination(
-                        destination: destinations[index],
-                        selected: selectedIndex == index,
-                        onTap: () => onDestinationSelected(index),
+              height: height,
+              child: Padding(
+                // Keeps the outer destinations clear of the 28-radius corners.
+                // Without it the first and last cells reach the rounded edge
+                // and the [ClipRRect] takes a bite out of their highlight.
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Row(
+                  // Stretch so the tap target is the full height of the bar,
+                  // not just the height of the icon and label stacked.
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    for (var index = 0; index < destinations.length; index++)
+                      Expanded(
+                        child: _LiquidDestination(
+                          destination: destinations[index],
+                          selected: selectedIndex == index,
+                          onTap: () => onDestinationSelected(index),
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -100,6 +133,7 @@ class _LiquidDestination extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final duration = context.motion(const Duration(milliseconds: 240));
+    final color = selected ? scheme.primary : scheme.onSurfaceVariant;
 
     return Semantics(
       button: true,
@@ -110,47 +144,59 @@ class _LiquidDestination extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(22),
-          child: Center(
-            child: AnimatedContainer(
-              duration: duration,
-              curve: Curves.easeOutCubic,
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 52),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-              decoration: BoxDecoration(
-                color: selected
-                    ? scheme.primary.withValues(alpha: 0.13)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  AnimatedSwitcher(
-                    duration: duration,
-                    child: Icon(
-                      selected ? destination.selectedIcon : destination.icon,
-                      key: ValueKey<bool>(selected),
-                      size: 23,
-                      color:
-                          selected ? scheme.primary : scheme.onSurfaceVariant,
-                    ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              // The pill wraps the icon alone rather than the whole cell. A
+              // cell-wide pill is as wide as its label, so with five tabs the
+              // widest one runs into its neighbours and into the edge of the
+              // bar; around the icon it is the same shape on every tab.
+              AnimatedContainer(
+                duration: duration,
+                curve: Curves.easeOutCubic,
+                width: 48,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: selected
+                      ? scheme.primary.withValues(alpha: 0.13)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: AnimatedSwitcher(
+                  duration: duration,
+                  child: Icon(
+                    selected ? destination.selectedIcon : destination.icon,
+                    key: ValueKey<bool>(selected),
+                    size: 22,
+                    color: color,
                   ),
-                  const SizedBox(height: 3),
-                  Text(
+                ),
+              ),
+              const SizedBox(height: 4),
+              // Scaled down to fit rather than faded off the end. Five tabs on
+              // a 360dp screen leave about 55dp a label, which is narrower
+              // than 'Touchpad' and 'Clipboard' render at even before the user
+              // asks for larger text, and a half-word names nothing. The box
+              // is fixed so the shrinking happens here and never as an
+              // overflow in the row above.
+              SizedBox(
+                height: 16,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
                     destination.label,
                     maxLines: 1,
-                    overflow: TextOverflow.fade,
+                    softWrap: false,
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: selected
-                              ? scheme.primary
-                              : scheme.onSurfaceVariant,
+                          color: color,
                           fontWeight:
                               selected ? FontWeight.w700 : FontWeight.w500,
                         ),
                   ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
         ),
       ),
