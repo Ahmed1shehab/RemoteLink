@@ -34,11 +34,23 @@ such rather than stubbed.
 | Auto-connect | Reconnects to the last computer on launch and skips the list |
 | Media control | macOS: transport via hardware media keys, volume, now playing |
 
+### Built, but not in this release
+
+**Screen sharing.** Capture works on macOS and the phone has a viewer, but the
+rest of [Milestone 3](docs/ROADMAP.md) — hardware encode, adaptive bitrate,
+multi-monitor, touch mapping — is not built, and a preview that streams is
+exactly the sort of half-feature that ships by accident. It is switched off at
+`kScreenSharingShipped` in `apps/desktop/lib/src/domain/desktop_service.dart`:
+the desktop does not advertise the capability, so the phone's screen button
+never appears, and a request to start a stream is refused rather than merely
+unadvertised. Remaining work is RL-300 to RL-303 in
+[BACKLOG.md](docs/BACKLOG.md).
+
 ### Declared in the protocol, not yet implemented
 
-Screen streaming · file transfer · presentation mode · gamepad · custom command
-registry · session resumption · Windows media control (the WinRT session API is
-not a flat C export, so it needs more than `DynamicLibrary.lookupFunction`).
+Presentation mode · gamepad · custom command registry · session resumption ·
+Windows media control (the WinRT session API is not a flat C export, so it
+needs more than `DynamicLibrary.lookupFunction`).
 
 These have wire codes reserved and decode as opaque, so a future build can
 speak to this one without a version bump.

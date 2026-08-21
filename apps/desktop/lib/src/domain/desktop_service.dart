@@ -17,6 +17,22 @@ import 'file_transfer_store.dart';
 import 'instance_lock.dart';
 import 'transfer_model.dart';
 
+/// Whether screen sharing ships in this release.
+///
+/// Off, and off deliberately: the capture backend and the phone's viewer both
+/// exist and both work well enough to demonstrate, which is exactly the state
+/// that gets a half-finished feature shipped by accident. The remaining work is
+/// specified as RL-300 to RL-303 in `docs/BACKLOG.md` — hardware encode,
+/// adaptive bitrate, multi-monitor, touch mapping — and none of it is in this
+/// version.
+///
+/// The switch lives here rather than in the phone because the desktop is the
+/// producer, and the handshake keeps only the intersection of both sides: a
+/// computer that does not advertise the bit takes the phone's screen button
+/// with it. Flipping this to `true` turns the whole feature back on with no
+/// other change.
+const bool kScreenSharingShipped = false;
+
 /// Everything the desktop advertises it can do.
 ///
 /// Assembled at run time rather than hard-coded, because two of these depend on
@@ -30,6 +46,7 @@ Capabilities buildCapabilities({
   bool gesturesAvailable = false,
   bool brightnessAvailable = false,
   bool screenCaptureAvailable = false,
+  bool screenSharingShipped = kScreenSharingShipped,
 }) {
   var capabilities = const Capabilities(
     Capabilities.powerControl |
@@ -69,9 +86,9 @@ Capabilities buildCapabilities({
     // Advertised only when a working brightness backend is detected.
     capabilities = capabilities.plus(Capabilities.brightness);
   }
-  if (screenCaptureAvailable) {
-    // Advertised only when screen recording permission is granted and a
-    // working screen capture backend is available.
+  if (screenCaptureAvailable && screenSharingShipped) {
+    // Two conditions, not one: the backend has to exist *and* the feature has
+    // to be part of this release. See [kScreenSharingShipped].
     capabilities = capabilities.plus(Capabilities.screenCapture);
   }
   return capabilities;
@@ -234,6 +251,7 @@ final class DesktopService {
     ClipboardHistory? clipboardHistory,
     this.incomingTransferStore,
     this.peerClipboardSettingsFile,
+    this.screenSharingShipped = kScreenSharingShipped,
   })  : _clipboardHistory = clipboardHistory,
         _clock = clock,
         _input = input ?? NativeBackends.createInput(),
@@ -251,6 +269,14 @@ final class DesktopService {
   final String deviceName;
   final String appVersion;
   final int servicePort;
+
+  /// Whether this instance offers screen sharing. See [kScreenSharingShipped].
+  ///
+  /// Injectable so the tests that cover capture, cursor overlay and stream
+  /// teardown keep running against the real paths. The feature is switched off
+  /// for the release, not removed, and untested code is not code that can be
+  /// switched back on.
+  final bool screenSharingShipped;
 
   /// Guards against a second copy starting beside this one.
   ///
@@ -445,6 +471,7 @@ final class DesktopService {
         gesturesAvailable: _input.isAvailable && _input is MacosInputBackend,
         brightnessAvailable: _brightness.isAvailable,
         screenCaptureAvailable: _screenCapture.isAvailable,
+        screenSharingShipped: screenSharingShipped,
       );
 
   /// The desk's monitor layout, or `null` when the host cannot report one.
@@ -1461,6 +1488,16 @@ final class DesktopService {
               uFiles[fileIdx] = uFiles[fileIdx].copyWith(
                 transferredBytes: uFiles[fileIdx].totalBytes,
                 isComplete: true,
+                // Asked for here, while the store still remembers: this is the
+                // only moment the app learns where the file actually landed,
+                // and "open" and "show in folder" in the transfer list have
+                // nothing to point at without it.
+                savedPath: incomingTransferStore is FileTransferStore
+                    ? (incomingTransferStore as FileTransferStore).committedPath(
+                        transferId: message.transferId,
+                        fileId: message.fileId,
+                      )
+                    : null,
               );
               final allDone = uFiles.every((f) => f.isComplete);
               final totalTr =
@@ -2351,6 +2388,22 @@ final class DesktopService {
     if (peerId == null) return;
     final device = _devices[peerId.value];
     if (device == null) return;
+
+    if (!screenSharingShipped) {
+      // Refused, not merely unadvertised. A capability bit is a statement of
+      // intent that a peer is free to ignore, and "this release does not do
+      // that" has to hold against a peer that asks anyway.
+      _log.info(
+        'screen streaming requested but is not part of this release',
+        fields: <String, Object?>{'peer': peerId.value},
+      );
+      unawaited(
+        device.serverSession.session.send(
+          const ScreenStreamStop(reason: ScreenStopReason.unsupportedCodec),
+        ),
+      );
+      return;
+    }
 
     if (!_screenCapture.isAvailable) {
       _log.warn(

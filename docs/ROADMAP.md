@@ -35,6 +35,14 @@ reconnect under 2 s after a Wi-Fi handoff.
 
 ## Milestone 3 — screen sharing
 
+**Not in the current release.** Capture (macOS) and the phone's viewer are
+written and work well enough to demonstrate, which is the state a half-finished
+feature gets shipped from. Both sit behind `kScreenSharingShipped` in
+`apps/desktop/lib/src/domain/desktop_service.dart`, switched off: the desktop
+withholds the capability bit, the phone's button disappears with it, and an
+explicit stream request is refused. Everything below is what turning it on is
+waiting for.
+
 The largest single feature and the one most likely to reveal that the transport
 needs QUIC.
 

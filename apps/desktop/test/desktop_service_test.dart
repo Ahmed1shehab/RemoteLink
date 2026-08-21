@@ -178,6 +178,7 @@ void main() {
   Future<(DesktopService, SpySystemInfoBackend)> buildService({
     NetworkAdapterBackend? networkAdapters,
     ScreenCaptureBackend? screenCapture,
+    bool screenSharingShipped = kScreenSharingShipped,
   }) async {
     final spy = SpySystemInfoBackend();
     final service = DesktopService(
@@ -195,6 +196,7 @@ void main() {
           networkAdapters ?? const UnsupportedNetworkAdapterBackend('test'),
       screenCapture:
           screenCapture ?? const UnsupportedScreenCaptureBackend('test'),
+      screenSharingShipped: screenSharingShipped,
     );
     return (service, spy);
   }
@@ -371,9 +373,7 @@ void main() {
   });
 
   group('buildCapabilities screen capture advertising', () {
-    test(
-        'advertises Capabilities.screenCapture only when screenCaptureAvailable is true',
-        () {
+    test('never advertises screenCapture without a backend', () {
       final capsWithoutCapture = buildCapabilities(
         inputAvailable: true,
         clipboardAvailable: true,
@@ -381,14 +381,24 @@ void main() {
         screenCaptureAvailable: false,
       );
       expect(capsWithoutCapture.has(Capabilities.screenCapture), isFalse);
+    });
 
+    test('a working backend is advertised only if the release ships it', () {
+      // Written against the switch rather than against `false`, so it states
+      // the coupling and stays true whichever way the switch is set. Screen
+      // sharing is out of this release (RL-300 to RL-303); the capture backend
+      // still exists and still works, which is precisely why the bit needs a
+      // second condition to hide behind.
       final capsWithCapture = buildCapabilities(
         inputAvailable: true,
         clipboardAvailable: true,
         mediaAvailable: true,
         screenCaptureAvailable: true,
       );
-      expect(capsWithCapture.has(Capabilities.screenCapture), isTrue);
+      expect(
+        capsWithCapture.has(Capabilities.screenCapture),
+        kScreenSharingShipped,
+      );
     });
 
     test(
@@ -400,12 +410,28 @@ void main() {
     });
 
     test(
-        'currentCapabilities advertises screenCapture when backend is available',
+        'currentCapabilities advertises screenCapture when the backend is '
+        'available and the release ships it', () async {
+      final capture = ControllableScreenCaptureBackend(isAvailable: true);
+      final (service, _) = await buildService(
+        screenCapture: capture,
+        screenSharingShipped: true,
+      );
+      expect(
+          service.currentCapabilities.has(Capabilities.screenCapture), isTrue);
+    });
+
+    test('a service built as the release ships it keeps the bit to itself',
         () async {
+      // The switch has to reach `currentCapabilities`, which is recomputed on
+      // every read — a permission granted mid-session must not quietly turn
+      // the feature on.
       final capture = ControllableScreenCaptureBackend(isAvailable: true);
       final (service, _) = await buildService(screenCapture: capture);
       expect(
-          service.currentCapabilities.has(Capabilities.screenCapture), isTrue);
+        service.currentCapabilities.has(Capabilities.screenCapture),
+        kScreenSharingShipped,
+      );
     });
   });
 
@@ -443,6 +469,10 @@ void main() {
         systemInfo: const UnsupportedSystemInfoBackend('test'),
         networkAdapters: const UnsupportedNetworkAdapterBackend('test'),
         screenCapture: captureBackend,
+        // Switched on here even though the release ships with it off: the code
+        // under test is still present and still has to work when the switch
+        // flips back. See `kScreenSharingShipped`.
+        screenSharingShipped: true,
       );
 
       await service.registerSessionForTesting(pair.session);
@@ -566,6 +596,10 @@ void main() {
         systemInfo: const UnsupportedSystemInfoBackend('test'),
         networkAdapters: const UnsupportedNetworkAdapterBackend('test'),
         screenCapture: captureBackend,
+        // Switched on here even though the release ships with it off: the code
+        // under test is still present and still has to work when the switch
+        // flips back. See `kScreenSharingShipped`.
+        screenSharingShipped: true,
       );
 
       await service.registerSessionForTesting(pair.session);
@@ -686,6 +720,10 @@ void main() {
         systemInfo: const UnsupportedSystemInfoBackend('test'),
         networkAdapters: const UnsupportedNetworkAdapterBackend('test'),
         screenCapture: captureBackend,
+        // Switched on here even though the release ships with it off: the code
+        // under test is still present and still has to work when the switch
+        // flips back. See `kScreenSharingShipped`.
+        screenSharingShipped: true,
       );
 
       await service.registerSessionForTesting(pair.session);
