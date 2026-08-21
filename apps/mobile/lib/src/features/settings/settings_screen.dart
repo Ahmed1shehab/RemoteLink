@@ -790,12 +790,15 @@ class _TouchpadSection extends ConsumerWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
-                Text(
-                  'Pointer sensitivity',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
+                Expanded(
+                  child: Text(
+                    'Pointer sensitivity',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
+                const SizedBox(width: 8),
                 Text(
                   '${pointerSettings.sensitivity.toStringAsFixed(1)}x',
                   style: theme.textTheme.labelLarge?.copyWith(
@@ -1077,7 +1080,15 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
               value: discoveryRoute,
             ),
             const Divider(height: 24),
-            Row(
+            // Wrapped rather than a Row with a Spacer: the filter label, the
+            // level names and "Export Logs" together need more width than a
+            // phone has once the card's padding is taken out, and a Row answers
+            // that by painting the overflow stripes over the button. Wrapping
+            // puts the button on its own line instead.
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
                 Text(
                   'Log filter:',
@@ -1085,7 +1096,6 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
                     color: colorScheme.onSurfaceVariant,
                   ),
                 ),
-                const SizedBox(width: 8),
                 DropdownButton<LogLevel?>(
                   value: _selectedLevel,
                   underline: const SizedBox.shrink(),
@@ -1113,7 +1123,6 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
                     ),
                   ],
                 ),
-                const Spacer(),
                 FilledButton.tonalIcon(
                   onPressed: () => _exportLogs(context, memorySink.records),
                   icon: const Icon(Icons.copy_all, size: 16),
@@ -1150,19 +1159,29 @@ class _DiagnosticRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(
-          label,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+        Expanded(
+          child: Text(
+            label,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
-        Text(
-          value,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-            color: valueColor,
+        const SizedBox(width: 12),
+        // Flexible and right-aligned rather than a bare Text: a discovery route
+        // reads `mDNS · 192.168.1.50:47811`, which is longer than the space
+        // left beside its label on a phone, and a Row answers that by painting
+        // overflow stripes over it.
+        Flexible(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: valueColor,
+            ),
           ),
         ),
       ],

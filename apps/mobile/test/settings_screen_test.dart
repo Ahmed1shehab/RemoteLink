@@ -105,6 +105,43 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('the diagnostics filter row fits a narrow phone',
+        (tester) async {
+      // 720 physical pixels at 2x is a common budget phone, and it is where the
+      // log-filter row ran 49 pixels past the card and painted overflow stripes
+      // across the export button. The default 800-logical-pixel test surface
+      // is wide enough to hide it, so the width has to be stated here.
+      tester.view.physicalSize = const Size(720, 1640);
+      tester.view.devicePixelRatio = 2.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final identity = await DeviceIdentity.generate();
+      final trustStore = InMemoryTrustStore();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: mobileSettingsOverrides(
+            identity: identity,
+            trustStore: trustStore,
+            deviceName: 'My Test Phone',
+            memoryLogSink: MemoryLogSink(),
+          ),
+          child: const MaterialApp(home: SettingsScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await tester.dragUntilVisible(
+        find.text('Export Logs'),
+        find.byType(Scrollable).first,
+        const Offset(0, -300),
+      );
+      expect(find.text('Export Logs'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets(
         'an invalid rename is rejected and leaves the stored name unchanged',
         (tester) async {
