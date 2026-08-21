@@ -98,6 +98,23 @@ final class ConnectionQuality {
       };
 }
 
+/// Why a session whose transport failed is closing.
+///
+/// A dead socket is not a protocol violation. The peer did nothing wrong; the
+/// link went away, which is the one failure the reconnect supervisor exists
+/// for. Filing it as [CloseReason.protocolError] told the supervisor never to
+/// try again, so a phone whose socket was aborted — backgrounded, roaming,
+/// radio asleep — stayed disconnected until the app was restarted, while every
+/// screen still read "Connected" and only the next send said otherwise.
+///
+/// A frame the peer could not have sent legitimately, such as an oversized
+/// record, arrives here non-retryable and keeps the old meaning: that one is
+/// worth refusing to reconnect over.
+CloseReason closeReasonForTransportError(Object error) =>
+    error is TransportError && !error.retryable
+        ? CloseReason.protocolError
+        : CloseReason.transportFailure;
+
 /// An authenticated, encrypted, message-oriented connection to one peer.
 ///
 /// Everything above this layer deals in [Message] objects and never sees a
@@ -636,7 +653,7 @@ final class Session {
 
   Future<void> _onTransportError(Object error, StackTrace stackTrace) async {
     _log.warn('transport error', error: error, stackTrace: stackTrace);
-    await _teardown(CloseReason.protocolError);
+    await _teardown(closeReasonForTransportError(error));
   }
 
   Future<void> _teardown(CloseReason reason) async {

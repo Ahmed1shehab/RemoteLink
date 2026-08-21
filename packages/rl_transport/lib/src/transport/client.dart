@@ -401,6 +401,15 @@ final class RemoteLinkClient {
     final reason = session.closeReason;
     if (reason != null && !reason.shouldReconnect) {
       _stopRequested = true;
+      // Every screen reads `state`, not `session`. Leaving it on `connected`
+      // once the supervisor has given up is what turns a dead link into a
+      // send that fails at the last moment with "not connected to peer",
+      // while the UI still offers a send button.
+      _setState(
+        reason == CloseReason.userRequested
+            ? ClientState.idle
+            : ClientState.failed,
+      );
     }
 
     await _detachSession();

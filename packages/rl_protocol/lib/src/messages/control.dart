@@ -434,7 +434,16 @@ enum CloseReason {
   revoked(5),
 
   /// Protocol violation.
-  protocolError(6);
+  protocolError(6),
+
+  /// The socket died underneath a live session.
+  ///
+  /// Never sent on the wire — a connection that has just failed cannot carry a
+  /// close notice — but recorded locally so a dropped link is not filed as
+  /// [protocolError]. That distinction decides whether the client reconnects,
+  /// and calling a Wi-Fi handoff a protocol violation strands the phone until
+  /// the user restarts the app.
+  transportFailure(7);
 
   const CloseReason(this.wireValue);
 
@@ -450,7 +459,10 @@ enum CloseReason {
   /// A deliberate disconnect must not trigger the reconnect supervisor —
   /// otherwise "disconnect" would be a button that does nothing.
   bool get shouldReconnect => switch (this) {
-        CloseReason.shuttingDown || CloseReason.idleTimeout => true,
+        CloseReason.shuttingDown ||
+        CloseReason.idleTimeout ||
+        CloseReason.transportFailure =>
+          true,
         _ => false,
       };
 }

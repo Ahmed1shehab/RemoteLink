@@ -50,6 +50,19 @@ final class FramedConnection {
       onDone: _onDone,
       cancelOnError: false,
     );
+
+    // A write that fails reports on `done`, not to the read subscription, and
+    // an unobserved error there is raised as an unhandled async exception —
+    // which on the phone is a crash-shaped log line for something the read
+    // side is already handling. The teardown belongs to `_onError`/`_onDone`;
+    // this only observes.
+    unawaited(
+      _socket.done.then<void>(
+        (_) {},
+        onError: (Object error) =>
+            _log.debug(() => 'socket write failed: $error'),
+      ),
+    );
   }
 
   /// Wraps an already-connected socket.
