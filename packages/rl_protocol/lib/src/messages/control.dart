@@ -443,7 +443,18 @@ enum CloseReason {
   /// [protocolError]. That distinction decides whether the client reconnects,
   /// and calling a Wi-Fi handoff a protocol violation strands the phone until
   /// the user restarts the app.
-  transportFailure(7);
+  transportFailure(7),
+
+  /// A record arrived that this session's keys could not authenticate.
+  ///
+  /// Local only, like [transportFailure]. The session must end — the nonce
+  /// counters are desynchronised and nothing after this point can be read —
+  /// but the peer is still worth reconnecting to: a fresh handshake re-derives
+  /// both keys and re-verifies the peer's static key, so nothing injected into
+  /// the old stream survives into the new one. Treating it as terminal instead
+  /// would let anyone able to place one forged segment on the wire disconnect a
+  /// device until its app is restarted.
+  authenticationFailure(8);
 
   const CloseReason(this.wireValue);
 
@@ -461,7 +472,8 @@ enum CloseReason {
   bool get shouldReconnect => switch (this) {
         CloseReason.shuttingDown ||
         CloseReason.idleTimeout ||
-        CloseReason.transportFailure =>
+        CloseReason.transportFailure ||
+        CloseReason.authenticationFailure =>
           true,
         _ => false,
       };

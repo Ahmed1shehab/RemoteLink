@@ -164,7 +164,14 @@ abstract final class HandshakeDriver {
           },
         );
 
-        await reader.detach();
+        // Attach before detaching, and carry over whatever arrived in between,
+        // for the same reason the client does: `records` is a broadcast stream,
+        // so a record delivered while no one is listening is dropped without a
+        // trace. A phone that pipelines its first session record behind its
+        // handshake finish — which it does, the two are written back to back —
+        // would lose it here, and a lost record is not a lost message: both
+        // sides derive the AEAD nonce from the record count, so the next record
+        // fails to authenticate and the session dies claiming corruption.
         final session = Session(
           connection: connection,
           keys: result.keys,
@@ -175,7 +182,9 @@ abstract final class HandshakeDriver {
           capabilities: result.capabilities,
           isServer: true,
           requiresPairing: result.requiresPairing,
+          initialRecords: reader.takePendingRecords(),
         );
+        await reader.detach();
         return (session, result);
       });
     } on Object {

@@ -906,6 +906,51 @@ void main() {
       expect(client.state, ClientState.connected);
     });
 
+    test('a forged record ends the session without ending the link', () async {
+      // One bogus segment on the wire used to disconnect a device until its app
+      // was restarted: the session tore down as a protocol violation, which
+      // stops the reconnect supervisor for good. The session must still die —
+      // its nonce counters are past saving — but a reconnect re-runs the
+      // handshake, which re-derives the keys and re-verifies the peer's static
+      // key, so nothing injected here survives into the next session.
+      await trustStore.upsert(
+        TrustedPeer(
+          id: phoneIdentity.id,
+          publicKey: phoneIdentity.publicKey,
+          name: 'Test Phone',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: 2,
+        ),
+      );
+
+      final proxy = await LinkProxy.start(server.boundPort);
+      addTearDown(proxy.dispose);
+
+      await client.connect(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: proxy.port,
+          deviceId: desktopIdentity.id,
+          serverPublicKey: desktopIdentity.publicKey,
+        ),
+      );
+      final live = await client.waitUntilConnected();
+
+      final reconnected = client.sessions.first;
+      // A well-formed record carrying bytes no key of this session can open.
+      final garbage = Uint8List(64);
+      final framed = Uint8List(4 + garbage.length);
+      ByteData.sublistView(framed).setUint32(0, garbage.length, Endian.big);
+      framed.setRange(4, framed.length, garbage);
+      proxy.injectTowardClient(framed);
+
+      await reconnected.timeout(const Duration(seconds: 10));
+      expect(live.state, SessionState.closed);
+      expect(live.closeReason, CloseReason.authenticationFailure);
+      expect(client.state, ClientState.connected);
+    });
+
     test('the granted tier is readable by something that subscribed late',
         () async {
       // The desktop sends the grant the moment a trusted session is
@@ -1157,6 +1202,9 @@ void main() {
 
       expect(CloseReason.transportFailure.shouldReconnect, isTrue);
       expect(CloseReason.protocolError.shouldReconnect, isFalse);
+      // A key stream that cannot be read is fixed by a fresh handshake, so it
+      // ends the session without ending the client.
+      expect(CloseReason.authenticationFailure.shouldReconnect, isTrue);
     });
   });
 }
@@ -1173,6 +1221,9 @@ final class LinkProxy {
   final ServerSocket _server;
   final List<Socket> _live = <Socket>[];
 
+  /// The halves facing the client, for tests that inject bytes at it.
+  final List<Socket> _clientFacing = <Socket>[];
+
   static Future<LinkProxy> start(int upstreamPort) async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     final proxy = LinkProxy._(server);
@@ -1181,6 +1232,7 @@ final class LinkProxy {
       proxy._live
         ..add(incoming)
         ..add(upstream);
+      proxy._clientFacing.add(incoming);
       incoming.listen(
         upstream.add,
         onDone: upstream.destroy,
@@ -1199,6 +1251,13 @@ final class LinkProxy {
 
   int get port => _server.port;
 
+  /// Writes [bytes] straight at the client, as an attacker on the path would.
+  void injectTowardClient(List<int> bytes) {
+    for (final socket in _clientFacing) {
+      socket.add(bytes);
+    }
+  }
+
   /// Drops every connection now being relayed, leaving the port open so the
   /// client can reconnect through it.
   void sever() {
@@ -1206,6 +1265,7 @@ final class LinkProxy {
       socket.destroy();
     }
     _live.clear();
+    _clientFacing.clear();
   }
 
   Future<void> dispose() async {

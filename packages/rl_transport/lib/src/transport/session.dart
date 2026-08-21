@@ -454,11 +454,20 @@ final class Session {
     // otherwise announce "the user is moving the mouse right now".
     final sealed = await _keys.send.seal(frame.encode());
 
+    // Every failure is fatal here, not just the transport's own. The nonce was
+    // spent by `seal` above, so a record that does not reach the socket leaves
+    // this side's counter one ahead of what the peer will ever count — and the
+    // peer derives its nonce from arrival order, so every later record fails to
+    // authenticate. Catching only `TransportError` let anything else — a
+    // `StateError` from writing to a sink mid-flush, say — fall into the write
+    // chain, which swallows errors to keep later sends alive. The session then
+    // stayed up, silently unable to be understood, until the peer gave up and
+    // reported corruption.
     try {
       _connection.send(sealed);
-    } on TransportError catch (e) {
+    } on Object catch (e) {
       _log.warn('write failed', error: e);
-      await _teardown(CloseReason.protocolError);
+      await _teardown(CloseReason.transportFailure);
       rethrow;
     }
 
@@ -479,11 +488,18 @@ final class Session {
       final plaintext = await _keys.receive.open(sealed, counter: counter);
       frame = Frame.readFrom(ByteReader(plaintext), copyPayload: false);
     } on SecurityError catch (e) {
-      // A failed AEAD tag means either corruption TCP should have caught or an
-      // active attacker. Neither is recoverable, and continuing would leave the
-      // nonce counters desynchronised.
+      // This session's key stream cannot be trusted again: continuing would
+      // leave the nonce counters desynchronised, so it has to end here.
+      //
+      // Ending it is not the same as giving up on the peer. A reconnect runs a
+      // full handshake, which re-derives both keys and re-verifies the peer
+      // against the stored static key, so nothing an attacker injected into
+      // this TCP stream carries into the next one. Refusing to reconnect, by
+      // contrast, hands anyone who can put one bogus segment on the wire a
+      // permanent disconnect — and cost a real user their clipboard for the
+      // rest of the day when the desync was our own bug rather than an attack.
       _log.error('record failed authentication', error: e);
-      await _teardown(CloseReason.protocolError);
+      await _teardown(CloseReason.authenticationFailure);
       return;
     } on ProtocolError catch (e) {
       _log.error('malformed frame', error: e);
