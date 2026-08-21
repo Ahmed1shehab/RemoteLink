@@ -274,11 +274,18 @@ void main() {
 
       // Without this the only trace of a missing grant was a log line, and the
       // phone's screen-share button silently never appeared.
+      //
+      // Written against the release switch rather than against `false`, so that
+      // flipping `kScreenSharingShipped` back on restores the assertion instead
+      // of leaving a test that quietly proves nothing.
       expect(
         find.text('Screen Recording permission is not granted'),
-        findsOneWidget,
+        kScreenSharingShipped ? findsOneWidget : findsNothing,
       );
-      expect(find.text('Open Settings'), findsOneWidget);
+      expect(
+        find.text('Open Settings'),
+        kScreenSharingShipped ? findsOneWidget : findsNothing,
+      );
       expect(tester.takeException(), isNull);
     });
 
@@ -298,7 +305,10 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      expect(find.textContaining('start it from the phone'), findsOneWidget);
+      expect(
+        find.textContaining('start it from the phone'),
+        kScreenSharingShipped ? findsOneWidget : findsNothing,
+      );
       expect(tester.takeException(), isNull);
     });
 
@@ -324,7 +334,10 @@ void main() {
       await tester.pump();
 
       expect(find.textContaining('start it from the phone'), findsNothing);
-      expect(find.text('Screen Recording is not granted'), findsOneWidget);
+      expect(
+        find.text('Screen Recording is not granted'),
+        kScreenSharingShipped ? findsOneWidget : findsNothing,
+      );
     });
 
     testWidgets(

@@ -147,7 +147,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 // without a banner of its own there was nothing anywhere in the app
                 // saying why screen sharing did not appear on the phone. The button
                 // simply never showed up and the reason lived only in a log line.
-                if (screenCapture != null && !screenCapture.available)
+                //
+                // Held back with the feature itself: while `kScreenSharingShipped`
+                // is false the phone has no screen button, so asking the user for a
+                // permission that unlocks nothing they can reach is a chore with no
+                // reward at the end of it. Both this and the status row below come
+                // back when the flag does.
+                if (kScreenSharingShipped &&
+                    screenCapture != null &&
+                    !screenCapture.available)
                   FocusTraversalOrder(
                     order: const NumericFocusOrder(1),
                     child: _PermissionBanner(
@@ -164,7 +172,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     key: _overviewKey,
                     child: _StatusCard(
                       status: status,
-                      screenCaptureReady: screenCapture?.available ?? false,
+                      screenCaptureReady: kScreenSharingShipped &&
+                          (screenCapture?.available ?? false),
                     ),
                   ),
                 ),
