@@ -108,6 +108,7 @@ Ranked in `SECURITY.md` §4 and reproduced here with task IDs:
 | Gap | Task |
 |---|---|
 | Both `widget_test.dart` files are stale `flutter create` scaffolding referencing a nonexistent `MyApp` — `flutter test` does not compile in either app | RL-000 |
+| Android kills the phone's socket seconds after the app leaves the screen, and refuses it a new one until the app is opened again | RL-109 |
 | No CI. No `.github/` directory exists | RL-001 |
 | QR pairing UI: protocol done, display widget and scanner missing | RL-106 |
 | No mobile settings screen (rename device, forget computer, tier request, sync toggles) | RL-700 |
@@ -745,6 +746,139 @@ the deterministic conflict resolution in `remoteWins`.
   is inverted. Verify by mutation: flip the condition, confirm red.
 - Adding a `MessageType` without updating `PermissionTier.allows` fails the
   dispatcher matrix test.
+
+---
+
+### RL-109 — Keep the phone's link alive while the app is off screen
+
+**Priority** P1 · **Size** M · **Android only**
+
+**Files**
+- `apps/mobile/android/app/src/main/kotlin/com/remotelink/app/LinkService.kt` (new)
+- `apps/mobile/android/app/src/main/kotlin/com/remotelink/app/MainActivity.kt`
+- `apps/mobile/android/app/src/main/AndroidManifest.xml`
+- `apps/mobile/lib/src/features/devices/link_service.dart` (new — the Dart seam)
+- `apps/mobile/lib/src/app/providers.dart`
+- `apps/mobile/lib/src/features/settings/settings_screen.dart` (the OEM guidance)
+- `docs/RUNNING.md`, `README.md`
+
+**Why.** Field logs from a Redmi on HyperOS, and the pattern is unambiguous —
+every socket abort follows the app leaving the screen within seconds:
+
+```
+18:47:07  (last foreground activity)
+          visibilityChanged oldVisibility=true newVisibility=false
+18:47:14  socket error: Software caused connection abort (errno = 103)
+18:47:19  connect_failed: Connection timed out (errno = 110)   ← and six more
+```
+
+`ETIMEDOUT` on a connect is packets going nowhere, not a closed port: the app
+has no network at all. The transport is behaving correctly underneath this — it
+retries on the backoff curve and recovers the moment the app is foregrounded —
+so this is not a reconnect bug and must not be fixed as one.
+
+What it costs today: a file transfer dies mid-send the moment the user switches
+apps, which is most of the time on a phone; anything the computer pushes stops
+arriving; and every return to the app races a reconnect against the freeze.
+
+**What a foreground service buys, and what it does not.** This decides whether
+the task is worth its size, so it is stated before the spec rather than
+discovered during it.
+
+*Buys.* The process is exempt from App Standby and Doze network restrictions and
+is not frozen. Sockets stay open across a backgrounding, so transfers continue,
+the desktop's pushes keep arriving, and a reconnect is not fighting the OS.
+
+*Does not buy: background clipboard reads.* Android has required window focus
+for clipboard access since Android 10, and **no service type lifts that**. Phone
+→ computer clipboard stays foreground-only whatever is built here. The deferred
+send already in `MobileClipboardController` remains the mechanism that makes
+"copy elsewhere, come back" work, and this task must not be sold as fixing it.
+
+*Does not buy: immunity from OEM battery managers.* Xiaomi, Huawei, Oppo and
+Samsung all kill foreground services that the user has not exempted. A service
+without the guidance below is a feature that works on a Pixel and on the
+reporter's phone not at all — which is the exact failure this task exists to
+address.
+
+*Does not apply to iOS.* There is no equivalent: iOS grants no persistent
+background networking to an app of this kind, and pretending otherwise would
+mean shipping a phone app whose behaviour differs by platform with nothing
+saying so. Document the difference; do not attempt to close it.
+
+**Spec.**
+
+*Service type.* `connectedDevice`, declared in the manifest — Android 14 refuses
+to start a foreground service without a type, and Android 15 caps `dataSync` at
+six hours per day, which is wrong for something meant to run as long as a
+computer is paired. `connectedDevice` requires `FOREGROUND_SERVICE_CONNECTED_DEVICE`
+plus one qualifying permission, and the app already declares
+`CHANGE_WIFI_MULTICAST_STATE` for discovery, so nothing new is asked of the
+user. Re-check both rules against current platform docs before implementing:
+they have changed at every recent API level and will change again.
+
+*Architecture: one engine, not two.* The service exists to stop the process
+being frozen, not to host anything. `RemoteLinkClient` stays exactly where it is
+— in the Dart isolate of the activity's engine — and keeps running because the
+process keeps running. A headless second engine would mean a second client, a
+second trust store reader and two sessions racing for one port, which is a
+larger change with worse failure modes than the problem it would solve.
+
+*Channel.* `MethodChannel("com.remotelink.app/link_service")` with `start(String
+peerName)`, `update(String peerName)`, and `stop()`. Dart drives it from the
+client's state stream: start on `ClientState.connected`, stop on `idle` or
+`failed`, update on a peer rename. Behind a `LinkService` interface with an
+inert implementation, so every other platform and every widget test gets a
+no-op rather than a `MissingPluginException`.
+
+*Notification.* Ongoing, low importance, its own channel: "Connected to
+<computer>" with a **Disconnect** action that stops the client and the service
+together. Android 13+ gates visibility behind runtime `POST_NOTIFICATIONS` — the
+service still runs when it is denied, so ask once, at the point of connecting,
+and do not block on the answer.
+
+*Swipe-away.* `stopWithTask=false`: dismissing the task should not sever a link
+the user deliberately established, and the notification's own action is the way
+out. This is a judgement call and should be revisited if it draws complaints.
+
+*OEM guidance, and it is not optional.* A settings entry — "Remote Link keeps
+stopping?" — that explains the battery manager in plain words and deep-links
+where the platform allows it (`ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS`;
+note that requesting the exemption directly needs a permission the Play Store
+restricts). Manufacturer-specific screens cannot be linked reliably and should
+be named, not automated: Autostart on Xiaomi, "Protected apps" on Huawei.
+
+**Acceptance.**
+
+1. With the app backgrounded for ten minutes on an exempted device, the session
+   survives: no `socket error` and no reconnect in the log.
+2. A file transfer started in the app completes with the app backgrounded
+   halfway through it.
+3. The notification names the connected computer, and its Disconnect action
+   leaves the client `idle` and the service stopped.
+4. Denying the notification permission does not stop the service.
+5. Disconnecting from the phone stops the service; no notification survives a
+   session that has ended.
+6. On iOS and on macOS the inert implementation is used and nothing changes.
+7. On a device with battery restrictions still applied, behaviour is no worse
+   than today and the settings entry says why.
+
+**Tests.** The channel contract in Dart: a fake `LinkService` asserting start on
+connect, stop on disconnect, no start when never connected, and that a rebuilt
+client does not leave a service running. The Android half is manual — a
+foreground service cannot be exercised from `flutter test` — so record the
+matrix in `docs/RUNNING.md`: Pixel or emulator, one exempted OEM device, one
+unexempted, each for the seven conditions above.
+
+**Risks.** Play Store review scrutinises foreground service types and rejects a
+`connectedDevice` claim it does not believe; the justification is that the app's
+whole purpose is a live link to a paired computer, and it should be written down
+before submission rather than improvised. A permanent notification is a cost the
+user pays for a feature they may not want, so this must be a preference and not
+a fact of the app. And an FGS that OEM software kills anyway produces the worst
+outcome available — a notification saying "connected" over a dead socket — so
+the notification text must be driven by the actual client state, never by the
+service's own existence.
 
 ---
 
@@ -1602,7 +1736,7 @@ currently ships a test suite that does not compile.
 | Wave | Tasks | Rationale |
 |---|---|---|
 | 0 | RL-000, RL-001 | The tests must run before anything else is trusted. |
-| 1 | RL-104, RL-105, RL-108 | Fix what is broken; test the security boundary. |
+| 1 | RL-104, RL-105, RL-108, RL-109 | Fix what is broken; test the security boundary. RL-109 is here rather than with the features because on a real Android phone the link dies every time the user looks at another app, which makes file transfer unreliable in ordinary use rather than at the margins. |
 | 2 | RL-100, RL-101 | Close the two ranked key-storage gaps. |
 | 3 | RL-107, RL-102 | Measure, then make reconnects cheap against a baseline. |
 | 4 | RL-103 | The datagram channel, validated by RL-107's numbers. |
