@@ -196,6 +196,40 @@ void main() {
       expect(await echo, isNull);
     });
 
+    test('a copy made while the link was down goes out when it returns',
+        () async {
+      // The shape of every backgrounding on a phone: Android freezes the app
+      // and takes its sockets, the user copies something in another app, comes
+      // back — and the reconnect is still seconds away. The copy used to be
+      // read, found undeliverable, and dropped, with nothing to ask again.
+      await client.disconnect();
+      await pumpEventQueue(times: 20);
+
+      clipboard.text = 'copied while offline';
+      watcher.fire();
+      // Long enough for the settle timer to fire against a dead link.
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+
+      final accepted = server.accepted.first;
+      final connected =
+          client.states.firstWhere((s) => s == ClientState.connected);
+      await client.connect(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: server.boundPort,
+          deviceId: desktopIdentity.id,
+          serverPublicKey: desktopIdentity.publicKey,
+        ),
+      );
+      await connected.timeout(const Duration(seconds: 10));
+      desktopSession =
+          (await accepted.timeout(const Duration(seconds: 10))).session;
+
+      final update = await nextUpdate();
+      expect(update, isNotNull);
+      expect(update!.plainText, 'copied while offline');
+    });
+
     test('an update the phone does not apply still advances its clock',
         () async {
       // The regression, on the general form of it. The phone adopted the

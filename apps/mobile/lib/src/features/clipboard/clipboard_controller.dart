@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
+import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
 import 'clipboard_history_controller.dart';
@@ -94,8 +95,19 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
   final Log _log = Log.scoped('mobile.clipboard');
 
   StreamSubscription<Message>? _messages;
+  StreamSubscription<ClientState>? _states;
   StreamSubscription<void>? _clipboardChanges;
   Timer? _settle;
+
+  /// Set when a send was wanted but the link was down.
+  ///
+  /// The link dropping is not the exception on a phone, it is the normal
+  /// shape of the thing: Android freezes a backgrounded app and takes its
+  /// sockets with it, so returning to Remote Link and reconnecting are
+  /// seconds apart — and the copy the user made in between falls exactly in
+  /// that gap. Without this, that copy was read, found undeliverable, and
+  /// dropped, and nothing ever asked again.
+  bool _sendWhenReconnected = false;
 
   /// When this controller last wrote the phone's clipboard itself.
   ///
@@ -144,6 +156,26 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
       },
       cancelOnError: false,
     );
+    // No flush without this. The states stream is the only thing that says the
+    // link came back, and the copy the drop interrupted is waiting on it.
+    _states = client.states.listen(
+      (state) {
+        if (state == ClientState.connected) _flushDeferredSend();
+      },
+      cancelOnError: false,
+    );
+  }
+
+  /// Sends the clipboard a dropped link stopped us sending.
+  ///
+  /// Only while the watcher is running, which is this controller's one signal
+  /// that the app is on screen. A reconnect that lands with Remote Link in the
+  /// background is a read Android would refuse anyway, and the deferral is
+  /// kept rather than spent — the next resume is where it belongs.
+  void _flushDeferredSend() {
+    if (!_sendWhenReconnected || _clipboardChanges == null) return;
+    _log.debug(() => 'the link is back; sending the copy it missed');
+    unawaited(sendCurrent(silent: true));
   }
 
   Future<void> _onSyncToggle(ClipboardSyncToggle toggle) async {
@@ -245,7 +277,15 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     }
 
     final client = _ref.read(clientProvider).valueOrNull;
-    if (client == null || !client.isConnected) return false;
+    if (client == null || !client.isConnected) {
+      // Deferred, not dropped. The clipboard is read on reconnect instead of
+      // now, because reading it now would cost the user an interruption for
+      // content that has nowhere to go.
+      _sendWhenReconnected = true;
+      _log.debug(() => 'nothing to send to; holding the copy for the reconnect');
+      return false;
+    }
+    _sendWhenReconnected = false;
 
     state = state.copyWith(sending: true);
     try {
@@ -388,6 +428,9 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     }
 
     _startWatching();
+    // A reconnect that happened while this app was in the background left its
+    // deferral unspent on purpose. This is the moment it is owed.
+    _flushDeferredSend();
 
     final settings = _ref.read(clipboardSettingsProvider);
     if (!settings.syncToDesktop) return;
@@ -406,6 +449,7 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     WidgetsBinding.instance.removeObserver(this);
     _stopWatching();
     unawaited(_messages?.cancel());
+    unawaited(_states?.cancel());
     super.dispose();
   }
 }
