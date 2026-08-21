@@ -862,6 +862,50 @@ void main() {
       expect(server.sessionCount, 1, reason: 'the old session must be evicted');
     });
 
+    test('a link that dies mid-session comes back on its own', () async {
+      // The promise the whole supervisor exists for, asserted end to end. It
+      // held only for a peer that said goodbye: an abrupt drop tore the session
+      // down as a protocol violation, which stops the supervisor for good, and
+      // the phone then sat reporting "Connected" with nothing underneath it
+      // until the app was restarted.
+      await trustStore.upsert(
+        TrustedPeer(
+          id: phoneIdentity.id,
+          publicKey: phoneIdentity.publicKey,
+          name: 'Test Phone',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: 2,
+        ),
+      );
+
+      final proxy = await LinkProxy.start(server.boundPort);
+      addTearDown(proxy.dispose);
+
+      await client.connect(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: proxy.port,
+          deviceId: desktopIdentity.id,
+          serverPublicKey: desktopIdentity.publicKey,
+        ),
+      );
+      final live = await client.waitUntilConnected();
+      final attemptsBefore = client.connectionAttemptCount;
+
+      // Subscribed before the link is cut: the reconnect can complete in a
+      // couple of hundred milliseconds and a subscription taken afterwards
+      // would race it.
+      final reconnected = client.sessions.first;
+      proxy.sever();
+
+      await reconnected.timeout(const Duration(seconds: 10));
+      expect(live.state, SessionState.closed);
+      expect(live.closeReason?.shouldReconnect, isTrue);
+      expect(client.connectionAttemptCount, greaterThan(attemptsBefore));
+      expect(client.state, ClientState.connected);
+    });
+
     test('the granted tier is readable by something that subscribed late',
         () async {
       // The desktop sends the grant the moment a trusted session is
@@ -1080,6 +1124,94 @@ void main() {
       }
     });
   });
+
+  group('transport failures', () {
+    test('a dead socket is reconnectable; a bad frame is not', () {
+      // The distinction is the whole of a bug seen on a real phone: the socket
+      // was aborted while the app sat in the background, the session recorded
+      // that as `protocolError`, and the supervisor — correctly, for a peer
+      // that had broken the protocol — never dialled again. Every later send
+      // failed with "not connected to peer".
+      expect(
+        closeReasonForTransportError(
+          const TransportError('socket_error', 'socket failed'),
+        ),
+        CloseReason.transportFailure,
+      );
+      expect(
+        closeReasonForTransportError(
+          const SocketException('Software caused connection abort'),
+        ),
+        CloseReason.transportFailure,
+      );
+      expect(
+        closeReasonForTransportError(
+          const TransportError(
+            'record_too_large',
+            'peer declared a 1 GiB record',
+            retryable: false,
+          ),
+        ),
+        CloseReason.protocolError,
+      );
+
+      expect(CloseReason.transportFailure.shouldReconnect, isTrue);
+      expect(CloseReason.protocolError.shouldReconnect, isFalse);
+    });
+  });
+}
+
+/// A TCP relay that can drop every connection it carries without warning.
+///
+/// No portable test can make the OS abort a socket, and closing either end
+/// politely is the case that always worked. Relaying through a proxy and
+/// destroying both halves is the closest a test gets to the network vanishing
+/// underneath a live session.
+final class LinkProxy {
+  LinkProxy._(this._server);
+
+  final ServerSocket _server;
+  final List<Socket> _live = <Socket>[];
+
+  static Future<LinkProxy> start(int upstreamPort) async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final proxy = LinkProxy._(server);
+    server.listen((incoming) async {
+      final upstream = await Socket.connect('127.0.0.1', upstreamPort);
+      proxy._live
+        ..add(incoming)
+        ..add(upstream);
+      incoming.listen(
+        upstream.add,
+        onDone: upstream.destroy,
+        onError: (Object _) => upstream.destroy(),
+        cancelOnError: true,
+      );
+      upstream.listen(
+        incoming.add,
+        onDone: incoming.destroy,
+        onError: (Object _) => incoming.destroy(),
+        cancelOnError: true,
+      );
+    });
+    return proxy;
+  }
+
+  int get port => _server.port;
+
+  /// Drops every connection now being relayed, leaving the port open so the
+  /// client can reconnect through it.
+  void sever() {
+    for (final socket in _live) {
+      socket.destroy();
+    }
+    _live.clear();
+  }
+
+  Future<void> dispose() async {
+    sever();
+    await _server.close();
+  }
 }
 
 /// Minimal TCP server for exercising framing directly.
