@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -211,4 +212,110 @@ void main() {
     expect(find.byIcon(Icons.brightness_high), findsNothing);
     expect(find.byType(Slider), findsOneWidget); // Only Volume
   });
+
+  group('the transport button', () {
+    /// A screen wired to a media stream the test drives, and a client with no
+    /// session — sending is a no-op, which is exactly the case that used to
+    /// leave the button frozen.
+    ///
+    /// Returns the way to push a state from the computer, rather than the
+    /// controller itself: the tear-down here owns closing it.
+    Future<void Function(MediaState)> pumpScreen(
+      WidgetTester tester, {
+      required bool isPlaying,
+    }) async {
+      // Closed by the tear-down below; the lint cannot see through the
+      // callback it is handed to.
+      // ignore: close_sinks
+      final states = StreamController<MediaState?>.broadcast();
+      addTearDown(states.close);
+
+      late final RemoteLinkClient client;
+      await tester.runAsync(() async {
+        client = RemoteLinkClient(
+          identity: await DeviceIdentity.fromPrivateKey(Uint8List(32)),
+          capabilities: const Capabilities(Capabilities.mediaControl),
+          clock: SystemClock(),
+        );
+      });
+      addTearDown(client.dispose);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            identityProvider.overrideWith(
+              (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+            ),
+            clientStateProvider.overrideWith(
+              (ref) => Stream<ClientState>.value(ClientState.connected),
+            ),
+            clientProvider.overrideWith((ref) async => client),
+            mediaStateProvider.overrideWith((ref) => states.stream),
+          ],
+          child: const MaterialApp(home: Scaffold(body: MediaScreen())),
+        ),
+      );
+      await tester.pump();
+      states.add(_playing(isPlaying: isPlaying));
+      await tester.pump();
+      await tester.pump();
+      return states.add;
+    }
+
+    testWidgets('answers the press before the computer does', (tester) async {
+      // It used to be drawn purely from the computer's last word, so pressing
+      // it did nothing at all until a state push arrived — and when the link
+      // was down, or the computer's guess about a browser tab was stale, it sat
+      // on the pause glyph however often it was pressed.
+      await pumpScreen(tester, isPlaying: true);
+      expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.pause_rounded));
+      await tester.pump();
+
+      expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.pause_rounded), findsNothing);
+    });
+
+    testWidgets('hands the state back once the computer agrees',
+        (tester) async {
+      final push = await pumpScreen(tester, isPlaying: true);
+
+      await tester.tap(find.byIcon(Icons.pause_rounded));
+      await tester.pump();
+      push(_playing(isPlaying: false));
+      await tester.pump();
+      expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+
+      // The computer's own news — a track starting on its own — must not be
+      // held back by the request that has already been answered.
+      push(_playing(isPlaying: true));
+      await tester.pump();
+      expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
+    });
+
+    testWidgets('gives up and shows what the computer says', (tester) async {
+      // The computer has the last word. A control that keeps insisting on a
+      // state the machine is not in is worse than one that admits it.
+      await pumpScreen(tester, isPlaying: true);
+
+      await tester.tap(find.byIcon(Icons.pause_rounded));
+      await tester.pump();
+      expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 5));
+      expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
+    });
+  });
 }
+
+MediaState _playing({required bool isPlaying}) => MediaState(
+      isPlaying: isPlaying,
+      title: 'Test Track',
+      artist: 'Test Artist',
+      album: 'Test Album',
+      positionSeconds: 30,
+      durationSeconds: 180,
+      volume: 0.7,
+      isMuted: false,
+    );

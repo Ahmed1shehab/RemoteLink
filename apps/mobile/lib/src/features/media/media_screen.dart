@@ -40,6 +40,39 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
   double? _brightnessDragging;
   double _brightness = 0.5;
 
+  /// What the user just asked playback to become, until the computer answers.
+  ///
+  /// The transport button used to be drawn purely from the computer's last
+  /// reported state, so pressing it did nothing visible until a state push
+  /// arrived — and when the computer's guess about a browser tab was stale, or
+  /// the link had dropped, nothing arrived at all and the button sat on the
+  /// pause glyph however often it was pressed. Showing the requested state
+  /// immediately is what makes it feel like a button rather than a readout.
+  bool? _requestedIsPlaying;
+
+  /// Gives up on the request above and shows what the computer says.
+  ///
+  /// The computer has the last word — this is a remote control, and a control
+  /// that keeps insisting on a state the machine is not in is worse than one
+  /// that admits it.
+  Timer? _requestTimeout;
+
+  static const Duration _kRequestGrace = Duration(seconds: 4);
+
+  void _requestPlaying({required bool isPlaying}) {
+    _requestTimeout?.cancel();
+    setState(() => _requestedIsPlaying = isPlaying);
+    _requestTimeout = Timer(_kRequestGrace, () {
+      if (mounted) setState(() => _requestedIsPlaying = null);
+    });
+  }
+
+  @override
+  void dispose() {
+    _requestTimeout?.cancel();
+    super.dispose();
+  }
+
   Future<void> _send(Message message) async {
     final client = ref.read(clientProvider).valueOrNull;
     if (client == null) return;
@@ -52,6 +85,18 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
     final connected =
         ref.watch(clientStateProvider).valueOrNull == ClientState.connected;
     final state = ref.watch(mediaStateProvider).valueOrNull;
+
+    // The moment the computer agrees, stop overriding it: anything after that
+    // is the computer's own news — a track ending, someone pressing space on
+    // the keyboard — and must not be held back by a stale request.
+    ref.listen<AsyncValue<MediaState?>>(mediaStateProvider, (_, next) {
+      final reported = next.valueOrNull;
+      if (reported == null || _requestedIsPlaying == null) return;
+      if (reported.isPlaying == _requestedIsPlaying) {
+        _requestTimeout?.cancel();
+        setState(() => _requestedIsPlaying = null);
+      }
+    });
     final capabilities =
         ref.watch(clientProvider).valueOrNull?.session?.capabilities;
 
@@ -77,14 +122,17 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
         _NowPlaying(state: state),
         const SizedBox(height: 24),
         _TransportRow(
-          isPlaying: state?.isPlaying ?? false,
+          isPlaying: _requestedIsPlaying ?? state?.isPlaying ?? false,
           enabled: connected,
           onPrevious: () => _send(
             const MediaCommand(action: MediaAction.previous),
           ),
-          onPlayPause: () => _send(
-            const MediaCommand(action: MediaAction.playPause),
-          ),
+          onPlayPause: () {
+            _requestPlaying(
+              isPlaying: !(_requestedIsPlaying ?? state?.isPlaying ?? false),
+            );
+            unawaited(_send(const MediaCommand(action: MediaAction.playPause)));
+          },
           onNext: () => _send(const MediaCommand(action: MediaAction.next)),
         ),
         const SizedBox(height: 26),
