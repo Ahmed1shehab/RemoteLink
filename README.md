@@ -32,6 +32,7 @@ such rather than stubbed.
 | Desktop app | Service, dispatcher with permission enforcement, clipboard sync, tray, pairing UI |
 | Mobile app | Discovery, pairing, touchpad, full keyboard, clipboard, media |
 | Auto-connect | Reconnects to the last computer on launch and skips the list |
+| Share sheet | Android: share text or files into Remote Link from any app — text lands on the computer's clipboard, files become a transfer offer. The one route past Android's clipboard focus rule |
 | Background link | Android: a foreground service keeps the connection alive while the app is off screen, so a transfer survives switching apps. No iOS equivalent exists |
 | Media control | macOS: transport via hardware media keys, volume, now playing |
 

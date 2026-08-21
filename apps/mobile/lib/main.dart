@@ -7,6 +7,7 @@ import 'src/app/theme.dart';
 import 'src/features/devices/auto_connect.dart';
 import 'src/features/devices/device_list_screen.dart';
 import 'src/features/devices/link_service.dart';
+import 'src/features/share/share_intake.dart';
 
 /// Entry point for the phone app.
 Future<void> main() async {
@@ -25,6 +26,14 @@ Future<void> main() async {
   runApp(const ProviderScope(child: RemoteLinkApp()));
 }
 
+/// The messenger every screen's snackbars go through.
+///
+/// A share can be answered while the user is anywhere in the app — or, on a
+/// cold start, before any screen has finished building — so the confirmation
+/// cannot depend on having a particular `BuildContext` to hand.
+final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
+
 class RemoteLinkApp extends ConsumerWidget {
   const RemoteLinkApp({super.key});
 
@@ -40,8 +49,27 @@ class RemoteLinkApp extends ConsumerWidget {
     // while the user is anywhere in the app, and the moment it matters most is
     // the moment they leave it.
     ref.watch(backgroundLinkProvider);
+    // And the same again for shares: something has to be listening when the
+    // system hands over a link the user shared into this app, whichever screen
+    // happens to be open at the time.
+    ref.listen<ShareOutcome>(shareControllerProvider, (previous, next) {
+      final message = switch (next) {
+        ShareIdle() => null,
+        ShareSent(:final description, :final peerName) =>
+          'Sent $description to $peerName.',
+        ShareWaiting(:final description) =>
+          'Holding $description until your computer is back.',
+        ShareFailed(:final reason) => 'Could not send that: $reason',
+      };
+      if (message == null) return;
+      scaffoldMessengerKey.currentState
+        ?..clearSnackBars()
+        ..showSnackBar(SnackBar(content: Text(message)));
+      ref.read(shareControllerProvider.notifier).acknowledge();
+    });
 
     return MaterialApp(
+      scaffoldMessengerKey: scaffoldMessengerKey,
       title: kProductName,
       debugShowCheckedModeBanner: false,
       theme: remoteLinkTheme(Brightness.light),

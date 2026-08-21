@@ -264,6 +264,19 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     _log.debug(() => 'applied ${text.length} clipboard characters');
   }
 
+  /// Puts [text] on the computer's clipboard without reading this phone's.
+  ///
+  /// For content that arrived some other way — the share sheet, principally,
+  /// which is how a copy made in another app reaches the computer at all when
+  /// Android will not serve this one a clipboard read.
+  ///
+  /// It goes through the same bookkeeping as a local copy, so it takes its turn
+  /// in the same clock and cannot be echoed back.
+  Future<bool> sendText(String text) async {
+    if (text.isEmpty) return false;
+    return _send(text);
+  }
+
   /// Reads this phone's clipboard and sends it, if it has changed.
   ///
   /// [silent] suppresses the "nothing to send" feedback for the automatic
@@ -292,39 +305,7 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       final text = data?.text;
       if (text == null || text.isEmpty) return false;
-
-      final bytes = utf8.encode(text);
-      final digest = await Primitives.sha256(bytes);
-      final hash = Uint8List.sublistView(digest, 0, 16);
-
-      // Already synced, in either direction. Re-sending would be harmless but
-      // would bump the computer's change counter and could start a loop.
-      if (Primitives.constantTimeEquals(hash, _lastHash)) return false;
-      _lastHash = hash;
-
-      final identity = await _ref.read(identityProvider.future);
-      final sent = await client.send(
-        ClipboardUpdate(
-          items: <ClipboardItem>[ClipboardItem.text(text)],
-          contentHash: hash,
-          originDeviceId: identity.id.value,
-          originSequence: ++_sequence,
-        ),
-      );
-
-      if (sent) {
-        state = ClipboardState(
-          text: text,
-          updatedAt: DateTime.now(),
-        );
-        _recordHistory(
-          kind: ClipboardHistoryKind.text,
-          data: Uint8List.fromList(bytes),
-          hash: hash,
-        );
-        _log.debug(() => 'sent ${bytes.length} clipboard bytes');
-      }
-      return sent;
+      return await _send(text);
     } on PlatformException catch (e) {
       // A clipboard read can be refused outright — a managed device policy, or
       // the user denying the paste prompt. Not worth an error dialog.
@@ -333,6 +314,47 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     } finally {
       state = state.copyWith(sending: false);
     }
+  }
+
+  /// Puts [text] on the computer's clipboard and records it here.
+  ///
+  /// The one path out, whether the text came from a clipboard read or from a
+  /// share: the hash guard, the clock and the local history all have to happen
+  /// exactly once per piece of content, and two call sites doing it separately
+  /// is how they drift apart.
+  Future<bool> _send(String text) async {
+    final client = _ref.read(clientProvider).valueOrNull;
+    if (client == null || !client.isConnected) return false;
+
+    final bytes = utf8.encode(text);
+    final digest = await Primitives.sha256(bytes);
+    final hash = Uint8List.sublistView(digest, 0, 16);
+
+    // Already synced, in either direction. Re-sending would be harmless but
+    // would bump the computer's change counter and could start a loop.
+    if (Primitives.constantTimeEquals(hash, _lastHash)) return false;
+    _lastHash = hash;
+
+    final identity = await _ref.read(identityProvider.future);
+    final sent = await client.send(
+      ClipboardUpdate(
+        items: <ClipboardItem>[ClipboardItem.text(text)],
+        contentHash: hash,
+        originDeviceId: identity.id.value,
+        originSequence: ++_sequence,
+      ),
+    );
+
+    if (sent) {
+      state = ClipboardState(text: text, updatedAt: DateTime.now());
+      _recordHistory(
+        kind: ClipboardHistoryKind.text,
+        data: Uint8List.fromList(bytes),
+        hash: hash,
+      );
+      _log.debug(() => 'sent ${bytes.length} clipboard bytes');
+    }
+    return sent;
   }
 
   /// The only path from this phone's clipboard into its history.

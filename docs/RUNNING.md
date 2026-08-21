@@ -236,7 +236,11 @@ own: those phones kill foreground services the user has not exempted, and the
 has no equivalent and the switch does not appear there.
 
 **Nothing copied on the phone reaches the computer while the phone app is in
-the background** — working as intended, and not fixable from user space.
+the background** — use the share sheet, which exists for exactly this. Select
+the text, Share, pick Remote Link, and it lands on the computer's clipboard
+without the app being opened first; shared files become an ordinary transfer
+offer. The restriction is the reason that route exists, and it is not fixable
+from user space.
 Android has refused clipboard reads to apps without focus since Android 10, and
 iOS puts a permission alert in front of them. The phone watches for changes and
 sends them while it is on screen, and catches up on whatever it missed the

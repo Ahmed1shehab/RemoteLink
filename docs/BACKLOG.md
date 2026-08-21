@@ -112,6 +112,7 @@ Ranked in `SECURITY.md` §4 and reproduced here with task IDs:
 | No CI. No `.github/` directory exists | RL-001 |
 | QR pairing UI: protocol done, display widget and scanner missing | RL-106 |
 | No mobile settings screen (rename device, forget computer, tier request, sync toggles) | RL-700 |
+| ~~The Android manifest advertises a share target and nothing reads the intent~~ — built; shared text goes to the computer's clipboard, shared files become a transfer offer. iOS still needs a share extension | RL-421 |
 | No desktop diagnostics panel; `CommandDispatcher` already counts applied/denied/unsupported and nothing reads them | RL-701 |
 | No custom-command registry storage or editor UI | RL-207 |
 | No latency measurement harness | RL-107 |

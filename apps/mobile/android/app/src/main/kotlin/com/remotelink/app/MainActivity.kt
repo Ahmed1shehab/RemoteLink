@@ -30,10 +30,25 @@ import io.flutter.plugin.common.MethodChannel
  * **The foreground service.** [LinkService] keeps the process unfrozen and
  * networked while the app is off screen. Dart drives it from the connection
  * state, because the connection is the only thing that justifies it running.
+ *
+ * **Shares.** The manifest has advertised this app as a share target since it
+ * was written, and nothing read the intent. [ShareIntake] does, and it is the
+ * one route past the clipboard restriction above: no focus rule applies to
+ * content another app hands over deliberately.
  */
 class MainActivity : FlutterActivity() {
     private var clipboardListener: ClipboardManager.OnPrimaryClipChangedListener? = null
     private var linkChannel: MethodChannel? = null
+    private var shareChannel: MethodChannel? = null
+
+    /**
+     * A share that arrived before Dart was listening.
+     *
+     * A cold start delivers the intent long before the isolate exists, so the
+     * payload waits here and Dart collects it with `takePending` once it is up.
+     * A warm start has somewhere to push it and does.
+     */
+    private var pendingShare: Map<String, Any?>? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -88,6 +103,70 @@ class MainActivity : FlutterActivity() {
         LinkService.onDisconnectRequested = {
             runOnUiThread { linkChannel?.invokeMethod("disconnectRequested", null) }
         }
+
+        val shares = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SHARE_CHANNEL)
+        shareChannel = shares
+        shares.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "takePending" -> {
+                    result.success(pendingShare)
+                    pendingShare = null
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // The intent that launched this activity, which for a share is the
+        // whole point of the launch.
+        handleShare(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // `singleTop`, so a share into an app that is already open arrives here
+        // rather than through a second `onCreate`.
+        setIntent(intent)
+        handleShare(intent)
+    }
+
+    /**
+     * Reads a share and hands it to Dart, or holds it until Dart asks.
+     *
+     * Staging happens off the main thread, so this returns immediately and the
+     * payload lands later — which is also why a share can arrive before the
+     * isolate is listening even on a warm start.
+     */
+    private fun handleShare(intent: Intent?) {
+        if (!ShareIntake.isShare(intent) || intent == null) {
+            // Only tidy up on a launch that is not itself a share: the two run
+            // concurrently, and clearing during a staging deletes the file the
+            // user is in the middle of sending.
+            ShareIntake.clearStaging(this)
+            return
+        }
+
+        ShareIntake.read(this, intent) { payload ->
+            val map = payload?.toMap() ?: return@read
+            val channel = shareChannel
+            if (channel == null) {
+                pendingShare = map
+                return@read
+            }
+            channel.invokeMethod("shared", map, object : MethodChannel.Result {
+                override fun success(result: Any?) = Unit
+
+                // Dart is not listening yet — the engine is up but the app has
+                // not reached the point of subscribing. Held rather than
+                // dropped, for `takePending` to collect.
+                override fun error(code: String, message: String?, details: Any?) {
+                    pendingShare = map
+                }
+
+                override fun notImplemented() {
+                    pendingShare = map
+                }
+            })
+        }
     }
 
     override fun onDestroy() {
@@ -97,6 +176,7 @@ class MainActivity : FlutterActivity() {
         stopWatchingClipboard()
         LinkService.onDisconnectRequested = null
         linkChannel = null
+        shareChannel = null
         // The engine goes with the activity, so nothing is left that could
         // honour the notification the service is showing. `stopWithTask` covers
         // the swipe-away; this covers every other way the activity ends.
@@ -162,6 +242,7 @@ class MainActivity : FlutterActivity() {
     private companion object {
         const val CLIPBOARD_CHANNEL = "com.remotelink.app/clipboard_changes"
         const val LINK_CHANNEL = "com.remotelink.app/link_service"
+        const val SHARE_CHANNEL = "com.remotelink.app/share"
         const val NOTIFICATION_PERMISSION_REQUEST = 1001
     }
 }
