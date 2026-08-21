@@ -53,6 +53,19 @@ final class _RecordingLinkService implements LinkService {
   bool get isSupported => true;
 
   @override
+  Future<bool> openAccessibilitySettings() async => false;
+
+  @override
+  Future<bool> backgroundClipboardEnabled() async => false;
+
+  @override
+  Stream<String> get backgroundCopies => const Stream<String>.empty();
+
+  @override
+  Stream<void> get backgroundReadRefusals => const Stream<void>.empty();
+
+
+  @override
   Stream<void> get disconnectRequests => disconnects.stream;
 }
 

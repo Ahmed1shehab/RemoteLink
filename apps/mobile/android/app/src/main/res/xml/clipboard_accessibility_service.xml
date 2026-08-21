@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The narrowest configuration that still lets the service bind.
+
+  `canRetrieveWindowContent` is false on purpose: this service reads the
+  clipboard and nothing else, and a service that cannot read the screen cannot
+  quietly grow into one that does. The event type is declared because a service
+  must declare some to be bindable at all — the clipboard listener registered in
+  onServiceConnected is what actually does the work.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewTextSelectionChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:canRetrieveWindowContent="false"
+    android:description="@string/clipboard_service_description"
+    android:notificationTimeout="100"
+    android:summary="@string/clipboard_service_summary" />

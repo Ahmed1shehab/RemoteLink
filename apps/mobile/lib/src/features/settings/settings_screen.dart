@@ -971,6 +971,8 @@ class _BackgroundSection extends ConsumerWidget {
                   ref.read(backgroundLinkEnabledProvider.notifier).set(value),
             ),
             const Divider(height: 16),
+            const _BackgroundClipboardTile(),
+            const Divider(height: 16),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: Icon(
@@ -990,6 +992,144 @@ class _BackgroundSection extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Turns on reading the clipboard while another app is on screen.
+///
+/// The only feature in this app that asks for an accessibility service, and it
+/// asks because Android leaves no other way: `getPrimaryClip` returns null to
+/// an app without window focus, so copying in a browser cannot reach the
+/// computer through any permission, service or entitlement. Off unless the
+/// user turns it on, and everything else works without it.
+class _BackgroundClipboardTile extends ConsumerStatefulWidget {
+  const _BackgroundClipboardTile();
+
+  @override
+  ConsumerState<_BackgroundClipboardTile> createState() =>
+      _BackgroundClipboardTileState();
+}
+
+class _BackgroundClipboardTileState
+    extends ConsumerState<_BackgroundClipboardTile> with WidgetsBindingObserver {
+  bool _enabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(_refresh());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The switch is thrown on a system screen this app cannot see, so the only
+    // moment its state can be trusted is on the way back from there.
+    if (state == AppLifecycleState.resumed) unawaited(_refresh());
+  }
+
+  Future<void> _refresh() async {
+    final enabled =
+        await ref.read(linkServiceProvider).backgroundClipboardEnabled();
+    if (!mounted) return;
+    setState(() => _enabled = enabled);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(
+        _enabled ? Icons.check_circle_outline : Icons.content_paste_off,
+        color: _enabled ? colorScheme.primary : colorScheme.onSurfaceVariant,
+      ),
+      title: const Text('Copy in any app, paste on your computer'),
+      subtitle: Text(
+        _enabled
+            ? 'On. What you copy anywhere goes to your computer.'
+            : 'Off. Android only allows this through Accessibility settings.',
+      ),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => showDialog<void>(
+        context: context,
+        builder: (context) => _BackgroundClipboardDialog(enabled: _enabled),
+      ),
+    );
+  }
+}
+
+/// Explains what enabling the service means before sending the user to do it.
+///
+/// Written plainly and without persuasion. An accessibility service is a large
+/// thing to grant, the system screen says so in stronger words than these, and
+/// a user who reads this and decides against it has decided correctly for
+/// them — the app works without it.
+class _BackgroundClipboardDialog extends ConsumerWidget {
+  const _BackgroundClipboardDialog({required this.enabled});
+
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return AlertDialog(
+      title: const Text('Copying while Remote Link is closed'),
+      content: const SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Android does not let an app read the clipboard unless it is the '
+              'app you are looking at. That is why copying in Chrome does not '
+              'reach your computer on its own.',
+            ),
+            SizedBox(height: 12),
+            Text(
+              'The one exception is an accessibility service, which you turn '
+              'on yourself in Android settings. Remote Link uses it for the '
+              'clipboard and nothing else: it cannot read your screen, and it '
+              'does not see what you type.',
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Settings › Accessibility › Remote Link › turn it on. Some '
+              'phones refuse the read even then — if nothing arrives after '
+              'enabling it, yours is one of them.',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Not now'),
+        ),
+        FilledButton(
+          onPressed: () async {
+            final opened =
+                await ref.read(linkServiceProvider).openAccessibilitySettings();
+            if (!context.mounted) return;
+            Navigator.of(context).pop();
+            if (opened) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Could not open Accessibility settings.'),
+              ),
+            );
+          },
+          child: Text(enabled ? 'Open settings' : 'Turn it on'),
+        ),
+      ],
     );
   }
 }

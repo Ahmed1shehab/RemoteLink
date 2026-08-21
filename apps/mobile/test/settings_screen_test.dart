@@ -603,6 +603,19 @@ final class _SupportedLinkService implements LinkService {
   bool get isSupported => true;
 
   @override
+  Future<bool> openAccessibilitySettings() async => false;
+
+  @override
+  Future<bool> backgroundClipboardEnabled() async => false;
+
+  @override
+  Stream<String> get backgroundCopies => const Stream<String>.empty();
+
+  @override
+  Stream<void> get backgroundReadRefusals => const Stream<void>.empty();
+
+
+  @override
   Future<void> start({
     required String title,
     required String body,

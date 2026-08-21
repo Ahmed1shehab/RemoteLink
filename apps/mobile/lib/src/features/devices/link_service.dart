@@ -46,6 +46,26 @@ abstract interface class LinkService {
   /// there is none to open.
   Future<bool> openBatterySettings();
 
+  /// Opens the platform's accessibility screen, where the background clipboard
+  /// reader is switched on.
+  Future<bool> openAccessibilitySettings();
+
+  /// Whether the background clipboard reader is enabled and running.
+  Future<bool> backgroundClipboardEnabled();
+
+  /// Text copied on this phone while another app was on screen.
+  ///
+  /// Empty on every platform that cannot read the clipboard from the
+  /// background, which is all of them unless the user has granted it.
+  Stream<String> get backgroundCopies;
+
+  /// Fires when the platform refused a background clipboard read.
+  ///
+  /// A device can have the service enabled and still say no — manufacturers
+  /// vary, and a feature that silently does nothing is worse than one that
+  /// says it cannot.
+  Stream<void> get backgroundReadRefusals;
+
   /// Fires when the user presses Disconnect on the notification.
   ///
   /// The service cannot honour that itself — this isolate owns the connection —
@@ -57,7 +77,15 @@ abstract interface class LinkService {
 final class PlatformLinkService implements LinkService {
   PlatformLinkService() {
     _channel.setMethodCallHandler((call) async {
-      if (call.method == 'disconnectRequested') _disconnects.add(null);
+      switch (call.method) {
+        case 'disconnectRequested':
+          _disconnects.add(null);
+        case 'clipboardCopied':
+          final text = call.arguments;
+          if (text is String && text.isNotEmpty) _copies.add(text);
+        case 'clipboardRefused':
+          _refusals.add(null);
+      }
     });
   }
 
@@ -68,9 +96,38 @@ final class PlatformLinkService implements LinkService {
 
   final StreamController<void> _disconnects =
       StreamController<void>.broadcast();
+  final StreamController<String> _copies =
+      StreamController<String>.broadcast();
+  final StreamController<void> _refusals =
+      StreamController<void>.broadcast();
 
   @override
   bool get isSupported => true;
+
+  @override
+  Stream<String> get backgroundCopies => _copies.stream;
+
+  @override
+  Stream<void> get backgroundReadRefusals => _refusals.stream;
+
+  @override
+  Future<bool> openAccessibilitySettings() =>
+      _ask('openAccessibilitySettings');
+
+  @override
+  Future<bool> backgroundClipboardEnabled() =>
+      _ask('backgroundClipboardEnabled');
+
+  Future<bool> _ask(String method) async {
+    try {
+      return await _channel.invokeMethod<bool>(method) ?? false;
+    } on PlatformException catch (e) {
+      _log.debug(() => '$method refused: ${e.message}');
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
 
   @override
   Stream<void> get disconnectRequests => _disconnects.stream;
@@ -141,6 +198,18 @@ final class InertLinkService implements LinkService {
 
   @override
   Future<bool> openBatterySettings() async => false;
+
+  @override
+  Future<bool> openAccessibilitySettings() async => false;
+
+  @override
+  Future<bool> backgroundClipboardEnabled() async => false;
+
+  @override
+  Stream<String> get backgroundCopies => const Stream<String>.empty();
+
+  @override
+  Stream<void> get backgroundReadRefusals => const Stream<void>.empty();
 
   @override
   Stream<void> get disconnectRequests => const Stream<void>.empty();

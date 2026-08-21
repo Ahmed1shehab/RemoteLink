@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:remotelink_mobile/src/app/providers.dart';
 import 'package:remotelink_mobile/src/features/clipboard/clipboard_controller.dart';
 import 'package:remotelink_mobile/src/features/clipboard/clipboard_watcher.dart';
+import 'package:remotelink_mobile/src/features/devices/link_service.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
@@ -55,6 +56,49 @@ final class _FakeSystemClipboard {
           .setMockMethodCallHandler(SystemChannels.platform, null);
 }
 
+/// A link service whose background clipboard reader a test can drive.
+///
+/// The real one is an Android accessibility service the user has to enable by
+/// hand, so this stands in for the seam it pushes through.
+final class _FakeLinkService implements LinkService {
+  // Closed by `dispose`, which every tearDown here calls.
+  // ignore: close_sinks
+  final StreamController<String> copies = StreamController<String>.broadcast();
+
+  Future<void> dispose() => copies.close();
+
+  @override
+  Stream<String> get backgroundCopies => copies.stream;
+
+  @override
+  bool get isSupported => true;
+
+  @override
+  Stream<void> get backgroundReadRefusals => const Stream<void>.empty();
+
+  @override
+  Stream<void> get disconnectRequests => const Stream<void>.empty();
+
+  @override
+  Future<bool> backgroundClipboardEnabled() async => true;
+
+  @override
+  Future<bool> openAccessibilitySettings() async => true;
+
+  @override
+  Future<bool> openBatterySettings() async => true;
+
+  @override
+  Future<void> start({
+    required String title,
+    required String body,
+    required String disconnectLabel,
+  }) async {}
+
+  @override
+  Future<void> stop() async {}
+}
+
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -64,6 +108,7 @@ void main() {
     late Session desktopSession;
     late ProviderContainer container;
     late _FakeClipboardWatcher watcher;
+    late _FakeLinkService linkService;
     late _FakeSystemClipboard clipboard;
     late DeviceIdentity desktopIdentity;
     late InMemoryTrustStore trust;
@@ -121,6 +166,7 @@ void main() {
           (await accepted.timeout(const Duration(seconds: 10))).session;
 
       watcher = _FakeClipboardWatcher();
+      linkService = _FakeLinkService();
       clipboard = _FakeSystemClipboard()..install(binding);
 
       container = ProviderContainer(
@@ -131,6 +177,7 @@ void main() {
                 phoneIdentity,
               )),
           clientProvider.overrideWith((ref) async => client),
+          linkServiceProvider.overrideWithValue(linkService),
           clipboardControllerProvider.overrideWith(
             (ref) => MobileClipboardController(ref, watcher: watcher),
           ),
@@ -147,6 +194,7 @@ void main() {
       container.dispose();
       clipboard.remove(binding);
       await watcher.close();
+      await linkService.dispose();
       await client.disconnect();
       await server.stop();
       await trust.dispose();
@@ -228,6 +276,40 @@ void main() {
       final update = await nextUpdate();
       expect(update, isNotNull);
       expect(update!.plainText, 'copied while offline');
+    });
+
+    test('a copy read while another app was on screen still goes out',
+        () async {
+      // The whole point of the accessibility service: copying in a browser
+      // reaches the computer without Remote Link being opened. Driven here
+      // through the seam the service pushes into, because the service itself
+      // needs a device and a grant no test can give it.
+      final seen = nextUpdate();
+      linkService.copies.add('copied in Chrome');
+
+      final update = await seen;
+      expect(update, isNotNull);
+      expect(update!.plainText, 'copied in Chrome');
+    });
+
+    test('the phone does not send back what it just wrote for the computer',
+        () async {
+      // The background reader watches the same clipboard this app writes to,
+      // so an update from the computer looks exactly like a copy. Without the
+      // guard the two would trade it back and forth.
+      await desktopSession.send(
+        ClipboardUpdate(
+          items: <ClipboardItem>[ClipboardItem.text('from the computer')],
+          contentHash: Uint8List.fromList(List<int>.filled(16, 3)),
+          originDeviceId: desktopIdentity.id.value,
+          originSequence: 1,
+        ),
+      );
+      await pumpEventQueue(times: 40);
+
+      final echo = nextUpdate(within: const Duration(milliseconds: 900));
+      linkService.copies.add('from the computer');
+      expect(await echo, isNull);
     });
 
     test('an update the phone does not apply still advances its clock',

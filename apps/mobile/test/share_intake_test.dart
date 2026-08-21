@@ -207,7 +207,10 @@ void main() {
       final photo = File('${tempDir.path}/holiday.jpg')
         ..writeAsBytesSync(<int>[1, 2, 3, 4]);
 
-      final seen = awaitMessage<FileOffer>();
+      // A longer window than the text cases: a file offer goes through the
+      // transfer controller and its store, and under a full-suite run that is
+      // slow enough to outlast a three-second wait.
+      final seen = awaitMessage<FileOffer>(within: const Duration(seconds: 10));
       intake.controller.add(
         SharedFiles(<({File file, String name})>[
           (file: photo, name: 'holiday.jpg'),

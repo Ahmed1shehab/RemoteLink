@@ -94,8 +94,22 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "openBatterySettings" -> result.success(openBatterySettings())
+                "backgroundClipboardEnabled" ->
+                    result.success(ClipboardAccessibilityService.isRunning)
+                "openAccessibilitySettings" ->
+                    result.success(openAccessibilitySettings())
                 else -> result.notImplemented()
             }
+        }
+
+        // The accessibility service reads the clipboard; sending it is this
+        // isolate's job, and it is the only thing here that knows where to
+        // send it.
+        ClipboardAccessibilityService.onCopied = { text ->
+            runOnUiThread { channel.invokeMethod("clipboardCopied", text) }
+        }
+        ClipboardAccessibilityService.onRefused = {
+            runOnUiThread { channel.invokeMethod("clipboardRefused", null) }
         }
 
         // Only the Dart isolate can honour a disconnect, so the notification
@@ -175,6 +189,8 @@ class MainActivity : FlutterActivity() {
         // each of those holds the engine this activity is about to destroy.
         stopWatchingClipboard()
         LinkService.onDisconnectRequested = null
+        ClipboardAccessibilityService.onCopied = null
+        ClipboardAccessibilityService.onRefused = null
         linkChannel = null
         shareChannel = null
         // The engine goes with the activity, so nothing is left that could
@@ -227,6 +243,23 @@ class MainActivity : FlutterActivity() {
         // Not every device ships the screen, and a settings activity that does
         // not exist should leave the user where they were rather than crash the
         // app they were using.
+        false
+    }
+
+    /**
+     * Opens the system's Accessibility screen.
+     *
+     * As far as this can go: enabling a service is the user's decision to make
+     * on a screen the app cannot reach into, which is the point of it being
+     * there rather than behind a permission dialog.
+     */
+    private fun openAccessibilitySettings(): Boolean = try {
+        startActivity(
+            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        true
+    } catch (e: Exception) {
         false
     }
 

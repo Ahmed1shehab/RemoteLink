@@ -13,6 +13,7 @@ import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
+import '../devices/link_service.dart';
 import 'clipboard_history_controller.dart';
 import 'clipboard_watcher.dart';
 
@@ -97,6 +98,7 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
   StreamSubscription<Message>? _messages;
   StreamSubscription<ClientState>? _states;
   StreamSubscription<void>? _clipboardChanges;
+  StreamSubscription<String>? _backgroundCopies;
   Timer? _settle;
 
   /// Set when a send was wanted but the link was down.
@@ -156,6 +158,15 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
       },
       cancelOnError: false,
     );
+    // Copies made while another app was on screen, which only arrive at all
+    // when the user has enabled the accessibility service. Sent through the
+    // same path as everything else, so the same echo guard and clock apply —
+    // and so applying the computer's own update cannot bounce back from here.
+    _backgroundCopies = _ref
+        .read(linkServiceProvider)
+        .backgroundCopies
+        .listen(_onBackgroundCopy, cancelOnError: false);
+
     // No flush without this. The states stream is the only thing that says the
     // link came back, and the copy the drop interrupted is waiting on it.
     _states = client.states.listen(
@@ -427,6 +438,26 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     _settle = null;
   }
 
+  /// Sends text the accessibility service read while the app was off screen.
+  ///
+  /// The self-write suppression applies here too: writing an update from the
+  /// computer into this phone's clipboard fires the same change the service
+  /// watches for, and without the guard every sync would be read back and
+  /// returned.
+  void _onBackgroundCopy(String text) {
+    final settings = _ref.read(clipboardSettingsProvider);
+    if (!settings.syncToDesktop) return;
+
+    final selfWrite = _lastSelfWrite;
+    if (selfWrite != null &&
+        DateTime.now().difference(selfWrite) < _kSelfWriteWindow) {
+      return;
+    }
+
+    _log.debug(() => 'a copy arrived from the background reader');
+    unawaited(sendText(text));
+  }
+
   void _onClipboardChanged() {
     final selfWrite = _lastSelfWrite;
     if (selfWrite != null &&
@@ -472,6 +503,7 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     _stopWatching();
     unawaited(_messages?.cancel());
     unawaited(_states?.cancel());
+    unawaited(_backgroundCopies?.cancel());
     super.dispose();
   }
 }

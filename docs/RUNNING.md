@@ -236,7 +236,14 @@ own: those phones kill foreground services the user has not exempted, and the
 has no equivalent and the switch does not appear there.
 
 **Nothing copied on the phone reaches the computer while the phone app is in
-the background** — use the share sheet, which exists for exactly this. Select
+the background** — turn on Settings › Background › "Copy in any app, paste on
+your computer". That enables an accessibility service, which is the only way
+Android permits a background clipboard read: `getPrimaryClip` returns null to
+an app without window focus, and no permission or service type changes it.
+Some manufacturers refuse the read even then, and the app says so in the log
+rather than going quiet.
+
+The share sheet is the route that needs no grant at all: Select
 the text, Share, pick Remote Link, and it lands on the computer's clipboard
 without the app being opened first; shared files become an ordinary transfer
 offer. The restriction is the reason that route exists, and it is not fixable

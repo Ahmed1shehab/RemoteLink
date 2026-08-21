@@ -70,6 +70,28 @@
             android:stopWithTask="true"
             android:foregroundServiceType="connectedDevice"/>
 
+        <!-- Reading the clipboard while another app is on screen.
+
+             Since Android 10 `getPrimaryClip` returns null unless the calling
+             app has focus or is the default keyboard. An accessibility service
+             is the remaining route, and the only one that makes "copy in
+             Chrome, paste on the computer" possible at all.
+
+             Off unless the user enables it on the system's Accessibility
+             screen, and the app is fully functional without it. -->
+        <service
+            android:name=".ClipboardAccessibilityService"
+            android:exported="false"
+            android:label="@string/clipboard_service_summary"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/clipboard_accessibility_service"/>
+        </service>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
