@@ -10,6 +10,23 @@ import 'package:rl_native/rl_native.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+/// Waits until [grants] contains one matching [matches], or gives up.
+///
+/// The timeout is only ever reached when the test is about to fail anyway; a
+/// passing run leaves as soon as the grant arrives, so this is quicker than the
+/// fixed sleeps it replaces rather than slower.
+Future<void> waitForGrant(
+  List<PermissionGrant> grants,
+  bool Function(PermissionGrant) matches, {
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!grants.any(matches)) {
+    if (DateTime.now().isAfter(deadline)) return;
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -148,11 +165,17 @@ void main() {
 
       final pending = await requestReceived.future;
 
-      // Listen for PermissionGrant on client
+      // The *elevation* grant, not merely the next grant to arrive. A trusted
+      // device is sent its current tier the moment the session is established,
+      // so there are two grants in flight here and `.first` picked whichever
+      // won the race — which on a loaded Windows runner was the opening
+      // `standard` one, failing with "Expected admin, Actual standard" for
+      // reasons that had nothing to do with elevation.
       final clientGrantFuture = client.messages
           .where((m) => m is PermissionGrant)
           .cast<PermissionGrant>()
-          .first;
+          .firstWhere((grant) => grant.tier == PermissionTier.admin)
+          .timeout(const Duration(seconds: 10));
 
       await service.approvePermissionRequest(pending);
 
@@ -244,10 +267,16 @@ void main() {
       // Approve with 30s expiry
       await service.approvePermissionRequest(pending, expiresInSeconds: 30);
 
-      // Wait for initial grant to be processed
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      expect(grants.last.tier, PermissionTier.extended);
-      expect(grants.last.expiresInSeconds, 30);
+      // Identified by its expiry rather than by arrival order. A trusted device
+      // is sent its current tier the moment the session is established, so the
+      // opening grant is in flight alongside this one — and sleeping 50 ms and
+      // taking whichever landed last is a guess. It is the guess that failed on
+      // a loaded Windows runner.
+      await waitForGrant(grants, (grant) => grant.expiresInSeconds != null);
+      final granted =
+          grants.firstWhere((grant) => grant.expiresInSeconds != null);
+      expect(granted.tier, PermissionTier.extended);
+      expect(granted.expiresInSeconds, 30);
       expect(service.devices.first.tier, PermissionTier.extended);
 
       // Temporary grant does NOT overwrite trustStore
@@ -256,9 +285,13 @@ void main() {
 
       // Advance clock by 30 seconds using FakeClock
       clock.advance(const Duration(seconds: 30));
-      await Future<void>.delayed(const Duration(milliseconds: 50));
 
-      // Device dropped back to readOnly
+      // Waited for rather than slept through, so the revert is observed when it
+      // happens instead of when a fixed delay guesses it has.
+      await waitForGrant(
+        grants,
+        (grant) => grant.tier == PermissionTier.readOnly,
+      );
       expect(service.devices.first.tier, PermissionTier.readOnly);
       expect(grants.last.tier, PermissionTier.readOnly);
     });
