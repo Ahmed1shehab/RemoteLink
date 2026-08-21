@@ -13,6 +13,7 @@ import 'package:rl_protocol/rl_protocol.dart';
 
 import '../../app/providers.dart';
 import 'clipboard_history_controller.dart';
+import 'clipboard_watcher.dart';
 
 /// What the phone currently holds, for display.
 final class ClipboardState {
@@ -47,42 +48,79 @@ final class ClipboardState {
 
 /// Mirrors the clipboard between this phone and the connected computer.
 ///
-/// ## Why this is not symmetric, and cannot be
+/// ## What is automatic, and where the limit actually is
 ///
-/// The brief asks for clipboard sync with no buttons, like Apple's Universal
-/// Clipboard. Half of that is achievable and half is not, and the asymmetry is
-/// imposed by the platform rather than chosen:
+/// Nothing here needs a button pressed:
 ///
-/// * **Computer → phone is fully automatic.** An update arrives over the
-///   session and is written with `Clipboard.setData`. Writing costs nothing and
-///   is invisible.
-/// * **Phone → computer cannot be.** Reading the clipboard is what would need
-///   to be continuous, and since iOS 14 every programmatic read shows the user
-///   a "pasted from" banner. Polling at the desktop's 50 ms would produce a
-///   banner storm; even polling once a second would make the app unusable.
-///   Android 12+ shows a toast for the same reason.
+/// * **Computer → phone.** An update arrives over the session and is written
+///   with `Clipboard.setData`. Writing costs nothing and is invisible.
+/// * **Phone → computer.** A [ClipboardWatcher] reports that the clipboard
+///   changed — without reading it — and that is what triggers the one read.
+///   Copy anything on the phone and it is on the computer a moment later.
 ///
-/// So the phone sends its clipboard at the two moments a read is justified:
-/// when the app comes to the foreground — the user just switched to it, almost
-/// always to use what they copied — and when they explicitly ask. That is one
-/// banner per visit rather than one per second, and it covers the actual
-/// workflow: copy on the phone, pick up the phone's remote, paste on the
-/// computer.
+/// The limit that remains is not this app's to lift: **the phone must be in
+/// the foreground.** Android refuses clipboard reads to apps without focus,
+/// and has since Android 10; iOS puts a permission alert in front of them. So
+/// "copy on the phone with Remote Link buried in the background, paste on the
+/// computer" cannot work from user space, and the resume hook below is what
+/// covers it — the app catches up the moment it is looked at again.
 ///
-/// Universal Clipboard avoids this because it is the operating system. A
-/// third-party app is not, and pretending otherwise would just mean shipping
-/// something users disable.
+/// Reading is also why this is driven by change notifications rather than by
+/// polling: every read is an interruption on both platforms (a toast on
+/// Android 12+, an alert on iOS 16+), so it happens once per copy, at the
+/// moment there is something new to send, and never on a timer.
+///
+/// Universal Clipboard has neither restriction because it is the operating
+/// system. A third-party app is not, and the honest version of this feature is
+/// one that says so rather than one that silently stops working when the
+/// screen locks.
 final class MobileClipboardController extends StateNotifier<ClipboardState>
     with WidgetsBindingObserver {
-  MobileClipboardController(this._ref) : super(const ClipboardState()) {
+  MobileClipboardController(
+    this._ref, {
+    ClipboardWatcher watcher = const PlatformClipboardWatcher(),
+  })  : _watcher = watcher,
+        super(const ClipboardState()) {
     WidgetsBinding.instance.addObserver(this);
     unawaited(_listen());
+    // The app is in the foreground when this is built — that is what building
+    // it means — so the watcher starts now rather than waiting for a resume
+    // that will not come until the user has already left and returned.
+    _startWatching();
   }
 
   final Ref _ref;
+  final ClipboardWatcher _watcher;
   final Log _log = Log.scoped('mobile.clipboard');
 
   StreamSubscription<Message>? _messages;
+  StreamSubscription<void>? _clipboardChanges;
+  Timer? _settle;
+
+  /// When this controller last wrote the phone's clipboard itself.
+  ///
+  /// Writing fires the same change notification a user copy does, and the two
+  /// are indistinguishable from the outside. Without this, every update from
+  /// the computer would provoke a read on the phone — and a read is a toast on
+  /// Android and an alert on iOS, so the user would be interrupted by their
+  /// own clipboard arriving. The [_lastHash] guard would still stop the update
+  /// being echoed back; it would just stop it after the interruption.
+  DateTime? _lastSelfWrite;
+
+  /// How long after our own write a change notification is treated as ours.
+  ///
+  /// Generous, because it only ever costs a send that [_lastHash] would have
+  /// refused anyway: a user copying something new inside this window has their
+  /// copy picked up by the next change, the next resume, or the Send button.
+  static const Duration _kSelfWriteWindow = Duration(seconds: 2);
+
+  /// How long to wait for the clipboard to stop changing before reading it.
+  ///
+  /// One copy can produce several notifications — an app that writes plain
+  /// text and then the rich version of it fires twice — and each read is an
+  /// interruption. Waiting a moment turns a burst into one read of the final
+  /// content.
+  static const Duration _kSettleDelay = Duration(milliseconds: 300);
 
   /// Fingerprint of the content last seen, in either direction.
   ///
@@ -140,6 +178,18 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
 
   /// Writes an update from the computer into the phone's clipboard.
   Future<void> _applyRemote(ClipboardUpdate update) async {
+    // Adopted before anything can return early, and deliberately so. This is
+    // a Lamport clock: seeing a message advances it whether or not the message
+    // is used, and the desktop breaks an equal-clock tie by device id.
+    // Adopting it further down — after the "same content" and "sync disabled"
+    // guards, where it used to live — left the phone's counter behind the
+    // computer's, so the phone's next copy tied, lost the tie-break, and was
+    // discarded. From the user's side the clipboard simply did not sync, with
+    // the only trace a debug line on the other machine.
+    if (update.originSequence > _sequence) {
+      _sequence = update.originSequence;
+    }
+
     final settings = _ref.read(clipboardSettingsProvider);
     if (!settings.syncFromDesktop) {
       _log.debug(
@@ -161,10 +211,7 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     if (Primitives.constantTimeEquals(update.contentHash, _lastHash)) return;
     _lastHash = update.contentHash;
 
-    if (update.originSequence > _sequence) {
-      _sequence = update.originSequence;
-    }
-
+    _lastSelfWrite = DateTime.now();
     await Clipboard.setData(ClipboardData(text: text));
     state = ClipboardState(
       text: text,
@@ -300,19 +347,55 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     await client.send(const ClipboardRequest());
   }
 
+  /// Subscribes to clipboard changes, which is also what starts the platform
+  /// watcher.
+  void _startWatching() {
+    if (_clipboardChanges != null) return;
+    _clipboardChanges = _watcher.changes.listen(
+      (_) => _onClipboardChanged(),
+      cancelOnError: false,
+    );
+  }
+
+  /// Cancels it, which is also what stops the platform watcher.
+  void _stopWatching() {
+    unawaited(_clipboardChanges?.cancel());
+    _clipboardChanges = null;
+    _settle?.cancel();
+    _settle = null;
+  }
+
+  void _onClipboardChanged() {
+    final selfWrite = _lastSelfWrite;
+    if (selfWrite != null &&
+        DateTime.now().difference(selfWrite) < _kSelfWriteWindow) {
+      _log.debug(() => 'ignoring the change our own clipboard write caused');
+      return;
+    }
+
+    _settle?.cancel();
+    _settle = Timer(_kSettleDelay, () => unawaited(sendCurrent(silent: true)));
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) return;
+    if (state != AppLifecycleState.resumed) {
+      // Nothing to watch from the background: Android will not serve a
+      // clipboard read to an app without focus, so a watcher left running
+      // there reports changes that cannot be acted on.
+      _stopWatching();
+      return;
+    }
+
+    _startWatching();
 
     final settings = _ref.read(clipboardSettingsProvider);
     if (!settings.syncToDesktop) return;
 
-    // The one automatic read. Coming to the foreground is the strongest signal
-    // available that the user is about to use what they copied, and it costs a
-    // single paste banner per visit instead of one per poll.
-    //
-    // Android is exempt from the banner but kept on the same schedule: two
-    // different sync behaviours would be harder to explain than one.
+    // Still read on resume, and not only when the watcher fires. Everything
+    // copied while this app was in the background happened where no watcher of
+    // ours could see it, and coming to the foreground is the moment that
+    // backlog is worth one read.
     if (Platform.isIOS || Platform.isAndroid) {
       unawaited(sendCurrent(silent: true));
     }
@@ -321,6 +404,7 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _stopWatching();
     unawaited(_messages?.cancel());
     super.dispose();
   }

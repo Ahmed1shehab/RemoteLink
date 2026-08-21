@@ -226,6 +226,13 @@ the phone clears the stored key and starts a fresh exchange.
 **Cursor does not move but everything else works** — Accessibility permission.
 See step 2.
 
+**Nothing copied on the phone reaches the computer while the phone app is in
+the background** — working as intended, and not fixable from user space.
+Android has refused clipboard reads to apps without focus since Android 10, and
+iOS puts a permission alert in front of them. The phone watches for changes and
+sends them while it is on screen, and catches up on whatever it missed the
+moment it is opened again.
+
 **Clipboard syncs one way only** — likely the concealed-content flag. Content
 copied from a password manager is deliberately not mirrored.
 

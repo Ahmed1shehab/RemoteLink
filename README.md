@@ -28,7 +28,7 @@ such rather than stubbed.
 | Discovery | Complete: UDP multicast with per-interface binding and broadcast fallback |
 | Transport | Complete: framed TCP, heartbeat, RTT, coalescing, reconnect with jittered backoff |
 | Native input | Complete: Win32 `SendInput` and macOS `CGEvent` via `dart:ffi`, full HID keymaps |
-| Native clipboard | Text complete on both platforms; images deferred |
+| Native clipboard | Text complete on both platforms; images deferred. Syncs both ways on its own — the phone half needs the app in the foreground, which is as far as iOS and Android allow |
 | Desktop app | Service, dispatcher with permission enforcement, clipboard sync, tray, pairing UI |
 | Mobile app | Discovery, pairing, touchpad, full keyboard, clipboard, media |
 | Auto-connect | Reconnects to the last computer on launch and skips the list |
