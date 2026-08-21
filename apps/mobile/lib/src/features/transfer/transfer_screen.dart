@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_transport/rl_transport.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../app/modern_ui.dart';
 import '../../app/motion.dart';
@@ -17,14 +18,16 @@ import 'transfer_model.dart';
 
 /// What happens to a file once it arrives, in one sentence.
 ///
-/// Said before the user accepts rather than after, because the app has nowhere
-/// of its own to put anything: a photo goes to the camera roll and anything
-/// else goes wherever the share sheet is pointed. Someone who expects a folder
-/// inside the app to browse later would otherwise go looking for one that does
-/// not exist.
+/// Said before the user accepts rather than after, because where a file lands
+/// is not this app's choice to make quietly: a photo goes to the camera roll
+/// and anything else goes wherever the share sheet is pointed. The transfer
+/// list can reopen recent arrivals, but that is a convenience on top of a real
+/// destination, not the destination itself — this app is still not a folder,
+/// and saying otherwise would leave people looking for one.
 const String kIncomingDestinationExplanation =
     'Photos and videos are saved to your Photos library. Anything else opens '
-    'the share sheet so you can choose where it goes.';
+    'the share sheet so you can choose where it goes. Recent arrivals stay '
+    'openable from this list.';
 
 /// Send and receive media and file transfers on mobile.
 class TransferScreen extends ConsumerStatefulWidget {
@@ -840,21 +843,7 @@ class _TransferCard extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           for (final f in transfer.files) ...<Widget>[
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: FileNameText(
-                    f.fileName,
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '${formatBytes(f.transferredBytes)} / ${formatBytes(f.totalBytes)}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
+            _TransferFileRow(file: f),
             const SizedBox(height: 4),
             LinearProgressIndicator(
               value: f.progress,
@@ -905,6 +894,119 @@ class _TransferCard extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// One file's name, size, and — once it has arrived — a way to open it.
+///
+/// The name is the tap target because the name is what people press. Before
+/// this, pressing it did nothing and the only route to a received photo was to
+/// leave the app and hunt for it in the gallery, which makes the transfer list
+/// a receipt rather than a place you can do anything from.
+///
+/// What a tap does depends on what arrived. An image opens in the app, where
+/// the point is to glance at it and go back. Anything else goes to the share
+/// sheet, which is the only "open this in something" a phone offers an app
+/// that does not own the file type — and is the same sheet the file came
+/// through when it landed, so it is already familiar.
+class _TransferFileRow extends StatelessWidget {
+  const _TransferFileRow({required this.file});
+
+  final TransferFileProgress file;
+
+  bool get _isImage => isPreviewableImage(file.fileName);
+
+  Future<void> _open(BuildContext context) async {
+    final path = file.savedPath;
+    if (path == null) return;
+
+    final handle = File(path);
+    // The keep lives in a cache directory, so it can be emptied by the OS
+    // between the row being drawn and the row being tapped. Checked here rather
+    // than trusted, and said plainly when it is gone.
+    //
+    // Async on purpose, against the lint: this runs on a tap, and the file may
+    // sit on storage that is slow to stat. A frame dropped on the way into a
+    // preview is exactly the jank the synchronous version would cause.
+    // ignore: avoid_slow_async_io
+    if (!await handle.exists()) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This file is no longer stored on your phone.'),
+        ),
+      );
+      return;
+    }
+
+    if (!context.mounted) return;
+    if (_isImage) {
+      await ImagePreviewPage.show(
+        context,
+        file: handle,
+        fileName: file.fileName,
+      );
+      return;
+    }
+    await SharePlus.instance.share(
+      ShareParams(files: <XFile>[XFile(path)]),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final path = file.savedPath;
+    final size = Text(
+      '${formatBytes(file.transferredBytes)} / ${formatBytes(file.totalBytes)}',
+      style: Theme.of(context).textTheme.bodySmall,
+    );
+
+    final name = FileNameText(
+      file.fileName,
+      style: TextStyle(
+        fontWeight: FontWeight.w500,
+        color: path == null ? null : scheme.primary,
+      ),
+    );
+
+    if (path == null) {
+      return Row(
+        children: <Widget>[
+          Expanded(child: name),
+          const SizedBox(width: 8),
+          size,
+        ],
+      );
+    }
+
+    return Semantics(
+      button: true,
+      label: '${_isImage ? 'Open' : 'Share'} ${file.fileName}',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => unawaited(_open(context)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: <Widget>[
+              Expanded(child: name),
+              const SizedBox(width: 6),
+              // Says which of the two things a tap will do before it happens.
+              Icon(
+                _isImage
+                    ? Icons.zoom_out_map_rounded
+                    : Icons.ios_share_rounded,
+                size: 16,
+                color: scheme.primary,
+              ),
+              const SizedBox(width: 8),
+              size,
+            ],
+          ),
+        ),
       ),
     );
   }

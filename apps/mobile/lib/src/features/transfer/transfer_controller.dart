@@ -426,10 +426,20 @@ class MobileTransferController extends StateNotifier<TransferState> {
         record.files.indexWhere((f) => f.fileId == complete.fileId);
     if (fileIndex == -1) return;
 
+    final store = _store;
     final updatedFiles = List<TransferFileProgress>.from(record.files);
     updatedFiles[fileIndex] = updatedFiles[fileIndex].copyWith(
       transferredBytes: updatedFiles[fileIndex].totalBytes,
       isComplete: true,
+      // Where the store put it, so the row can open it later. Null when the
+      // file could not be kept, which the list renders as a row with nothing
+      // to tap rather than one that fails when tapped.
+      savedPath: store is MobileTransferStore
+          ? store.keptPath(
+              transferId: complete.transferId,
+              fileId: complete.fileId,
+            )
+          : null,
     );
 
     final allComplete = updatedFiles.every((f) => f.isComplete);
@@ -1028,11 +1038,13 @@ final transferFilePickerProvider = Provider<TransferFilePicker>(
 /// of those things: the OS may empty it at will, which is safe precisely
 /// because nothing here is meant to outlive the transfer that created it.
 ///
-/// [MobileTransferStore] deletes each file as soon as it has been handed to the
-/// photo library or the share sheet, so in practice this directory is empty
-/// between transfers. Using the cache is the belt to that braces: if the app is
-/// killed mid-transfer, the half-written partial is the OS's to reclaim rather
-/// than something the user has to find and delete.
+/// [MobileTransferStore] hands each file to the photo library or the share
+/// sheet the moment it is whole, and keeps only the most recent few afterwards
+/// so the transfer list can reopen them. Using the cache is what makes that
+/// keep safe to have: the OS may reclaim the whole directory whenever it likes,
+/// and everything in it has already been delivered somewhere that will not
+/// vanish. A half-written partial left by an app that was killed mid-transfer
+/// is likewise the OS's to collect rather than something the user has to find.
 final mobileTransferStoreProvider =
     FutureProvider<IncomingTransferStore>((ref) async {
   final base = await getApplicationCacheDirectory();

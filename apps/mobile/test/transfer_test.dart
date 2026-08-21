@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -7,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:remotelink_mobile/src/app/providers.dart';
 import 'package:remotelink_mobile/src/features/transfer/file_exporter.dart';
+import 'package:remotelink_mobile/src/features/transfer/image_preview.dart';
 import 'package:remotelink_mobile/src/features/transfer/mobile_transfer_store.dart';
 import 'package:remotelink_mobile/src/features/transfer/transfer_controller.dart';
 import 'package:remotelink_mobile/src/features/transfer/transfer_model.dart';
@@ -155,15 +157,121 @@ void main() {
 
       await incoming.commit();
 
-      // The file is handed to the phone and then removed. This app has no
-      // folder of its own, so the assembled bytes existing at all is a
-      // transient state that ends inside commit().
+      // The file is handed to the phone, and the staging root is left clean:
+      // the assembled bytes sitting beside the partials is a transient state
+      // that ends inside commit().
       expect(exporter.exported, hasLength(1));
       expect(exporter.exported.single.bytes, <int>[1, 2, 3, 4, 5, 6, 7, 8]);
       expect(
         File('${tempDir.path}/test.bin').existsSync(),
         isFalse,
-        reason: 'nothing is left behind in the app',
+        reason: 'the staging root is not where a delivered file lives',
+      );
+    });
+
+    test('a delivered file stays openable from the transfer list', () async {
+      // The transfer list names files that have arrived, and tapping one of
+      // those names should open it. That needs the file to still be somewhere,
+      // and this is the record of where.
+      final offer = FileOffer(
+        transferId: 't-keep',
+        files: <OfferedFile>[
+          OfferedFile(
+            fileId: 'f-1',
+            fileName: 'holiday.jpg',
+            size: 4,
+            fileType: 'image/jpeg',
+          ),
+        ],
+      );
+
+      final incoming =
+          (await store.prepare(offer, namespace: 'session-keep'))['f-1']!;
+      await incoming.write(0, Uint8List.fromList(<int>[7, 7, 7, 7]));
+      await incoming.commit();
+
+      final kept = store.keptPath(transferId: 't-keep', fileId: 'f-1');
+      expect(kept, isNotNull);
+      expect(File(kept!).readAsBytesSync(), <int>[7, 7, 7, 7]);
+      expect(
+        kept,
+        contains(kReceivedDirectoryName),
+        reason: 'kept files are gathered in one place the cache can drop',
+      );
+    });
+
+    test('a refused export keeps nothing to open', () async {
+      // The mirror of the test above, and the more important half. A file the
+      // user declined to receive is not one to hold on to on their behalf.
+      final failing = _RecordingExporter(
+        throws: const ExportError(ExportFailure.permissionDenied),
+      );
+      final failingStore = MobileTransferStore(tempDir, exporter: failing);
+      final offer = FileOffer(
+        transferId: 't-refused',
+        files: <OfferedFile>[
+          OfferedFile(
+            fileId: 'f-1',
+            fileName: 'refused.jpg',
+            size: 2,
+            fileType: 'image/jpeg',
+          ),
+        ],
+      );
+
+      final incoming = (await failingStore.prepare(offer,
+          namespace: 'session-refused'))['f-1']!;
+      await incoming.write(0, Uint8List.fromList(<int>[1, 2]));
+      await expectLater(incoming.commit(), throwsA(isA<ExportError>()));
+
+      expect(
+        failingStore.keptPath(transferId: 't-refused', fileId: 'f-1'),
+        isNull,
+      );
+      final keep = Directory('${tempDir.path}/$kReceivedDirectoryName');
+      expect(
+        !keep.existsSync() || keep.listSync().isEmpty,
+        isTrue,
+        reason: 'a refused file leaves the app exactly as it found it',
+      );
+    });
+
+    test('the keep drops the oldest file once it is full', () async {
+      // Otherwise this is a photo library the user cannot see, did not ask for,
+      // and has no way to empty.
+      for (var index = 0; index < kKeptFileCount + 3; index++) {
+        final offer = FileOffer(
+          transferId: 't-full-$index',
+          files: <OfferedFile>[
+            OfferedFile(
+              fileId: 'f-1',
+              fileName: 'shot_$index.jpg',
+              size: 1,
+              fileType: 'image/jpeg',
+            ),
+          ],
+        );
+        final incoming =
+            (await store.prepare(offer, namespace: 'session-full-$index'))[
+                'f-1']!;
+        await incoming.write(0, Uint8List.fromList(<int>[index]));
+        await incoming.commit();
+      }
+
+      final keep = Directory('${tempDir.path}/$kReceivedDirectoryName');
+      expect(keep.listSync().whereType<File>(), hasLength(kKeptFileCount));
+      expect(
+        store.keptPath(transferId: 't-full-0', fileId: 'f-1'),
+        isNull,
+        reason: 'the first file in is the first one out',
+      );
+      expect(
+        store.keptPath(
+          transferId: 't-full-${kKeptFileCount + 2}',
+          fileId: 'f-1',
+        ),
+        isNotNull,
+        reason: 'the newest arrival is the last thing to be dropped',
       );
     });
 
@@ -193,6 +301,12 @@ void main() {
 
       await expectLater(incoming.commit(), throwsA(isA<ExportError>()));
       expect(File('${tempDir.path}/declined.bin').existsSync(), isFalse);
+      expect(
+        File('${tempDir.path}/$kReceivedDirectoryName/declined.bin')
+            .existsSync(),
+        isFalse,
+        reason: 'the keep is for files that were delivered, not attempted',
+      );
     });
 
     test('a photo goes to the library and a document to the share sheet',
@@ -608,6 +722,172 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('a received file is something the list can open', (tester) async {
+      // The complaint this answers: tapping the name of a photo that had just
+      // arrived did nothing, and the only way to see it was to leave the app
+      // and find it in the gallery.
+      //
+      // Asserted on the row rather than on the preview it pushes. Opening it
+      // for real would put an `Image.file` on screen, and a file-backed image
+      // never finishes decoding under a test's fake clock — the suite hangs
+      // until it times out. The tap itself is covered by the stale-path test
+      // below, which follows the same handler all the way to its message.
+      // Synchronous, and it has to be: a widget test runs on a fake clock, and
+      // awaiting real filesystem I/O outside `runAsync` is a future that never
+      // completes.
+      final directory =
+          Directory.systemTemp.createTempSync('received_open_test_');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final photo = File('${directory.path}/holiday.png')
+        ..writeAsBytesSync(base64Decode(_kOnePixelPng));
+
+      final received = TransferRecord(
+        transferId: 'in-open',
+        peerId: const DeviceId('desktop-1'),
+        peerName: 'Work Mac',
+        direction: TransferDirection.incoming,
+        status: TransferStatus.completed,
+        files: <TransferFileProgress>[
+          TransferFileProgress(
+            fileId: 'f-1',
+            fileName: 'holiday.png',
+            totalBytes: 4,
+            transferredBytes: 4,
+            isComplete: true,
+            savedPath: photo.path,
+          ),
+          // Sent, not received, so there is nothing of it on this phone.
+          const TransferFileProgress(
+            fileId: 'f-2',
+            fileName: 'notes.txt',
+            totalBytes: 4,
+            transferredBytes: 4,
+            isComplete: true,
+          ),
+        ],
+        totalBytes: 8,
+        transferredBytes: 8,
+        createdAt: DateTime.now(),
+        completedAt: DateTime.now(),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            identityProvider.overrideWith(
+              (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+            ),
+            transferTargetProvider.overrideWithValue(
+              (id: const DeviceId('desktop-1'), name: 'Work Mac'),
+            ),
+            clientStateProvider.overrideWith(
+              (ref) => Stream<ClientState>.value(ClientState.connected),
+            ),
+            transferControllerProvider.overrideWith((ref) {
+              final controller = MobileTransferController(
+                ref,
+                customTransferStore: MobileTransferStore(Directory.systemTemp),
+              );
+              controller.state =
+                  TransferState(transfers: <TransferRecord>[received]);
+              return controller;
+            }),
+          ],
+          child: const MaterialApp(home: Scaffold(body: TransferScreen())),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        find.ancestor(
+          of: find.text('holiday.png'),
+          matching: find.byType(InkWell),
+        ),
+        findsOneWidget,
+        reason: 'a file that is still here is a file you can press',
+      );
+      expect(
+        find.ancestor(
+          of: find.text('notes.txt'),
+          matching: find.byType(InkWell),
+        ),
+        findsNothing,
+        reason: 'and one that never landed here is not',
+      );
+      // Which of the two things a tap does, said before it happens.
+      expect(find.byIcon(Icons.zoom_out_map_rounded), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a file the phone no longer holds says so rather than nothing',
+        (tester) async {
+      // The cache this keeps files in is the OS's to empty, so the path on a
+      // row can go stale between being drawn and being tapped.
+      final received = TransferRecord(
+        transferId: 'in-gone',
+        peerId: const DeviceId('desktop-1'),
+        peerName: 'Work Mac',
+        direction: TransferDirection.incoming,
+        status: TransferStatus.completed,
+        files: const <TransferFileProgress>[
+          TransferFileProgress(
+            fileId: 'f-1',
+            fileName: 'evicted.png',
+            totalBytes: 4,
+            transferredBytes: 4,
+            isComplete: true,
+            savedPath: '/does/not/exist/evicted.png',
+          ),
+        ],
+        totalBytes: 4,
+        transferredBytes: 4,
+        createdAt: DateTime.now(),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            identityProvider.overrideWith(
+              (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+            ),
+            transferTargetProvider.overrideWithValue(
+              (id: const DeviceId('desktop-1'), name: 'Work Mac'),
+            ),
+            clientStateProvider.overrideWith(
+              (ref) => Stream<ClientState>.value(ClientState.connected),
+            ),
+            transferControllerProvider.overrideWith((ref) {
+              final controller = MobileTransferController(
+                ref,
+                customTransferStore: MobileTransferStore(Directory.systemTemp),
+              );
+              controller.state =
+                  TransferState(transfers: <TransferRecord>[received]);
+              return controller;
+            }),
+          ],
+          child: const MaterialApp(home: Scaffold(body: TransferScreen())),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.text('evicted.png'));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ImagePreviewPage), findsNothing);
+      expect(
+        find.text('This file is no longer stored on your phone.'),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('shows incoming transfer prompt and handles Accept and Decline',
         (tester) async {
       final incomingOffer = FileOffer(
@@ -706,3 +986,8 @@ final class _RecordingExporter implements IncomingFileExporter {
     if (throws case final error?) throw error;
   }
 }
+
+/// A one-pixel PNG, so the preview has something real to decode.
+const String _kOnePixelPng =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGMAAQAABQABDQott'
+    'AAAAABJRU5ErkJggg==';

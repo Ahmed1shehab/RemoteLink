@@ -14,15 +14,41 @@ import 'file_exporter.dart';
 
 typedef DiskSpaceProbe = Future<int> Function(String canonicalPath);
 
+/// Directory under the staging root holding files that have been delivered.
+const String kReceivedDirectoryName = 'received';
+
+/// How many delivered files stay openable from the transfer list.
+///
+/// A row in that list is a claim that a file arrived, and a row that cannot be
+/// opened makes the user go hunting through the gallery for it. Keeping the
+/// last couple of dozen is what makes tapping one work. Keeping all of them
+/// would turn a cache directory into a second photo library — one the user
+/// cannot see, did not ask for, and has no way to empty.
+const int kKeptFileCount = 24;
+
+/// And how much room they may take, whichever limit is reached first.
+///
+/// A phone cache is not the place for half a gigabyte of video: the OS may
+/// reclaim it at any moment anyway, so hoarding buys nothing.
+const int kKeptFileBytes = 256 * 1024 * 1024;
+
+final Log _log = Log.scoped('mobile.transfer.store');
+
 /// Mobile filesystem adapter for the transport-agnostic transfer engine.
 ///
-/// [destination] is a staging area, not a home. This app keeps nothing: bytes
-/// have to land somewhere before a hash can be verified over them, so they land
-/// in a cache directory, and the moment a file is whole it is handed to
-/// [exporter] — the photo library for media, the share sheet for everything
-/// else — and the staged copy is deleted. That happens whether the export
-/// succeeded or not, so a refused permission or a dismissed share sheet cannot
-/// leave a file accumulating inside the app where the user cannot reach it.
+/// [destination] is a staging area, not a home. Bytes have to land somewhere
+/// before a hash can be verified over them, so they land in a cache directory,
+/// and the moment a file is whole it is handed to [exporter] — the photo
+/// library for media, the share sheet for everything else. That is the delivery
+/// and it happens exactly once.
+///
+/// What survives it is a bounded keep: the last [kKeptFileCount] delivered
+/// files, up to [kKeptFileBytes], stay in `received/` so the transfer list can
+/// open them. Only delivered files are kept — a refused permission or a
+/// dismissed share sheet still leaves nothing behind, because a file the user
+/// declined to receive is not one to hold on to on their behalf. The cache is
+/// the OS's to reclaim, so the keep is a convenience allowed to vanish, which
+/// is why every path handed out is re-checked before it is opened.
 final class MobileTransferStore implements IncomingTransferStore {
   MobileTransferStore(
     this.destination, {
@@ -39,6 +65,31 @@ final class MobileTransferStore implements IncomingTransferStore {
   final DiskSpaceProbe _diskSpaceProbe;
   final Map<String, int> _reservations = <String, int>{};
   Future<void> _prepareChain = Future<void>.value();
+
+  /// Where each delivered file was kept, keyed by transfer and file.
+  ///
+  /// Bounded, and in insertion order: this exists so a row the user can still
+  /// see can still be opened, and a transfer list that has scrolled far enough
+  /// to lose a row has no use for its path either.
+  final Map<String, String> _keptPaths = <String, String>{};
+
+  /// Where [transferId]/[fileId] was kept, or null if it was not kept or has
+  /// since been pruned.
+  ///
+  /// The path is not proof the file is still there — the OS may empty this
+  /// cache whenever it likes — so callers open it defensively.
+  String? keptPath({required String transferId, required String fileId}) =>
+      _keptPaths['$transferId\u0000$fileId'];
+
+  void _rememberKept(String transferId, String fileId, String path) {
+    _keptPaths['$transferId\u0000$fileId'] = path;
+    while (_keptPaths.length > kKeptFileCount * 4) {
+      _keptPaths.remove(_keptPaths.keys.first);
+    }
+  }
+
+  void _forgetKept(String path) =>
+      _keptPaths.removeWhere((_, kept) => kept == path);
 
   @override
   Future<Map<String, IncomingFile>> prepare(
@@ -116,8 +167,13 @@ final class MobileTransferStore implements IncomingTransferStore {
     await manifest.persist();
     return <String, IncomingFile>{
       for (final entry in manifest.entries.entries)
-        entry.key:
-            _MobileDiskIncomingFile(manifest, entry.value, root, exporter),
+        entry.key: _MobileDiskIncomingFile(
+          manifest,
+          entry.value,
+          root,
+          exporter,
+          this,
+        ),
     };
   }
 
@@ -209,12 +265,14 @@ final class _MobileDiskIncomingFile implements IncomingFile {
     this._entry,
     this._canonicalRoot,
     this._exporter,
+    this._store,
   );
 
   final _MobileDiskManifest _manifest;
   final _MobileDiskEntry _entry;
   final String _canonicalRoot;
   final IncomingFileExporter _exporter;
+  final MobileTransferStore _store;
 
   @override
   OfferedFile get offer => _entry.offer;
@@ -250,13 +308,15 @@ final class _MobileDiskIncomingFile implements IncomingFile {
   @override
   Stream<List<int>> read() => _entry.partial.openRead(0, offer.size);
 
-  /// Verifies the assembled file, hands it to the phone, and keeps nothing.
+  /// Verifies the assembled file, hands it to the phone, and keeps a copy the
+  /// transfer list can reopen.
   ///
-  /// The staged copy is deleted in a `finally`, so every path leaves the cache
-  /// empty: an export that worked, a permission the user refused, a share sheet
-  /// they dismissed, a photo library that rejected the format. This app is not
-  /// a place files live, and the only way to be sure of that is to delete
-  /// unconditionally rather than on the happy path.
+  /// The staged copy leaves this method one way or the other: moved into the
+  /// bounded keep once it has been delivered, deleted in the `finally`
+  /// otherwise. Nothing accumulates on the failure paths — a permission the
+  /// user refused, a share sheet they dismissed, a photo library that rejected
+  /// the format — because a file the user did not accept is not one to hold on
+  /// to for them.
   ///
   /// An export that fails rethrows, so the transfer is reported as failed. That
   /// is the honest outcome: the file is gone, and a row claiming "completed"
@@ -276,10 +336,57 @@ final class _MobileDiskIncomingFile implements IncomingFile {
         staged,
         mimeType: offer.fileType,
       );
+      await _keep(staged);
     } finally {
       if (staged.existsSync()) await staged.delete();
       _manifest.entries.remove(offer.fileId);
       await _manifest.persist();
+    }
+  }
+
+  /// Moves a delivered file into the keep and records where it went.
+  ///
+  /// Every failure here is swallowed on purpose. The file has already reached
+  /// the photo library or the share sheet, which is what the user asked for;
+  /// failing the whole transfer because a spare copy could not be filed would
+  /// report a loss that did not happen.
+  Future<void> _keep(File staged) async {
+    try {
+      final directory = Directory(
+        _join(_canonicalRoot, kReceivedDirectoryName),
+      );
+      await _ensureDirectoryInside(directory, _canonicalRoot);
+      final kept = await _reserveCollisionFreeFile(directory, offer.fileName);
+      await staged.rename(kept.path);
+      await _verifyRegularFileInside(kept, _canonicalRoot);
+      _store._rememberKept(_manifest.transferId, offer.fileId, kept.path);
+      await _prune(directory);
+    } on Object catch (error) {
+      _log.debug(() => 'could not keep a received file: $error');
+    }
+  }
+
+  /// Drops the oldest kept files until the keep is inside both limits.
+  ///
+  /// Newest first, so the files most likely to be on screen are the last to
+  /// go. Counted by what is actually on disk rather than by what this process
+  /// remembers putting there — the OS may have emptied the cache underneath
+  /// us, and a previous run's files are equally the ones to prune.
+  Future<void> _prune(Directory directory) async {
+    final kept = <(File, FileStat)>[];
+    await for (final entity in directory.list(followLinks: false)) {
+      if (entity is! File) continue;
+      kept.add((entity, await entity.stat()));
+    }
+    kept.sort((left, right) => right.$2.modified.compareTo(left.$2.modified));
+
+    var bytes = 0;
+    for (var index = 0; index < kept.length; index++) {
+      final (file, stat) = kept[index];
+      bytes += stat.size;
+      if (index < kKeptFileCount && bytes <= kKeptFileBytes) continue;
+      _store._forgetKept(file.path);
+      await file.delete();
     }
   }
 

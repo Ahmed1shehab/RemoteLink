@@ -30,6 +30,7 @@ final class TransferFileProgress {
     required this.transferredBytes,
     this.isComplete = false,
     this.error,
+    this.savedPath,
   });
 
   final String fileId;
@@ -39,6 +40,15 @@ final class TransferFileProgress {
   final bool isComplete;
   final String? error;
 
+  /// Where a received file was kept, if it still is.
+  ///
+  /// Set only on incoming files, and only after delivery. Null covers three
+  /// different situations that the UI treats the same way: the file was sent
+  /// rather than received, it has not finished arriving, or the phone's cache
+  /// was emptied out from under it. In every one of them there is nothing to
+  /// open, which is the only question the transfer list asks of this.
+  final String? savedPath;
+
   double get progress =>
       totalBytes > 0 ? (transferredBytes / totalBytes).clamp(0.0, 1.0) : 0.0;
 
@@ -46,6 +56,7 @@ final class TransferFileProgress {
     int? transferredBytes,
     bool? isComplete,
     String? error,
+    String? savedPath,
     bool clearError = false,
   }) =>
       TransferFileProgress(
@@ -55,6 +66,7 @@ final class TransferFileProgress {
         transferredBytes: transferredBytes ?? this.transferredBytes,
         isComplete: isComplete ?? this.isComplete,
         error: clearError ? null : error ?? this.error,
+        savedPath: savedPath ?? this.savedPath,
       );
 }
 
