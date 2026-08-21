@@ -59,6 +59,27 @@ say "Generating platform runners"
 # The server entitlement is the one people forget: `network.client` alone lets
 # the app make outbound connections but not accept them, so the desktop starts
 # cleanly and then silently never sees a phone.
+# The client's macOS build needs a newer floor than `flutter create` writes.
+#
+# `gal` — which files a received photo into the library — declares macOS 11 as
+# its minimum, and the template still generates 10.15. The mismatch is not a
+# warning: Swift Package Manager refuses to resolve the plugin at all, and the
+# build stops before it compiles a line of this app. Applied here rather than
+# left to whoever next runs `flutter create`, because that is exactly what
+# reintroduces it.
+say "macOS deployment target for the client"
+for target in \
+  "apps/mobile/macos/Runner.xcodeproj/project.pbxproj|MACOSX_DEPLOYMENT_TARGET = 10.15;|MACOSX_DEPLOYMENT_TARGET = 11.0;" \
+  "apps/mobile/macos/Podfile|platform :osx, '10.15'|platform :osx, '11.0'"; do
+  file="${target%%|*}"
+  rest="${target#*|}"
+  [ -f "$file" ] || continue
+  # BSD sed wants an argument to -i; GNU sed refuses one. Try both.
+  sed -i '' "s/${rest%%|*}/${rest#*|}/g" "$file" 2>/dev/null \
+    || sed -i "s/${rest%%|*}/${rest#*|}/g" "$file"
+  echo "  patched $file"
+done
+
 if [ "$APPLE_PLATFORMS" = "1" ]; then
   say "macOS entitlements"
   for app in desktop mobile; do
