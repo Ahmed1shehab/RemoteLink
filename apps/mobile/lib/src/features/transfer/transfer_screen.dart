@@ -9,7 +9,9 @@ import '../../app/modern_ui.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import 'file_name_text.dart';
 import 'file_picker.dart';
+import 'image_preview.dart';
 import 'transfer_controller.dart';
 import 'transfer_model.dart';
 
@@ -514,29 +516,17 @@ class _PickedFilesField extends StatelessWidget {
               ),
               child: Row(
                 children: <Widget>[
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: scheme.surface,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      isMediaMode
-                          ? Icons.image_outlined
-                          : Icons.description_outlined,
-                      size: 20,
-                      color: scheme.primary,
-                    ),
-                  ),
+                  // Tapping opens the picture full size. Four screenshots from
+                  // the same afternoon are indistinguishable at 40 pixels, and
+                  // sending the wrong one to a computer is not undoable.
+                  _PickedThumbnail(file: file, isMediaMode: isMediaMode),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        Text(
+                        FileNameText(
                           file.displayName,
-                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 2),
@@ -567,6 +557,57 @@ class _PickedFilesField extends StatelessWidget {
     } on FileSystemException {
       return 0;
     }
+  }
+}
+
+/// The 40-pixel square beside a picked file: the picture itself when it is one,
+/// and a tap target that opens it full size.
+class _PickedThumbnail extends StatelessWidget {
+  const _PickedThumbnail({required this.file, required this.isMediaMode});
+
+  final PickedFile file;
+  final bool isMediaMode;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final previewable = isPreviewableImage(file.displayName);
+
+    final square = Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ImageThumbnail(
+        file: file.file,
+        fileName: file.displayName,
+        fallback: Icon(
+          isMediaMode ? Icons.image_outlined : Icons.description_outlined,
+          size: 20,
+          color: scheme.primary,
+        ),
+      ),
+    );
+
+    if (!previewable) return square;
+
+    return Semantics(
+      button: true,
+      label: 'Preview ${file.displayName}',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => unawaited(
+          ImagePreviewPage.show(
+            context,
+            file: file.file,
+            fileName: file.displayName,
+          ),
+        ),
+        child: square,
+      ),
+    );
   }
 }
 
@@ -670,11 +711,12 @@ class _IncomingTransferDialog extends StatelessWidget {
                       const Icon(Icons.insert_drive_file, size: 16),
                       const SizedBox(width: 6),
                       Expanded(
-                        child: Text(
+                        child: FileNameText(
                           f.fileName,
                           style: const TextStyle(fontWeight: FontWeight.w500),
                         ),
                       ),
+                      const SizedBox(width: 8),
                       Text(formatBytes(f.size)),
                     ],
                   ),
@@ -801,11 +843,12 @@ class _TransferCard extends StatelessWidget {
             Row(
               children: <Widget>[
                 Expanded(
-                  child: Text(
+                  child: FileNameText(
                     f.fileName,
                     style: const TextStyle(fontWeight: FontWeight.w500),
                   ),
                 ),
+                const SizedBox(width: 8),
                 Text(
                   '${formatBytes(f.transferredBytes)} / ${formatBytes(f.totalBytes)}',
                   style: Theme.of(context).textTheme.bodySmall,
