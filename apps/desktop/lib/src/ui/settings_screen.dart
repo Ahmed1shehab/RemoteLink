@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/brand.dart';
 import '../app/providers.dart';
+import '../domain/file_launcher.dart';
 import 'diagnostics_screen.dart';
 
 /// Everything about the app itself, as opposed to the devices it talks to.
@@ -165,6 +166,14 @@ class _SavingSection extends ConsumerWidget {
               _ => 'Checking…',
             },
           ),
+          // Tapping the row opens it. Showing someone a path and making them
+          // retype it into a file manager is the sort of thing that is only
+          // fine until you have done it twice.
+          onTap: switch (directory) {
+            AsyncData<Directory>(:final value) => () =>
+                unawaited(FileLauncher.openFolder(value.path)),
+            _ => null,
+          },
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[

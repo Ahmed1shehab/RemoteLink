@@ -30,6 +30,7 @@ final class TransferFileProgress {
     required this.transferredBytes,
     this.isComplete = false,
     this.error,
+    this.savedPath,
   });
 
   final String fileId;
@@ -39,6 +40,13 @@ final class TransferFileProgress {
   final bool isComplete;
   final String? error;
 
+  /// Where an incoming file ended up on this machine, once it finished.
+  ///
+  /// Null for outgoing files and for anything still arriving. It is not
+  /// derivable from [fileName]: a name that collides with an existing file is
+  /// saved under a different one.
+  final String? savedPath;
+
   double get progress =>
       totalBytes > 0 ? (transferredBytes / totalBytes).clamp(0.0, 1.0) : 0.0;
 
@@ -46,6 +54,7 @@ final class TransferFileProgress {
     int? transferredBytes,
     bool? isComplete,
     String? error,
+    String? savedPath,
   }) =>
       TransferFileProgress(
         fileId: fileId,
@@ -54,6 +63,7 @@ final class TransferFileProgress {
         transferredBytes: transferredBytes ?? this.transferredBytes,
         isComplete: isComplete ?? this.isComplete,
         error: error ?? this.error,
+        savedPath: savedPath ?? this.savedPath,
       );
 }
 

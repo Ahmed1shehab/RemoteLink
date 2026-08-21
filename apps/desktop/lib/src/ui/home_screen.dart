@@ -14,6 +14,7 @@ import '../app/motion.dart';
 import '../app/providers.dart';
 import '../app/theme.dart';
 import '../domain/desktop_service.dart';
+import '../domain/file_launcher.dart';
 import '../domain/transfer_model.dart';
 import 'clipboard_history_panel.dart';
 import 'diagnostics_screen.dart';
@@ -970,10 +971,13 @@ class _TransferTile extends StatelessWidget {
                     color: scheme.primary.withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(13),
                   ),
+                  // Down for arriving, up for leaving — the same pair the
+                  // phone uses. The diagonal arrows read as "back" and
+                  // "forward" at this size and pointed the eye off the card.
                   child: Icon(
                     isIncoming
-                        ? Icons.south_west_rounded
-                        : Icons.north_east_rounded,
+                        ? Icons.arrow_downward_rounded
+                        : Icons.arrow_upward_rounded,
                     size: 20,
                     color: scheme.primary,
                   ),
@@ -995,11 +999,30 @@ class _TransferTile extends StatelessWidget {
               Row(
                 children: <Widget>[
                   Expanded(
-                    child: Text(
-                      f.fileName,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
-                    ),
+                    child: switch (f.savedPath) {
+                      final String path => _SavedFileName(
+                          fileName: f.fileName,
+                          path: path,
+                        ),
+                      null => Text(
+                          f.fileName,
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                    },
                   ),
+                  if (f.savedPath case final String path) ...<Widget>[
+                    IconButton(
+                      onPressed: () =>
+                          unawaited(FileLauncher.revealFile(path)),
+                      icon: const Icon(Icons.folder_open_rounded, size: 18),
+                      tooltip: Platform.isMacOS
+                          ? 'Show in Finder'
+                          : 'Show in folder',
+                      visualDensity: VisualDensity.compact,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 4),
+                  ],
                   Text(
                     '${formatBytes(f.transferredBytes)} / ${formatBytes(f.totalBytes)}',
                     style: Theme.of(context).textTheme.bodySmall,
@@ -1066,6 +1089,47 @@ class _TransferTile extends StatelessWidget {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The name of a file that arrived, as a link to the file itself.
+///
+/// A received file the user cannot reach from here is a file they have to go
+/// hunting for — and the name shown is not always the name on disk, so hunting
+/// is exactly what it takes. Clicking opens it; the tooltip says where it is.
+class _SavedFileName extends StatelessWidget {
+  const _SavedFileName({required this.fileName, required this.path});
+
+  final String fileName;
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Tooltip(
+        message: path,
+        waitDuration: const Duration(milliseconds: 400),
+        child: InkWell(
+          onTap: () => unawaited(FileLauncher.openFile(path)),
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Text(
+              fileName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                color: scheme.primary,
+              ),
+            ),
+          ),
         ),
       ),
     );

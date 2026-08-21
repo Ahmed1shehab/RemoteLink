@@ -48,6 +48,43 @@ void main() {
     );
   });
 
+  test('remembers where a committed file actually landed', () async {
+    // The UI offers "open" and "show in folder" on a finished transfer, and
+    // the name on the wire is not the answer: a collision renames the file,
+    // and the transfer engine forgets it the moment it commits.
+    await destination.create(recursive: true);
+    await File('${destination.path}/report.bin').writeAsString('in the way');
+
+    final store = FileTransferStore(
+      destination,
+      diskSpaceProbe: (_) async => 1024,
+    );
+    final offer = _offer('landed', 4);
+    final file = (await store.prepare(offer, namespace: 'peer-1'))['file-1']!;
+
+    expect(
+      store.committedPath(transferId: offer.transferId, fileId: 'file-1'),
+      isNull,
+      reason: 'nothing has been committed yet',
+    );
+
+    await file.write(0, Uint8List.fromList(<int>[1, 2, 3, 4]));
+    await file.commit();
+
+    // Canonical, not as configured: the store resolves the destination once
+    // and every path it reports is under that, which is what a file manager
+    // needs to be handed.
+    final resolved = await destination.resolveSymbolicLinks();
+    expect(
+      store.committedPath(transferId: offer.transferId, fileId: 'file-1'),
+      '$resolved/report (2).bin',
+    );
+    expect(
+      store.committedPath(transferId: offer.transferId, fileId: 'file-2'),
+      isNull,
+    );
+  });
+
   test('does not follow a destination filename symlink and avoids overwrite',
       () async {
     await destination.create(recursive: true);
