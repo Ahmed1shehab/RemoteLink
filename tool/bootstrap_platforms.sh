@@ -17,6 +17,25 @@ cd "$(dirname "$0")/.."
 
 PLIST=/usr/libexec/PlistBuddy
 
+# Whether the Apple half of this script can run at all.
+#
+# `PlistBuddy` ships with macOS and exists nowhere else, and `set -e` turns a
+# missing one into an exit code 127 that stops the whole script. That is what
+# happened on the Windows CI runner: the Apple sections are the first thing
+# after `flutter create`, so the build failed before it reached the Windows
+# runner it was there to generate — with "No such file or directory" as the
+# only explanation.
+#
+# Skipped rather than made portable. There is no Windows equivalent worth
+# writing: an iOS usage description set on a machine that cannot build for iOS
+# is a file nobody reads, and the entitlements are consumed by a macOS build
+# that cannot happen there either.
+if [ "$(uname -s)" = "Darwin" ] && [ -x "$PLIST" ]; then
+  APPLE_PLATFORMS=1
+else
+  APPLE_PLATFORMS=0
+fi
+
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
 # Sets a plist key, adding it if absent and overwriting if present.
@@ -40,64 +59,82 @@ say "Generating platform runners"
 # The server entitlement is the one people forget: `network.client` alone lets
 # the app make outbound connections but not accept them, so the desktop starts
 # cleanly and then silently never sees a phone.
-say "macOS entitlements"
-for app in desktop mobile; do
-  for config in DebugProfile Release; do
-    file="apps/$app/macos/Runner/${config}.entitlements"
-    [ -f "$file" ] || continue
-    set_plist "$file" "com.apple.security.network.server" bool true
-    set_plist "$file" "com.apple.security.network.client" bool true
-    # Apple events, for reading the current track out of a music player or a
-    # browser tab. Under the hardened runtime this entitlement and the
-    # NSAppleEventsUsageDescription string below are both required — either one
-    # alone gets the event refused, which surfaces as `osascript` exiting
-    # non-zero and the desktop reporting "nothing playing" while a song is
-    # audibly playing.
-    set_plist "$file" "com.apple.security.automation.apple-events" bool true
-    echo "  patched $file"
+if [ "$APPLE_PLATFORMS" = "1" ]; then
+  say "macOS entitlements"
+  for app in desktop mobile; do
+    for config in DebugProfile Release; do
+      file="apps/$app/macos/Runner/${config}.entitlements"
+      [ -f "$file" ] || continue
+      set_plist "$file" "com.apple.security.network.server" bool true
+      set_plist "$file" "com.apple.security.network.client" bool true
+      # Apple events, for reading the current track out of a music player or a
+      # browser tab. Under the hardened runtime this entitlement and the
+      # NSAppleEventsUsageDescription string below are both required — either one
+      # alone gets the event refused, which surfaces as `osascript` exiting
+      # non-zero and the desktop reporting "nothing playing" while a song is
+      # audibly playing.
+      set_plist "$file" "com.apple.security.automation.apple-events" bool true
+      echo "  patched $file"
+    done
   done
-done
 
-# Note: no `keychain-access-groups` entitlement is added for the client's macOS
-# build, deliberately. Keychain access groups resolve `$(AppIdentifierPrefix)`
-# from a provisioning profile, so adding one forces development signing and
-# breaks `flutter run` with ad-hoc signing. The client instead uses the
-# platform keystore only on iOS and Android — where it ships, and where the
-# profile provides the prefix — and a permission-restricted file on desktop.
-# See `identityStoreProvider` in apps/mobile/lib/src/app/providers.dart.
+  # Note: no `keychain-access-groups` entitlement is added for the client's macOS
+  # build, deliberately. Keychain access groups resolve `$(AppIdentifierPrefix)`
+  # from a provisioning profile, so adding one forces development signing and
+  # breaks `flutter run` with ad-hoc signing. The client instead uses the
+  # platform keystore only on iOS and Android — where it ships, and where the
+  # profile provides the prefix — and a permission-restricted file on desktop.
+  # See `identityStoreProvider` in apps/mobile/lib/src/app/providers.dart.
 
-MAC_PLIST=apps/desktop/macos/Runner/Info.plist
-if [ -f "$MAC_PLIST" ]; then
-  set_plist "$MAC_PLIST" "NSLocalNetworkUsageDescription" string \
-    "RemoteLink lets your phone find and control this computer over your local network."
-  # The other half of the Apple-events pair. Without this key macOS refuses the
-  # event before the user is ever asked, so the Automation checkbox the fix
-  # depends on never appears in System Settings at all.
-  set_plist "$MAC_PLIST" "NSAppleEventsUsageDescription" string \
-    "RemoteLink asks your music player or browser what is playing, so your phone can show the track and control it."
-  # LSUIElement hides the Dock icon: this is a menu-bar service, and a bouncing
-  # Dock icon for something that runs all day is wrong.
-  set_plist "$MAC_PLIST" "LSUIElement" bool true
-  echo "  patched $MAC_PLIST"
-fi
+  MAC_PLIST=apps/desktop/macos/Runner/Info.plist
+  if [ -f "$MAC_PLIST" ]; then
+    set_plist "$MAC_PLIST" "NSLocalNetworkUsageDescription" string \
+      "RemoteLink lets your phone find and control this computer over your local network."
+    # The other half of the Apple-events pair. Without this key macOS refuses the
+    # event before the user is ever asked, so the Automation checkbox the fix
+    # depends on never appears in System Settings at all.
+    set_plist "$MAC_PLIST" "NSAppleEventsUsageDescription" string \
+      "RemoteLink asks your music player or browser what is playing, so your phone can show the track and control it."
+    # LSUIElement hides the Dock icon: this is a menu-bar service, and a bouncing
+    # Dock icon for something that runs all day is wrong.
+    set_plist "$MAC_PLIST" "LSUIElement" bool true
+    echo "  patched $MAC_PLIST"
+  fi
 
-# ── iOS ──────────────────────────────────────────────────────────────────────
-#
-# iOS 14+ blocks local-network traffic until the user accepts a prompt, and the
-# prompt only appears if this key exists. Without it, discovery returns nothing
-# and there is no error to diagnose.
-say "iOS local network permission"
-IOS_PLIST=apps/mobile/ios/Runner/Info.plist
-if [ -f "$IOS_PLIST" ]; then
-  set_plist "$IOS_PLIST" "NSLocalNetworkUsageDescription" string \
-    "RemoteLink uses your local network to find and control your computer."
-  "$PLIST" -c "Delete :NSBonjourServices" "$IOS_PLIST" 2>/dev/null || true
-  "$PLIST" -c "Add :NSBonjourServices array" "$IOS_PLIST"
-  "$PLIST" -c "Add :NSBonjourServices:0 string _remotelink._tcp" "$IOS_PLIST"
-  echo "  patched $IOS_PLIST"
+  # ── iOS ──────────────────────────────────────────────────────────────────────
+  #
+  # iOS 14+ blocks local-network traffic until the user accepts a prompt, and the
+  # prompt only appears if this key exists. Without it, discovery returns nothing
+  # and there is no error to diagnose.
+  say "iOS local network permission"
+  IOS_PLIST=apps/mobile/ios/Runner/Info.plist
+  if [ -f "$IOS_PLIST" ]; then
+    set_plist "$IOS_PLIST" "NSLocalNetworkUsageDescription" string \
+      "RemoteLink uses your local network to find and control your computer."
+    # Add-only photo access, for writing a received photo or video to the camera
+    # roll. iOS terminates an app that writes to the library without this string
+    # rather than denying the write, so a missing key is a crash on the first
+    # incoming photo.
+    set_plist "$IOS_PLIST" "NSPhotoLibraryAddUsageDescription" string \
+      "RemoteLink saves photos and videos your computer sends into your photo library."
+    set_plist "$IOS_PLIST" "NSPhotoLibraryUsageDescription" string \
+      "RemoteLink needs access to your photos so you can send them to your computer."
+    "$PLIST" -c "Delete :NSBonjourServices" "$IOS_PLIST" 2>/dev/null || true
+    "$PLIST" -c "Add :NSBonjourServices array" "$IOS_PLIST"
+    "$PLIST" -c "Add :NSBonjourServices:0 string _remotelink._tcp" "$IOS_PLIST"
+    echo "  patched $IOS_PLIST"
+  fi
+
+else
+  say "Skipping the macOS and iOS steps"
+  echo "  not macOS — PlistBuddy is unavailable, and nothing here could be"
+  echo "  built for an Apple platform on this machine anyway."
 fi
 
 # ── Android ──────────────────────────────────────────────────────────────────
+#
+# Runs everywhere, unlike the sections above: the manifest is plain XML and
+# python3 edits it on any host.
 #
 # CHANGE_WIFI_MULTICAST_STATE is the one that matters. Android drops multicast
 # packets before they reach the app unless a multicast lock is held, and the

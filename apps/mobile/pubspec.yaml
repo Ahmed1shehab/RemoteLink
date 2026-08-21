@@ -27,6 +27,11 @@ dependencies:
     sdk: flutter
   flutter_riverpod: ^2.5.1
   flutter_secure_storage: ^9.2.2
+  # Saving a received photo or video into the camera roll. There is no
+  # first-party plugin for this — `image_picker` reads the library and cannot
+  # write to it — and the alternative is a Swift and Kotlin shim, which this
+  # repository deliberately does not ship (ADR 0003). Used for nothing else.
+  gal: ^2.3.3
   # Separate from file_selector, and worth the second dependency: this is the
   # system photo picker (PHPickerViewController on iOS, the Android photo
   # picker on API 33+), which runs out-of-process and therefore needs no
@@ -44,6 +49,13 @@ dependencies:
   rl_native: ^0.1.0
   rl_protocol: ^0.1.0
   rl_transport: ^0.1.0
+  # The system share sheet, which is how a file that is not a photo leaves this
+  # app. "Save to Files" is one of its entries, so this covers "let the user
+  # choose where it goes" without the app needing a folder of its own.
+  # Pinned to 12.x: 13.0 moved to win32 ^6, and flutter_secure_storage 9.x —
+  # which holds this phone's long-term key — pins win32 ^5. The two cannot
+  # coexist, and the keystore is not worth migrating for a share sheet.
+  share_plus: ^12.0.0
 
 dev_dependencies:
   flutter_test:

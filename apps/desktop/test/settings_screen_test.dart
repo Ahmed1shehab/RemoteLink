@@ -134,11 +134,33 @@ void main() {
     );
   });
 
+  /// Scrolls the rename control into view, then taps it.
+  ///
+  /// It sits near the bottom of a scrolling list, so its offset is a function
+  /// of how many rows happen to be above it. At the 800x600 test surface it
+  /// lands within a few pixels of the fold, and a macOS runner put it just
+  /// past: `tap` then aims outside the render tree and the dialog never opens.
+  /// Tapping where it last was is the bug, not the pixel that moved.
+  ///
+  /// Dragged rather than `ensureVisible`d because the list builds lazily. A row
+  /// far enough down is not off-screen, it is absent, and no finder can scroll
+  /// to something that does not exist yet.
+  Future<void> tapRename(WidgetTester tester) async {
+    final rename = find.widgetWithText(TextButton, 'Rename');
+    await tester.dragUntilVisible(
+      rename,
+      find.byType(ListView),
+      const Offset(0, -100),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(rename);
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('renames this computer', (tester) async {
     final container = await pumpSettings(tester);
 
-    await tester.tap(find.widgetWithText(TextButton, 'Rename'));
-    await tester.pumpAndSettle();
+    await tapRename(tester);
 
     await tester.enterText(find.byType(TextField), '  Studio Mac  ');
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
@@ -151,8 +173,7 @@ void main() {
     final container = await pumpSettings(tester);
     final before = container.read(deviceNameProvider);
 
-    await tester.tap(find.widgetWithText(TextButton, 'Rename'));
-    await tester.pumpAndSettle();
+    await tapRename(tester);
     await tester.enterText(find.byType(TextField), '   ');
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();

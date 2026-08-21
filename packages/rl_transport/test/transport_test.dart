@@ -427,7 +427,12 @@ void main() {
           await acceptedFuture.timeout(const Duration(seconds: 10));
       await client.waitUntilConnected();
 
-      const frames = 5;
+      // More frames than the handful this started with, because the window
+      // being probed is only as wide as one flush is slow. Five concurrent
+      // sends left it narrow enough that the overlap this test exists to catch
+      // appeared on a loaded Windows runner and never on a developer's Mac —
+      // which reads as a flaky test rather than the ordering bug it was.
+      const frames = 24;
       final received = <int>[];
       final complete = Completer<void>();
       final subscription = client.messages.listen((message) {

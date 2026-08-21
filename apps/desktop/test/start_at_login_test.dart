@@ -36,6 +36,16 @@ void main() {
     File legacyPlist() =>
         File('${launchAgents.path}/com.example.remotelinkDesktop.plist');
 
+    // A login item is a plist on macOS and a registry value on Windows, and
+    // `AutoStart` branches on the host to match. These three seed a plist and
+    // watch it go, so they only mean anything on macOS — on Windows the sweep
+    // correctly takes the registry branch, leaves the seeded file alone, and
+    // the assertion fails for a reason that has nothing to do with the
+    // behaviour. The Windows half is deliberately not covered: it edits the
+    // real `HKCU\...\Run` key, and a test suite has no business writing there.
+    final onlyOnMacOS =
+        Platform.isMacOS ? null : 'login items are plists only on macOS';
+
     test('an entry under a previous label is removed when enabling', () async {
       legacyPlist().writeAsStringSync('<plist>stale</plist>');
 
@@ -47,7 +57,7 @@ void main() {
         isTrue,
         reason: 'the new label is registered in its place',
       );
-    });
+    }, skip: onlyOnMacOS);
 
     test('and when disabling, so opting out cleans up too', () async {
       // The path that would otherwise strand it forever: someone who turns the
@@ -58,12 +68,12 @@ void main() {
       await subject().disable();
 
       expect(legacyPlist().existsSync(), isFalse);
-    });
+    }, skip: onlyOnMacOS);
 
     test('a missing legacy entry is not an error', () async {
       await subject().enable();
       expect(legacyPlist().existsSync(), isFalse);
-    });
+    }, skip: onlyOnMacOS);
 
     test('the shipped label matches the bundle identifier', () {
       // Both are read by the OS and neither is derived from the other, so

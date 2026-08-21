@@ -300,8 +300,11 @@ final class Session {
       _enqueueLossy(message);
       return;
     }
-    await _writeNow(message, requireAck: requireAck);
-    if (awaitDrain) await _connection.flush();
+    await _writeNow(
+      message,
+      requireAck: requireAck,
+      flushAfterwards: awaitDrain,
+    );
   }
 
   /// Sends a reliable application message and waits for the peer's frame ack.
@@ -388,10 +391,29 @@ final class Session {
   /// exactly the wrong place to start debugging.
   Future<void> _writeChain = Future<void>.value();
 
-  Future<void> _writeNow(Message message, {required bool requireAck}) {
-    final queued = _writeChain.then(
-      (_) => _performWrite(message, requireAck: requireAck),
-    );
+  /// [flushAfterwards] drains inside the chain rather than after it.
+  ///
+  /// This is the whole of a bug that only ever showed up on a loaded machine.
+  /// The flush used to sit in `send`, after the write had been awaited — which
+  /// puts it *outside* the chain, so with several concurrent `awaitDrain` sends
+  /// one call could be in `flush` while the next reached `add` on the same
+  /// socket. `dart:io` forbids that: `add` during a pending flush throws
+  /// `Bad state: StreamSink is bound to a stream`, which is a confusing way to
+  /// be told two writers overlapped.
+  ///
+  /// It reproduced on the Windows CI runner and not on a developer's Mac,
+  /// because the window is only as wide as the flush is slow — which made it
+  /// look like a flaky test rather than the ordering bug the chain exists to
+  /// prevent. Serialising the flush closes it for good.
+  Future<void> _writeNow(
+    Message message, {
+    required bool requireAck,
+    bool flushAfterwards = false,
+  }) {
+    final queued = _writeChain.then((_) async {
+      await _performWrite(message, requireAck: requireAck);
+      if (flushAfterwards) await _connection.flush();
+    });
     // The chain must survive a failed write. Without swallowing the error here,
     // one broken send would leave every later send awaiting a rejected future.
     _writeChain = queued.then((_) {}, onError: (Object _) {});

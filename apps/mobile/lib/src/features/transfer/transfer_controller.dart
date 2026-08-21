@@ -1020,9 +1020,22 @@ final transferFilePickerProvider = Provider<TransferFilePicker>(
 );
 
 /// Provider for the download directory store on mobile.
+/// Where incoming files are assembled before they leave the app.
+///
+/// The cache directory, not Documents — and the difference is the whole point.
+/// Documents is backed up, survives forever, and on iOS is visible in the Files
+/// app, so a file left there is a file this app is storing. The cache is none
+/// of those things: the OS may empty it at will, which is safe precisely
+/// because nothing here is meant to outlive the transfer that created it.
+///
+/// [MobileTransferStore] deletes each file as soon as it has been handed to the
+/// photo library or the share sheet, so in practice this directory is empty
+/// between transfers. Using the cache is the belt to that braces: if the app is
+/// killed mid-transfer, the half-written partial is the OS's to reclaim rather
+/// than something the user has to find and delete.
 final mobileTransferStoreProvider =
     FutureProvider<IncomingTransferStore>((ref) async {
-  final base = await getApplicationDocumentsDirectory();
-  final destination = Directory('${base.path}/RemoteLink');
+  final base = await getApplicationCacheDirectory();
+  final destination = Directory('${base.path}/incoming');
   return MobileTransferStore(destination);
 });

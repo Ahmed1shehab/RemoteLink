@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:remotelink_mobile/src/app/providers.dart';
+import 'package:remotelink_mobile/src/features/transfer/file_exporter.dart';
 import 'package:remotelink_mobile/src/features/transfer/mobile_transfer_store.dart';
 import 'package:remotelink_mobile/src/features/transfer/transfer_controller.dart';
 import 'package:remotelink_mobile/src/features/transfer/transfer_model.dart';
@@ -86,10 +87,12 @@ void main() {
   group('MobileTransferStore', () {
     late Directory tempDir;
     late MobileTransferStore store;
+    late _RecordingExporter exporter;
 
     setUp(() async {
       tempDir = await Directory.systemTemp.createTemp('mobile_store_test_');
-      store = MobileTransferStore(tempDir);
+      exporter = _RecordingExporter();
+      store = MobileTransferStore(tempDir, exporter: exporter);
     });
 
     tearDown(() async {
@@ -151,9 +154,74 @@ void main() {
       await incoming.write(4, Uint8List.fromList(<int>[5, 6, 7, 8]));
 
       await incoming.commit();
-      final destination = File('${tempDir.path}/test.bin');
-      expect(destination.existsSync(), isTrue);
-      expect(await destination.readAsBytes(), <int>[1, 2, 3, 4, 5, 6, 7, 8]);
+
+      // The file is handed to the phone and then removed. This app has no
+      // folder of its own, so the assembled bytes existing at all is a
+      // transient state that ends inside commit().
+      expect(exporter.exported, hasLength(1));
+      expect(exporter.exported.single.bytes, <int>[1, 2, 3, 4, 5, 6, 7, 8]);
+      expect(
+        File('${tempDir.path}/test.bin').existsSync(),
+        isFalse,
+        reason: 'nothing is left behind in the app',
+      );
+    });
+
+    test('an export that fails still leaves nothing behind', () async {
+      // The path that matters most. A refused photo permission or a dismissed
+      // share sheet must not turn the staging directory into the storage this
+      // app is not supposed to have.
+      final failing = _RecordingExporter(
+        throws: const ExportError(ExportFailure.cancelled),
+      );
+      final failingStore = MobileTransferStore(tempDir, exporter: failing);
+      final offer = FileOffer(
+        transferId: 't-fail',
+        files: <OfferedFile>[
+          OfferedFile(
+            fileId: 'f-1',
+            fileName: 'declined.bin',
+            size: 4,
+            fileType: 'application/octet-stream',
+          ),
+        ],
+      );
+
+      final incoming = (await failingStore.prepare(offer,
+          namespace: 'session-fail'))['f-1']!;
+      await incoming.write(0, Uint8List.fromList(<int>[9, 9, 9, 9]));
+
+      await expectLater(incoming.commit(), throwsA(isA<ExportError>()));
+      expect(File('${tempDir.path}/declined.bin').existsSync(), isFalse);
+    });
+
+    test('a photo goes to the library and a document to the share sheet',
+        () async {
+      // The whole of the routing rule, asserted on the one thing that decides
+      // it. The photo library cannot hold a PDF, and a photo filed into a
+      // folder is a photo missing from the camera roll.
+      for (final (name, mime) in const <(String, String)>[
+        ('holiday.jpg', 'image/jpeg'),
+        ('clip.mov', 'video/quicktime'),
+        ('report.pdf', 'application/pdf'),
+      ]) {
+        final offer = FileOffer(
+          transferId: 't-$name',
+          files: <OfferedFile>[
+            OfferedFile(fileId: 'f-1', fileName: name, size: 1, fileType: mime),
+          ],
+        );
+        final incoming =
+            (await store.prepare(offer, namespace: 'session-mime'))['f-1']!;
+        await incoming.write(0, Uint8List.fromList(<int>[1]));
+        await incoming.commit();
+      }
+
+      expect(
+        exporter.exported.map((e) => e.mimeType),
+        <String>['image/jpeg', 'video/quicktime', 'application/pdf'],
+        reason: 'the exporter is told the type, and decides from it',
+      );
     });
 
     test('a hostile fileType from a peer does not influence destination path',
@@ -175,9 +243,8 @@ void main() {
       await incoming.write(0, Uint8List.fromList(<int>[1, 2, 3, 4]));
       await incoming.commit();
 
-      final destination = File('${tempDir.path}/safe_document.pdf');
-      expect(destination.existsSync(), isTrue);
-      expect(await destination.readAsBytes(), <int>[1, 2, 3, 4]);
+      expect(exporter.exported.single.bytes, <int>[1, 2, 3, 4]);
+      expect(File('${tempDir.path}/safe_document.pdf').existsSync(), isFalse);
       expect(File('${tempDir.parent.path}/traversal.sh').existsSync(), isFalse);
     });
   });
@@ -617,4 +684,25 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+}
+
+/// Captures what was exported instead of opening a share sheet.
+///
+/// The real exporter puts a file in the photo library or in front of the user,
+/// neither of which a test can do — so this stands in, and reads the bytes
+/// before commit() deletes them, which is the only moment they exist.
+final class _RecordingExporter implements IncomingFileExporter {
+  _RecordingExporter({this.throws});
+
+  /// Typed rather than `Object?`, so the throw below is one the analyzer can
+  /// see is an exception.
+  final ExportError? throws;
+  final List<({String mimeType, List<int> bytes})> exported =
+      <({String mimeType, List<int> bytes})>[];
+
+  @override
+  Future<void> export(File file, {required String mimeType}) async {
+    exported.add((mimeType: mimeType, bytes: await file.readAsBytes()));
+    if (throws case final error?) throw error;
+  }
 }
