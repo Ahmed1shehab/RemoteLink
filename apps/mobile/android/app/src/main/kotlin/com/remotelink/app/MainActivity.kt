@@ -1,29 +1,39 @@
 package com.remotelink.app
 
+import android.Manifest
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodChannel
 
 /**
- * Hosts the Flutter engine, and tells it when this phone's clipboard changes.
+ * Hosts the Flutter engine, and gives Dart the two things it cannot reach.
  *
- * The change notification is the whole point, and it is why this is here rather
- * than in Dart. Flutter exposes reading the clipboard and nothing else, so
- * noticing a copy from Dart alone would mean reading on a timer — and since
- * Android 12 every read of another app's clip shows the user a toast naming
- * this app. `OnPrimaryClipChangedListener` reports the change for free and
- * hands over no content at all, so the single read happens once per copy, when
- * there is something new to send.
+ * **Clipboard change notifications.** Flutter exposes reading the clipboard and
+ * nothing else, so noticing a copy from Dart alone would mean reading on a
+ * timer — and since Android 12 every read of another app's clip shows the user
+ * a toast naming this app. `OnPrimaryClipChangedListener` reports the change for
+ * free and hands over no content, so the single read happens once per copy, when
+ * there is something new to send. The listener is registered when Dart
+ * subscribes and removed when it unsubscribes, which is how the app avoids
+ * watching from the background — where Android would refuse the follow-up read
+ * anyway, because since Android 10 clipboard access requires focus.
  *
- * The listener is registered when Dart subscribes and removed when it
- * unsubscribes, which is how the app avoids watching from the background —
- * where Android would refuse the follow-up read anyway, because since Android
- * 10 clipboard access requires focus.
+ * **The foreground service.** [LinkService] keeps the process unfrozen and
+ * networked while the app is off screen. Dart drives it from the connection
+ * state, because the connection is the only thing that justifies it running.
  */
 class MainActivity : FlutterActivity() {
     private var clipboardListener: ClipboardManager.OnPrimaryClipChangedListener? = null
+    private var linkChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -35,7 +45,7 @@ class MainActivity : FlutterActivity() {
                         if (events == null) return
                         val manager = clipboardManager() ?: return
 
-                        stopWatching()
+                        stopWatchingClipboard()
                         // Null payload on purpose: this says "something changed",
                         // not what it changed to. Handing the content over here
                         // would be a read, which is the thing being avoided.
@@ -46,19 +56,101 @@ class MainActivity : FlutterActivity() {
                         clipboardListener = listener
                     }
 
-                    override fun onCancel(arguments: Any?) = stopWatching()
+                    override fun onCancel(arguments: Any?) = stopWatchingClipboard()
                 },
             )
+
+        val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, LINK_CHANNEL)
+        linkChannel = channel
+        channel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    requestNotificationPermission()
+                    LinkService.start(
+                        this,
+                        title = call.argument<String>("title").orEmpty(),
+                        body = call.argument<String>("body").orEmpty(),
+                        disconnectLabel = call.argument<String>("disconnectLabel").orEmpty(),
+                    )
+                    result.success(null)
+                }
+                "stop" -> {
+                    LinkService.stop(this)
+                    result.success(null)
+                }
+                "openBatterySettings" -> result.success(openBatterySettings())
+                else -> result.notImplemented()
+            }
+        }
+
+        // Only the Dart isolate can honour a disconnect, so the notification
+        // asks it rather than tearing anything down itself.
+        LinkService.onDisconnectRequested = {
+            runOnUiThread { linkChannel?.invokeMethod("disconnectRequested", null) }
+        }
     }
 
     override fun onDestroy() {
-        // The listener holds an event sink that outlives this activity if it is
-        // left registered, and the sink holds the engine.
-        stopWatching()
+        // Both of these outlive this activity if left set: the clipboard
+        // listener holds an event sink, and the callback holds a channel, and
+        // each of those holds the engine this activity is about to destroy.
+        stopWatchingClipboard()
+        LinkService.onDisconnectRequested = null
+        linkChannel = null
+        // The engine goes with the activity, so nothing is left that could
+        // honour the notification the service is showing. `stopWithTask` covers
+        // the swipe-away; this covers every other way the activity ends.
+        LinkService.stop(this)
         super.onDestroy()
     }
 
-    private fun stopWatching() {
+    /**
+     * Asks for notification permission, which Android 13 introduced and which
+     * the service does not depend on.
+     *
+     * A denied permission hides the notification and changes nothing else — the
+     * service still runs, and the link still survives. So this asks once, at
+     * the moment a connection makes it meaningful, and never blocks on the
+     * answer.
+     */
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) return
+
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            NOTIFICATION_PERMISSION_REQUEST,
+        )
+    }
+
+    /**
+     * Opens the battery-optimisation list, which is as far as this can go.
+     *
+     * Asking for the exemption directly needs `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`,
+     * a permission the Play Store restricts to apps whose core function is
+     * unarguably broken without it. The manufacturer screens that actually
+     * matter — Xiaomi's Autostart, Huawei's protected apps — have no public
+     * intent at all, so the app names them and lets the user find them.
+     */
+    private fun openBatterySettings(): Boolean = try {
+        startActivity(
+            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        true
+    } catch (e: Exception) {
+        // Not every device ships the screen, and a settings activity that does
+        // not exist should leave the user where they were rather than crash the
+        // app they were using.
+        false
+    }
+
+    private fun stopWatchingClipboard() {
         val listener = clipboardListener ?: return
         clipboardListener = null
         clipboardManager()?.removePrimaryClipChangedListener(listener)
@@ -69,5 +161,7 @@ class MainActivity : FlutterActivity() {
 
     private companion object {
         const val CLIPBOARD_CHANNEL = "com.remotelink.app/clipboard_changes"
+        const val LINK_CHANNEL = "com.remotelink.app/link_service"
+        const val NOTIFICATION_PERMISSION_REQUEST = 1001
     }
 }

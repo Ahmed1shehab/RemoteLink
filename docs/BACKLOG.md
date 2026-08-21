@@ -751,7 +751,10 @@ the deterministic conflict resolution in `remoteWins`.
 
 ### RL-109 — Keep the phone's link alive while the app is off screen
 
-**Priority** P1 · **Size** M · **Android only**
+**Priority** P1 · **Size** M · **Android only** · **Built** — the Dart contract
+is in `apps/mobile/test/link_service_test.dart` and the device matrix is in
+`docs/RUNNING.md`. Kept here in full because the reasoning is the part worth
+having, particularly the three things it deliberately does not do.
 
 **Files**
 - `apps/mobile/android/app/src/main/kotlin/com/remotelink/app/LinkService.kt` (new)
@@ -837,9 +840,14 @@ together. Android 13+ gates visibility behind runtime `POST_NOTIFICATIONS` — t
 service still runs when it is denied, so ask once, at the point of connecting,
 and do not block on the answer.
 
-*Swipe-away.* `stopWithTask=false`: dismissing the task should not sever a link
-the user deliberately established, and the notification's own action is the way
-out. This is a judgement call and should be revisited if it draws complaints.
+*Swipe-away.* `stopWithTask=true`, reversing this task's first instinct. The
+reasoning changed on contact with the code: swiping the task away destroys the
+activity, and the activity owns the Flutter engine that owns the connection. A
+service outliving it would be a notification claiming a link whose isolate no
+longer exists — the exact failure named under Risks below. Surviving the swipe
+would mean caching the engine in the `Application` rather than letting the
+activity own it, which is a larger change than this feature justifies and one
+to make deliberately if the swipe-away case turns out to matter.
 
 *OEM guidance, and it is not optional.* A settings entry — "Remote Link keeps
 stopping?" — that explains the battery manager in plain words and deep-links

@@ -4,6 +4,20 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
 
+    <!-- Keeping the link alive while the app is off screen.
+
+         `connectedDevice` rather than `dataSync`: Android 15 caps dataSync at
+         six hours a day, which is wrong for something meant to run as long as a
+         computer is paired. connectedDevice needs one qualifying permission and
+         CHANGE_WIFI_MULTICAST_STATE above already qualifies, so this asks the
+         user for nothing they have not already granted for discovery.
+
+         POST_NOTIFICATIONS is Android 13+. Denying it hides the notification
+         and stops nothing: the service still runs and the link still holds. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
         android:label="Remote Link"
         android:name="${applicationName}"
@@ -41,6 +55,21 @@
                 <data android:mimeType="*/*"/>
             </intent-filter>
         </activity>
+        <!-- `stopWithTask="true"` on purpose, against the first instinct.
+
+             Swiping the task away destroys the activity, and the activity owns
+             the Flutter engine that owns the connection. A service outliving it
+             would be a notification saying "Connected" over a Dart isolate that
+             no longer exists. Surviving the swipe would need the engine cached
+             in the Application rather than owned by the activity — a larger
+             change than this feature justifies, and one to make deliberately if
+             the swipe-away case ever turns out to matter. -->
+        <service
+            android:name=".LinkService"
+            android:exported="false"
+            android:stopWithTask="true"
+            android:foregroundServiceType="connectedDevice"/>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

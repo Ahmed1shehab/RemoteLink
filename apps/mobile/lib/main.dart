@@ -6,6 +6,7 @@ import 'src/app/brand.dart';
 import 'src/app/theme.dart';
 import 'src/features/devices/auto_connect.dart';
 import 'src/features/devices/device_list_screen.dart';
+import 'src/features/devices/link_service.dart';
 
 /// Entry point for the phone app.
 Future<void> main() async {
@@ -35,6 +36,10 @@ class RemoteLinkApp extends ConsumerWidget {
     // screen: the address a computer moved to matters just as much while the
     // user is on the touchpad as while they are staring at the device list.
     ref.watch(connectionRetargetProvider);
+    // Same reasoning, same place: the background service has to be running
+    // while the user is anywhere in the app, and the moment it matters most is
+    // the moment they leave it.
+    ref.watch(backgroundLinkProvider);
 
     return MaterialApp(
       title: kProductName,

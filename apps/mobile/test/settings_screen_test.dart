@@ -8,6 +8,7 @@ import 'package:remotelink_mobile/src/app/brand.dart';
 import 'package:remotelink_mobile/src/app/providers.dart';
 import 'package:remotelink_mobile/src/features/control/control_screen.dart';
 import 'package:remotelink_mobile/src/features/devices/device_list_screen.dart';
+import 'package:remotelink_mobile/src/features/devices/link_service.dart';
 import 'package:remotelink_mobile/src/features/input/pointer_controller.dart';
 import 'package:remotelink_mobile/src/features/settings/settings_screen.dart';
 import 'package:rl_core/rl_core.dart';
@@ -85,23 +86,77 @@ void main() {
       expect(find.text('Sync from computer'), findsOneWidget);
       expect(find.text('Sync to computer'), findsOneWidget);
       expect(
-        find.textContaining('Why is phone-to-computer manual on iOS?'),
+        find.textContaining('Why does my phone need to be open?'),
         findsOneWidget,
       );
 
-      // Section 5: DIAGNOSTICS
+      // Section 5: BACKGROUND — absent, and that is the assertion. These tests
+      // run on the host, where there is no service to run, and a switch
+      // offered where nothing can honour it is worse than no switch.
+      expect(find.text('Background'), findsNothing);
+
+      // Section 6: DIAGNOSTICS
       expect(find.text('Diagnostics'), findsOneWidget);
       expect(find.text('Connection state'), findsOneWidget);
       expect(find.text('Round-trip time'), findsOneWidget);
       expect(find.text('Discovery route'), findsOneWidget);
       expect(find.text('Export Logs'), findsOneWidget);
 
-      // Section 6: ABOUT
+      // Section 7: ABOUT
       expect(find.text('About'), findsOneWidget);
       expect(find.text('Remote Link'), findsOneWidget);
       expect(find.text('Version $kAppVersion'), findsOneWidget);
       expect(find.text('Licenses'), findsOneWidget);
 
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the background section appears where a service can run',
+        (tester) async {
+      // The switch is offered on Android and nowhere else, so this stands in
+      // for the platform the host is not.
+      //
+      // Tall surface, like the section sweep above: the settings list mounts
+      // lazily, and a section below the fold is a section `find.text` cannot
+      // see at all.
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final identity = await DeviceIdentity.generate();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            ...mobileSettingsOverrides(
+              identity: identity,
+              trustStore: InMemoryTrustStore(),
+              deviceName: 'My Test Phone',
+            ),
+            linkServiceProvider.overrideWithValue(const _SupportedLinkService()),
+          ],
+          child: const MaterialApp(home: SettingsScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Background'), findsOneWidget);
+      expect(find.text('Stay connected in the background'), findsOneWidget);
+
+      await tester.dragUntilVisible(
+        find.text('Remote Link keeps stopping?'),
+        find.byType(Scrollable).first,
+        const Offset(0, -300),
+      );
+      await tester.tap(find.text('Remote Link keeps stopping?'));
+      await tester.pumpAndSettle();
+
+      // The phones this exists for, named rather than linked: their autostart
+      // screens have no public intent to open.
+      expect(find.textContaining('Xiaomi'), findsOneWidget);
+      expect(find.text('Open battery settings'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
@@ -538,4 +593,28 @@ void main() {
       expect(find.text('Permissions · Living Room PC'), findsNothing);
     });
   });
+}
+
+/// A link service that claims a platform which can run one.
+final class _SupportedLinkService implements LinkService {
+  const _SupportedLinkService();
+
+  @override
+  bool get isSupported => true;
+
+  @override
+  Future<void> start({
+    required String title,
+    required String body,
+    required String disconnectLabel,
+  }) async {}
+
+  @override
+  Future<void> stop() async {}
+
+  @override
+  Future<bool> openBatterySettings() async => true;
+
+  @override
+  Stream<void> get disconnectRequests => const Stream<void>.empty();
 }

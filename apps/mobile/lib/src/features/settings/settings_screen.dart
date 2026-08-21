@@ -11,6 +11,7 @@ import 'package:rl_transport/rl_transport.dart';
 import '../../app/brand.dart';
 import '../../app/providers.dart';
 import '../devices/bonjour_discovery.dart';
+import '../devices/link_service.dart';
 
 /// Settings screen for configuring device identity, managing paired computers,
 /// adjusting touchpad and clipboard preferences, inspecting diagnostics, and
@@ -34,6 +35,8 @@ class SettingsScreen extends ConsumerWidget {
           _TouchpadSection(),
           SizedBox(height: 16),
           _ClipboardSection(),
+          SizedBox(height: 16),
+          _BackgroundSection(),
           SizedBox(height: 16),
           _DiagnosticsSection(),
           SizedBox(height: 16),
@@ -904,12 +907,12 @@ class _ClipboardSection extends ConsumerWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Why is phone-to-computer manual on iOS?\n'
-                      'Reading the pasteboard on iOS shows a system “pasted from” '
-                      'banner every time an app reads your clipboard. To prevent '
-                      'constant banner alerts, Remote Link does not poll continuously '
-                      '— it only reads the clipboard when you switch to the app '
-                      'or press the Send button.',
+                      'Why does my phone need to be open?\n'
+                      'Android and iOS both refuse to let an app read your '
+                      'clipboard unless it is the app on screen, so a copy made '
+                      'while Remote Link is in the background reaches your '
+                      'computer when you next open it. Copies made on your '
+                      'computer arrive on this phone either way.',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
@@ -921,6 +924,152 @@ class _ClipboardSection extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 5. BACKGROUND
+// ---------------------------------------------------------------------------
+
+class _BackgroundSection extends ConsumerWidget {
+  const _BackgroundSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final service = ref.watch(linkServiceProvider);
+    final enabled = ref.watch(backgroundLinkEnabledProvider);
+
+    // Nothing here applies to a platform with no service to run. iOS grants no
+    // persistent background networking to an app of this kind, so offering the
+    // switch there would be offering a setting that does nothing.
+    if (!service.isSupported) return const SizedBox.shrink();
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            _SectionHeader(
+              icon: Icons.sync_rounded,
+              title: 'Background',
+              color: colorScheme.primary,
+            ),
+            const SizedBox(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Stay connected in the background'),
+              subtitle: const Text(
+                'Keeps transfers running when you switch apps. Shows a '
+                'notification while connected.',
+              ),
+              value: enabled,
+              onChanged: (value) =>
+                  ref.read(backgroundLinkEnabledProvider.notifier).set(value),
+            ),
+            const Divider(height: 16),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.battery_alert_outlined,
+                color: colorScheme.onSurfaceVariant,
+              ),
+              title: const Text('Remote Link keeps stopping?'),
+              subtitle: const Text(
+                'Some phones close it anyway. Here is how to stop that.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (context) => const _BatteryGuidanceDialog(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// What to do when the phone's own battery manager closes the app anyway.
+///
+/// Written as instructions rather than an apology, because on the phones where
+/// this matters the user genuinely can fix it and nothing in the app can. The
+/// manufacturer screens are named rather than linked: Xiaomi's Autostart and
+/// Huawei's protected-apps lists have no public intent, and a button that
+/// silently does nothing would be worse than a sentence that says where to look.
+class _BatteryGuidanceDialog extends ConsumerWidget {
+  const _BatteryGuidanceDialog();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return AlertDialog(
+      title: const Text('If Remote Link keeps disconnecting'),
+      content: const SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Android stops apps it thinks you are not using, and some phones '
+              'are stricter than others. Remote Link asks to keep running, but '
+              'only you can grant it.',
+            ),
+            SizedBox(height: 16),
+            Text('On any phone', style: TextStyle(fontWeight: FontWeight.w600)),
+            SizedBox(height: 4),
+            Text('Allow unrestricted battery use for Remote Link.'),
+            SizedBox(height: 16),
+            Text(
+              'Xiaomi, Redmi and POCO',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            SizedBox(height: 4),
+            Text(
+              'Settings › Apps › Remote Link: turn on Autostart, and set '
+              'Battery saver to No restrictions. Then hold Remote Link in the '
+              'recent-apps list and tap the lock.',
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Huawei, Oppo, vivo and OnePlus',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            SizedBox(height: 4),
+            Text(
+              'Add Remote Link to the protected or auto-launch list in your '
+              'battery settings.',
+            ),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+        FilledButton(
+          onPressed: () async {
+            final opened =
+                await ref.read(linkServiceProvider).openBatterySettings();
+            if (!context.mounted) return;
+            Navigator.of(context).pop();
+            if (opened) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'This phone has no battery settings screen to open. Look '
+                  'under Settings › Apps › Remote Link.',
+                ),
+              ),
+            );
+          },
+          child: const Text('Open battery settings'),
+        ),
+      ],
     );
   }
 }

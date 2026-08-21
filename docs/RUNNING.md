@@ -226,6 +226,15 @@ the phone clears the stored key and starts a fresh exchange.
 **Cursor does not move but everything else works** — Accessibility permission.
 See step 2.
 
+**The phone disconnects seconds after you leave the app** — check the
+background switch and the battery manager, in that order. Settings ›
+Background › "Stay connected in the background" runs a foreground service that
+keeps the process networked; without it, Android freezes the app and takes its
+sockets. On Xiaomi, Huawei, Oppo and Samsung the service is not enough on its
+own: those phones kill foreground services the user has not exempted, and the
+"Remote Link keeps stopping?" entry beside the switch says what to grant. iOS
+has no equivalent and the switch does not appear there.
+
 **Nothing copied on the phone reaches the computer while the phone app is in
 the background** — working as intended, and not fixable from user space.
 Android has refused clipboard reads to apps without focus since Android 10, and
@@ -240,6 +249,35 @@ copied from a password manager is deliberately not mirrored.
 Isolation blocks synthetic input from an unelevated process into an elevated
 one. This is Windows working correctly and cannot be worked around from user
 space.
+
+---
+
+## The background service, which cannot be unit tested
+
+A foreground service needs a device, so `flutter test` cannot reach it. The
+Dart half — that the service runs for exactly as long as there is a link worth
+keeping — is pinned in `apps/mobile/test/link_service_test.dart`. The Android
+half is this table, and it wants three phones: a Pixel or emulator, one OEM
+device with battery restrictions lifted, and the same device with them applied.
+
+| # | Do this | Expect |
+|---|---|---|
+| 1 | Connect, background the app, wait ten minutes | No `socket error`, no reconnect in the log |
+| 2 | Start a file transfer, background the app halfway | It completes |
+| 3 | Look at the notification while connected | It names the computer |
+| 4 | Press Disconnect on it | Client `idle`, notification gone, app still running |
+| 5 | Deny the notification permission, then connect | No notification, link still survives (1) |
+| 6 | Disconnect from inside the app | Notification gone |
+| 7 | Turn the Background switch off mid-session | Notification gone, session intact |
+| 8 | Swipe the app out of Recents | Notification gone, session ended |
+
+Row 8 is deliberate. Swiping the task away destroys the activity and the
+Flutter engine with it, so a service that outlived it would be a notification
+claiming a connection that no longer exists.
+
+On the unexempted OEM device, rows 1 and 2 are expected to fail — that is what
+the guidance dialog is for, and the point of testing it there is to confirm the
+app says so rather than appearing broken.
 
 ---
 
