@@ -192,6 +192,69 @@ already picked up.
 
 ---
 
+## 3c. The Apple Watch app
+
+The watch app lives in `apps/mobile/ios/RemoteLinkWatch/` and is a target of
+`Runner.xcodeproj`, because a watchOS app has to be embedded in its companion
+iPhone app to install at all. It is a trackpad and nothing else: drag to move
+the pointer, tap to click, turn the Digital Crown to scroll, and three buttons
+for left click, a drag lock, and right click.
+
+It does **not** speak the Remote Link protocol. It talks to the iPhone over
+WatchConnectivity and the iPhone puts what it says on the session it already
+holds — [ADR 0004](adr/0004-apple-watch-relays-through-the-phone.md) has the
+reasoning and states what that costs.
+
+### One thing that changes for everyone
+
+A project with a watch companion cannot be built for a simulator without naming
+the device, because Flutter will not guess which paired watch simulator to
+build for:
+
+```bash
+cd apps/mobile && flutter build ios --simulator -d <iphone-simulator-id>
+```
+
+`flutter run -d <id>` is unaffected — it already passes one. Device builds and
+`flutter build ipa` are unaffected.
+
+### If the target is missing
+
+The Xcode target is added by a script rather than by a hand-merged
+`project.pbxproj`, so it survives `flutter create`, `pod install`, and anything
+else that rewrites that file. Re-run it any time the target has gone:
+
+```bash
+cd apps/mobile/ios && ruby tool/add_watch_target.rb
+```
+
+It is idempotent — it reports and exits if the target is already there — and it
+needs the `xcodeproj` gem, which ships with CocoaPods.
+
+### Running it in the Simulator
+
+The watch app installs onto whichever watch simulator is *paired* with the
+iPhone simulator you are running (`xcrun simctl list pairs` shows which):
+
+```bash
+xcrun simctl boot <watch-simulator-id>
+cd apps/mobile
+flutter build ios --simulator --debug -d <iphone-simulator-id>
+xcrun simctl install <watch-simulator-id> build/ios/Debug-watchsimulator/RemoteLinkWatch.app
+xcrun simctl launch  <watch-simulator-id> com.remotelink.app.watchkitapp
+```
+
+The watch says which link is down rather than a single "not connected", so the
+header is the fastest diagnostic there is:
+
+| The watch says | What is wrong |
+|---|---|
+| `Open on iPhone` | The watch cannot reach the phone app. Launch it on the phone. |
+| `No computer` | The watch reached the phone; the phone is not connected to a computer. |
+| The computer's name | Working. |
+
+---
+
 ## 4. What to expect on a first successful run
 
 1. The desktop window shows "Discoverable on this network" with its device ID.

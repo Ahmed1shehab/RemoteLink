@@ -76,6 +76,7 @@ void main() {
       expect(find.textContaining('Last seen: 192.168.1.50'), findsOneWidget);
 
       // Section 3: TOUCHPAD
+      expect(find.text('Appearance'), findsOneWidget);
       expect(find.text('Touchpad'), findsOneWidget);
       expect(find.text('Pointer sensitivity'), findsOneWidget);
       expect(find.text('Natural scrolling'), findsOneWidget);
@@ -359,6 +360,49 @@ void main() {
             'No paired computers yet. Pair with a computer on your Wi-Fi network to start.'),
         findsOneWidget,
       );
+    });
+
+    testWidgets('the app opens dark, and the choice round-trips through storage',
+        (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final storage = InMemoryIdentityStore();
+      final container = ProviderContainer(
+        overrides: mobileSettingsOverrides(identityStore: storage),
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: SettingsScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      // The default the whole setting exists to justify. Asserted against the
+      // provider rather than against a rendered colour, because what ships is
+      // the mode `MaterialApp` is handed, and a screenshot-shaped assertion
+      // would pass just as happily on a light theme that happened to be dark.
+      expect(container.read(themeModeProvider), ThemeMode.dark);
+
+      await tester.tap(find.text('Light'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(container.read(themeModeProvider), ThemeMode.light);
+      expect(await storage.read('remotelink.settings.appearance'), 'light');
+
+      await tester.tap(find.text('System'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(container.read(themeModeProvider), ThemeMode.system);
+      expect(await storage.read('remotelink.settings.appearance'), 'system');
     });
 
     testWidgets('a touchpad setting round-trips through storage',

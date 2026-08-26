@@ -35,6 +35,23 @@ class ControlScreen extends ConsumerStatefulWidget {
 class _ControlScreenState extends ConsumerState<ControlScreen> {
   int _index = 0;
 
+  /// Whether the gesture surface has been given the whole screen.
+  ///
+  /// Off by default: the tab bar is how the other four features are reached,
+  /// and a control that hides it has to be the user's choice rather than the
+  /// state they find the app in.
+  bool _immersive = false;
+
+  /// The tabs whose content *is* a gesture surface.
+  ///
+  /// These get the height the host status strip would otherwise take, and they
+  /// are the only tabs the expand control appears on — expanding a list of
+  /// clipboard entries to fill the screen achieves nothing, and a button that
+  /// does nothing on three tabs out of five is worse than a missing one.
+  static const Set<int> _gestureTabs = <int>{0};
+
+  bool get _onGestureTab => _gestureTabs.contains(_index);
+
   @override
   void initState() {
     super.initState();
@@ -51,7 +68,6 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(clientStateProvider).valueOrNull;
-    final quality = ref.watch(connectionQualityProvider).valueOrNull;
     final capabilities =
         ref.watch(clientProvider).valueOrNull?.session?.capabilities;
 
@@ -66,42 +82,41 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
         capabilities?.has(Capabilities.screenCapture) == true &&
             (tier?.canViewScreen ?? false);
 
+    final expanded = _immersive && _onGestureTab;
+
     return Scaffold(
       extendBody: true,
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        title: Text(
-          switch (_index) {
-            0 => 'Touchpad',
-            1 => 'Keyboard',
-            2 => 'Media',
-            3 => 'Clipboard',
-            _ => 'Send',
-          },
-        ),
+        centerTitle: true,
+        // The expand control, where a back button would be. Only on the tabs
+        // it means something on — see [_gestureTabs].
+        leading: _onGestureTab
+            ? IconButton(
+                icon: Icon(
+                  expanded
+                      ? Icons.close_fullscreen_rounded
+                      : Icons.open_in_full_rounded,
+                ),
+                tooltip: expanded
+                    ? 'Show the tabs again'
+                    : 'Expand the gesture area',
+                onPressed: () => setState(() => _immersive = !_immersive),
+              )
+            : null,
+        // The connection state, in words, where the tab name used to be. Which
+        // tab is open is already answered by the tab bar and by what fills the
+        // screen; whether the computer is still on the other end is not
+        // answered anywhere else, and it is the thing a user checks when a
+        // gesture does nothing.
+        //
+        // What was here before this was a round-trip figure in milliseconds.
+        // It was removed rather than moved: a number that changes several times
+        // a second, in the corner of a screen someone is staring at while
+        // aiming a cursor, is a distraction that reports nothing actionable —
+        // the same fact, "the link is healthy", is carried by the bar below.
+        title: _ConnectionTitle(state: state),
         actions: <Widget>[
-          if (quality != null && state == ClientState.connected)
-            Center(
-              child: Container(
-                margin: const EdgeInsets.only(right: 4),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .primary
-                      .withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  '${quality.roundTripMillis.toStringAsFixed(0)} ms',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-              ),
-            ),
           if (canViewScreen)
             IconButton(
               icon: const Icon(Icons.screenshot_monitor_outlined),
@@ -129,29 +144,46 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
       ),
       body: Column(
         children: <Widget>[
-          const SystemStatusStrip(),
+          // Collapsed on a gesture tab, and animated rather than switched, so
+          // the extra height reads as the surface growing into it. The strip is
+          // reference information — the computer's battery, load and uptime —
+          // and on a tab that is one large touch target it is thirty pixels of
+          // text nobody is reading taken off the area the thumb works in.
+          AnimatedSize(
+            duration: context.motion(const Duration(milliseconds: 260)),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: _onGestureTab
+                ? const SizedBox(width: double.infinity)
+                : const SystemStatusStrip(),
+          ),
           Expanded(
-            child: Padding(
+            child: AnimatedPadding(
+              duration: context.motion(const Duration(milliseconds: 260)),
+              curve: Curves.easeOutCubic,
               // The navigation floats over the body, so the body keeps its
-              // own bottom clear by exactly the room the bar takes.
+              // own bottom clear by exactly the room the bar takes — and
+              // reclaims all of it when the bar is gone.
               padding: EdgeInsets.only(
-                bottom: LiquidNavigationBar.heightOf(context),
+                bottom: expanded ? 0 : LiquidNavigationBar.heightOf(context),
               ),
               child: IndexedStack(
                 index: _index,
-                children: const <Widget>[
-                  TouchpadSurfaceView(),
-                  KeyboardScreen(),
-                  MediaScreen(),
-                  ClipboardView(),
-                  TransferScreen(),
+                children: <Widget>[
+                  TouchpadSurfaceView(immersive: expanded),
+                  const KeyboardScreen(),
+                  const MediaScreen(),
+                  const ClipboardView(),
+                  const TransferScreen(),
                 ],
               ),
             ),
           ),
         ],
       ),
-      bottomNavigationBar: LiquidNavigationBar(
+      bottomNavigationBar: expanded
+          ? null
+          : LiquidNavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (index) => setState(() => _index = index),
         destinations: const <LiquidNavDestination>[
@@ -178,10 +210,10 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
           LiquidNavDestination(
             icon: Icons.send_outlined,
             selectedIcon: Icons.send_rounded,
-            label: 'Send',
-          ),
-        ],
-      ),
+                  label: 'Send',
+                ),
+              ],
+            ),
     );
   }
 }
@@ -516,6 +548,62 @@ class _HistoryTile extends StatelessWidget {
           'You can pin up to $kMaxPinnedClipboardEntries items. Unpin one '
           'first.',
         ),
+      ),
+    );
+  }
+}
+
+/// The connection state as a dot and a word, centred in the app bar.
+///
+/// The dot alone would be quicker to read and is not enough on its own —
+/// colour is not information every user receives — so the word carries it and
+/// the dot is what makes it glanceable. Both come from the same switch, which
+/// is what keeps them from disagreeing.
+class _ConnectionTitle extends StatelessWidget {
+  const _ConnectionTitle({required this.state});
+
+  final ClientState? state;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final (color, label) = switch (state) {
+      ClientState.connected => (const Color(0xFF3DD68C), 'Connected'),
+      ClientState.reconnecting => (scheme.tertiary, 'Reconnecting'),
+      ClientState.connecting => (scheme.tertiary, 'Connecting'),
+      ClientState.pairing => (scheme.tertiary, 'Pairing'),
+      ClientState.failed => (scheme.error, 'Connection failed'),
+      _ => (scheme.outline, 'Not connected'),
+    };
+
+    return Semantics(
+      liveRegion: true,
+      label: 'Connection status: $label',
+      excludeSemantics: true,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          // Shrinks rather than overflowing: 'Connection failed' at a large
+          // text setting is wider than what an app bar leaves between two
+          // icon buttons, and an overflowing title is a title with no end.
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: scheme.onSurface,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ),
+        ],
       ),
     );
   }

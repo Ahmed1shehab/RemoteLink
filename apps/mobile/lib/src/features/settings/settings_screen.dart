@@ -12,6 +12,7 @@ import '../../app/brand.dart';
 import '../../app/providers.dart';
 import '../devices/bonjour_discovery.dart';
 import '../devices/link_service.dart';
+import '../watch/watch_bridge.dart';
 
 /// Settings screen for configuring device identity, managing paired computers,
 /// adjusting touchpad and clipboard preferences, inspecting diagnostics, and
@@ -30,6 +31,8 @@ class SettingsScreen extends ConsumerWidget {
         children: const <Widget>[
           _ThisPhoneSection(),
           SizedBox(height: 16),
+          _AppearanceSection(),
+          SizedBox(height: 16),
           _PairedComputersSection(),
           SizedBox(height: 16),
           _TouchpadSection(),
@@ -37,6 +40,8 @@ class SettingsScreen extends ConsumerWidget {
           _ClipboardSection(),
           SizedBox(height: 16),
           _BackgroundSection(),
+          SizedBox(height: 16),
+          _AppleWatchSection(),
           SizedBox(height: 16),
           _DiagnosticsSection(),
           SizedBox(height: 16),
@@ -230,7 +235,82 @@ class _RenamePhoneDialogState extends ConsumerState<_RenamePhoneDialog> {
 }
 
 // ---------------------------------------------------------------------------
-// 2. PAIRED COMPUTERS
+// 2. APPEARANCE
+// ---------------------------------------------------------------------------
+
+/// Light, dark, or whatever the phone says.
+///
+/// A [SegmentedButton] rather than a switch, because there are three states and
+/// the third one — follow the system — is not the absence of the other two.
+class _AppearanceSection extends ConsumerWidget {
+  const _AppearanceSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final mode = ref.watch(themeModeProvider);
+    final notifier = ref.read(themeModeProvider.notifier);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            _SectionHeader(
+              icon: Icons.dark_mode_outlined,
+              title: 'Appearance',
+              color: colorScheme.primary,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Remote Link opens dark. The gesture surface fills the screen, '
+              'and a bright one at arm\u2019s length in a dark room is a torch.',
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            // Full width so the three labels have room at a large text size;
+            // a segmented button sized to its content wraps 'System' onto two
+            // lines before the phone runs out of width.
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<ThemeMode>(
+                showSelectedIcon: false,
+                segments: const <ButtonSegment<ThemeMode>>[
+                  ButtonSegment<ThemeMode>(
+                    value: ThemeMode.system,
+                    icon: Icon(Icons.brightness_auto_outlined, size: 18),
+                    label: Text('System'),
+                    tooltip: 'Follow the phone\u2019s setting',
+                  ),
+                  ButtonSegment<ThemeMode>(
+                    value: ThemeMode.light,
+                    icon: Icon(Icons.light_mode_outlined, size: 18),
+                    label: Text('Light'),
+                    tooltip: 'Always light',
+                  ),
+                  ButtonSegment<ThemeMode>(
+                    value: ThemeMode.dark,
+                    icon: Icon(Icons.dark_mode_outlined, size: 18),
+                    label: Text('Dark'),
+                    tooltip: 'Always dark',
+                  ),
+                ],
+                selected: <ThemeMode>{mode},
+                onSelectionChanged: (selection) =>
+                    notifier.setThemeMode(selection.first),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 3. PAIRED COMPUTERS
 // ---------------------------------------------------------------------------
 
 class _PairedComputersSection extends ConsumerWidget {
@@ -765,7 +845,7 @@ class _RequestPermissionDialogState
 }
 
 // ---------------------------------------------------------------------------
-// 3. TOUCHPAD
+// 4. TOUCHPAD
 // ---------------------------------------------------------------------------
 
 class _TouchpadSection extends ConsumerWidget {
@@ -845,7 +925,7 @@ class _TouchpadSection extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 4. CLIPBOARD
+// 5. CLIPBOARD
 // ---------------------------------------------------------------------------
 
 class _ClipboardSection extends ConsumerWidget {
@@ -929,7 +1009,7 @@ class _ClipboardSection extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 5. BACKGROUND
+// 6. BACKGROUND
 // ---------------------------------------------------------------------------
 
 class _BackgroundSection extends ConsumerWidget {
@@ -1215,7 +1295,91 @@ class _BatteryGuidanceDialog extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 5. DIAGNOSTICS
+// 7. APPLE WATCH
+// ---------------------------------------------------------------------------
+
+/// Whether there is a watch, whether it has the app, and whether it is in
+/// range — reported separately, because each sends the user somewhere else.
+///
+/// Hidden entirely on a phone that cannot have one. A permanently empty section
+/// explaining that Android has no Apple Watch is noise on every Android
+/// install, and there is nothing the user could do about it.
+class _AppleWatchSection extends ConsumerWidget {
+  const _AppleWatchSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final availability =
+        ref.watch(watchAvailabilityProvider).valueOrNull ??
+            const WatchAvailability();
+
+    if (!availability.supported) return const SizedBox.shrink();
+
+    final (icon, headline, detail) = switch (availability) {
+      WatchAvailability(paired: false) => (
+          Icons.watch_off_outlined,
+          'No Apple Watch paired',
+          'Pair a watch with this iPhone and Remote Link appears on it.',
+        ),
+      WatchAvailability(installed: false) => (
+          Icons.watch_outlined,
+          'Not installed on your watch',
+          'Install Remote Link from the Watch app on this iPhone.',
+        ),
+      WatchAvailability(reachable: false) => (
+          Icons.watch_outlined,
+          'Watch out of range',
+          'The watch controls the pointer whenever it can reach this iPhone.',
+        ),
+      _ => (
+          Icons.watch_rounded,
+          'Ready on your wrist',
+          'Drag on the watch to move the pointer, tap to click, and turn the '
+              'Digital Crown to scroll.',
+        ),
+    };
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            _SectionHeader(
+              icon: Icons.watch_outlined,
+              title: 'Apple Watch',
+              color: colorScheme.primary,
+            ),
+            const SizedBox(height: 12),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(icon, color: colorScheme.primary),
+              title: Text(headline),
+              subtitle: Text(detail),
+              trailing: IconButton(
+                tooltip: 'Check again',
+                icon: const Icon(Icons.refresh_rounded),
+                onPressed: () => ref.invalidate(watchAvailabilityProvider),
+              ),
+            ),
+            const Divider(height: 16),
+            Text(
+              'The watch sends what you do to this iPhone, and the iPhone sends '
+              'it on to your computer. Keep Remote Link on the phone connected '
+              'for the watch to have anything to drive.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 8. DIAGNOSTICS
 // ---------------------------------------------------------------------------
 
 class _DiagnosticsSection extends ConsumerStatefulWidget {
@@ -1479,7 +1643,7 @@ class _DiagnosticRow extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 6. ABOUT
+// 9. ABOUT
 // ---------------------------------------------------------------------------
 
 class _AboutSection extends StatelessWidget {

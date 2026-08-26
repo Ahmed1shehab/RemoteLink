@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:meta/meta.dart';
@@ -58,6 +59,7 @@ const String _trustKey = 'remotelink.trust.peers';
 const String _deviceNameKey = 'remotelink.device.name';
 const String _pointerSettingsKey = 'remotelink.settings.pointer';
 const String _clipboardSettingsKey = 'remotelink.settings.clipboard';
+const String _appearanceKey = 'remotelink.settings.appearance';
 
 /// Where hardware addresses of paired computers are persisted.
 ///
@@ -718,6 +720,51 @@ final class ClipboardSettingsNotifier extends StateNotifier<ClipboardSettings> {
 final clipboardSettingsProvider =
     StateNotifierProvider<ClipboardSettingsNotifier, ClipboardSettings>(
   ClipboardSettingsNotifier.new,
+);
+
+/// Which theme the app opens in, persisted in [IdentityStore].
+///
+/// Defaults to [ThemeMode.dark] rather than [ThemeMode.system], which is the
+/// one place this app deliberately overrules the phone. A remote control is
+/// used in the dark — pointed at a screen across the room, at night, while the
+/// lights are off — and the largest object in this app is a full-height gesture
+/// surface. Following a phone left on "light" turns that surface into a torch
+/// held at arm's length. The setting still exists, and picking `system` puts
+/// the phone back in charge for anyone who wants that.
+final class ThemeModeNotifier extends StateNotifier<ThemeMode> {
+  ThemeModeNotifier(this._ref) : super(kDefaultThemeMode) {
+    unawaited(_load());
+  }
+
+  final Ref _ref;
+
+  static const Map<String, ThemeMode> _byName = <String, ThemeMode>{
+    'system': ThemeMode.system,
+    'light': ThemeMode.light,
+    'dark': ThemeMode.dark,
+  };
+
+  Future<void> _load() async {
+    final storage = await _ref.read(identityStoreProvider.future);
+    final stored = await storage.read(_appearanceKey);
+    // An unrecognised value is a value written by a build that knew something
+    // this one does not, so it falls back to the default rather than throwing.
+    final mode = _byName[stored];
+    if (mode != null) state = mode;
+  }
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    state = mode;
+    final storage = await _ref.read(identityStoreProvider.future);
+    await storage.write(_appearanceKey, mode.name);
+  }
+}
+
+/// The theme the app opens in before the user has chosen one.
+const ThemeMode kDefaultThemeMode = ThemeMode.dark;
+
+final themeModeProvider = StateNotifierProvider<ThemeModeNotifier, ThemeMode>(
+  ThemeModeNotifier.new,
 );
 
 /// In-memory log buffer backing the diagnostics view.

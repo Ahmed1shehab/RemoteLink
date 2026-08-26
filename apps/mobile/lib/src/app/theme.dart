@@ -70,12 +70,19 @@ const ColorScheme _light = ColorScheme(
   scrim: Color(0xFF000000),
 );
 
-/// Dark: white ink on the logo's own navy.
+/// Dark: white ink on the logo's own navy, taken most of the way to black.
 ///
 /// The surfaces are the brand colour here, so `primary` cannot also be the
 /// navy — it would vanish into the page. It becomes a light tint of the same
 /// hue, which is what Material expects of a dark scheme and keeps filled
 /// buttons legible without introducing a second colour family.
+///
+/// The surfaces sit far darker than a stock Material dark scheme, and that is
+/// the point: this is the theme the app opens in, it is held a few inches from
+/// the face in a dark room, and the gesture surface is the largest object on
+/// the screen. A mid-navy page at that size is a lamp. The hue is still the
+/// logo's — every value below is the same navy, just carried down in tone —
+/// so nothing in the palette drifts away from the mark.
 const ColorScheme _dark = ColorScheme(
   brightness: Brightness.dark,
   primary: Color(0xFFB6C8E6),
@@ -94,16 +101,16 @@ const ColorScheme _dark = ColorScheme(
   onError: Color(0xFF601410),
   errorContainer: Color(0xFF8C1D18),
   onErrorContainer: Color(0xFFF9DEDC),
-  surface: Color(0xFF111A2B),
+  surface: Color(0xFF0D1119),
   onSurface: Color(0xFFE7ECF5),
   onSurfaceVariant: Color(0xFFB3BDCE),
-  surfaceContainerLowest: Color(0xFF0A101C),
-  surfaceContainerLow: Color(0xFF161F32),
-  surfaceContainer: Color(0xFF1A2539),
-  surfaceContainerHigh: Color(0xFF212D43),
-  surfaceContainerHighest: Color(0xFF28354D),
+  surfaceContainerLowest: Color(0xFF05070B),
+  surfaceContainerLow: Color(0xFF11161F),
+  surfaceContainer: Color(0xFF151B26),
+  surfaceContainerHigh: Color(0xFF1B222E),
+  surfaceContainerHighest: Color(0xFF232B39),
   outline: Color(0xFF8894A8),
-  outlineVariant: Color(0xFF414D63),
+  outlineVariant: Color(0xFF39435A),
   inverseSurface: Color(0xFFE7ECF5),
   onInverseSurface: kBrandNavy,
   inversePrimary: Color(0xFF3B4761),
@@ -113,7 +120,7 @@ const ColorScheme _dark = ColorScheme(
 
 /// The page behind the cards, a shade off the card surface in both themes.
 const Color _lightCanvas = Color(0xFFF4F6FA);
-const Color _darkCanvas = Color(0xFF0B121F);
+const Color _darkCanvas = Color(0xFF06080C);
 
 ColorScheme remoteLinkColorScheme(Brightness brightness) =>
     brightness == Brightness.dark ? _dark : _light;

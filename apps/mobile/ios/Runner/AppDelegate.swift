@@ -21,6 +21,14 @@ import UIKit
         binaryMessenger: registrar.messenger()
       ).setStreamHandler(clipboardWatcher)
     }
+
+    // Started here rather than lazily on first use. `WCSession.sendMessage`
+    // launches this app in the background to deliver, and the delegate has to
+    // already be set by the time that delivery happens or the message is lost —
+    // which is precisely the message the user is waiting on.
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "RemoteLinkWatchBridge") {
+      WatchBridge.shared.start(with: registrar)
+    }
   }
 }
 

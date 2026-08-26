@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Remote Link</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Marks this as a modern single-target watchOS app rather than the old
+	     app-plus-extension pair. Without it the bundle is built but never
+	     installed on the watch. -->
+	<key>WKApplication</key>
+	<true/>
+	<!-- The iPhone app this one belongs to. WatchConnectivity refuses to pair a
+	     session with anything else, and the App Store refuses to accept a watch
+	     app whose companion identifier is not its own bundle's prefix. -->
+	<key>WKCompanionAppBundleIdentifier</key>
+	<string>com.remotelink.app</string>
+</dict>
+</plist>

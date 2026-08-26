@@ -36,6 +36,8 @@ such rather than stubbed.
 | Share sheet | Android: share text or files into Remote Link from any app — text lands on the computer's clipboard, files become a transfer offer. The one route past Android's clipboard focus rule |
 | Background link | Android: a foreground service keeps the connection alive while the app is off screen, so a transfer survives switching apps. No iOS equivalent exists |
 | Media control | macOS: transport via hardware media keys, volume, now playing |
+| Apple Watch | A trackpad on the wrist: drag to move, tap to click, Digital Crown to scroll. The watch relays through the iPhone rather than speaking the protocol itself — [ADR 0004](docs/adr/0004-apple-watch-relays-through-the-phone.md) says why, and what that costs |
+| Appearance | Dark by default, with light and system in Settings › Appearance |
 
 ### Built, but not in this release
 
@@ -103,6 +105,7 @@ hardware behind an entitlement they grant by application).
 apps/
   desktop/        Flutter desktop companion — the service
   mobile/         Flutter phone app — the remote
+    ios/RemoteLinkWatch/   watchOS app (SwiftUI) — a trackpad on the wrist
 packages/
   rl_core/        Clock, Result, errors, logging, device identity types
   rl_protocol/    Wire format: bytes, frames, messages, codec       (pure Dart)
