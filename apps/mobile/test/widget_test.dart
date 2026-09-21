@@ -14,9 +14,9 @@ void main() {
       (tester) async {
     await _pumpDeviceList(tester, discoveryOperational: true);
 
-    expect(find.text('Computers'), findsOneWidget);
+    expect(find.text('Devices'), findsOneWidget);
     expect(find.text('Looking for computers'), findsOneWidget);
-    expect(find.text('Connect by address'), findsOneWidget);
+    expect(find.text('Scan code'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

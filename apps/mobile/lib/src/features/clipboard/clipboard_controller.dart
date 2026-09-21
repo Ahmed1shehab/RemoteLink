@@ -306,7 +306,8 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
       // now, because reading it now would cost the user an interruption for
       // content that has nowhere to go.
       _sendWhenReconnected = true;
-      _log.debug(() => 'nothing to send to; holding the copy for the reconnect');
+      _log.debug(
+          () => 'nothing to send to; holding the copy for the reconnect');
       return false;
     }
     _sendWhenReconnected = false;

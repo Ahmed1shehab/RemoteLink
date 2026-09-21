@@ -60,12 +60,8 @@ const String _deviceNameKey = 'remotelink.device.name';
 const String _pointerSettingsKey = 'remotelink.settings.pointer';
 const String _clipboardSettingsKey = 'remotelink.settings.clipboard';
 const String _appearanceKey = 'remotelink.settings.appearance';
-
-/// Where hardware addresses of paired computers are persisted.
-///
-/// Public, unlike its neighbours, so a test can seed realistic stored state and
-/// exercise the same load path the app uses rather than a parallel one.
-const String kWakeAddressesKey = 'remotelink.wake.addresses';
+const String _sensitivityTutorialSeenKey =
+    'remotelink.tutorial.sensitivity_seen';
 
 /// Where the client keeps its long-term key and trust list.
 ///
@@ -227,70 +223,6 @@ Future<void> persistTrustStore(TrustStore store, IdentityStore storage) async {
   );
 }
 
-/// Hardware addresses of paired computers, keyed by device ID.
-///
-/// Stored beside the trust store rather than inside it. `TrustedPeer` lives in
-/// `rl_crypto` and its persisted shape is shared with the desktop, where a MAC
-/// has no meaning — the desktop reads its own from the OS. This is phone-side
-/// state about a paired computer, so it is keyed by the same device ID and
-/// written through the same [IdentityStore], and a peer the user un-pairs
-/// simply stops being looked up.
-///
-/// An address here is a convenience, never a trust input: it decides which
-/// bytes get broadcast to a sleeping machine, and the woken machine still has
-/// to complete the same handshake as ever.
-final class WakeAddressesNotifier
-    extends StateNotifier<Map<String, MacAddress>> {
-  WakeAddressesNotifier(this._ref) : super(const <String, MacAddress>{}) {
-    unawaited(_load());
-  }
-
-  final Ref _ref;
-
-  Future<void> _load() async {
-    final storage = await _ref.read(identityStoreProvider.future);
-    final raw = await storage.read(kWakeAddressesKey);
-    if (raw == null) return;
-
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map<String, dynamic>) return;
-      state = <String, MacAddress>{
-        for (final entry in decoded.entries)
-          if (entry.value is String)
-            if (MacAddress.tryParse(entry.value as String) case final mac?)
-              entry.key: mac,
-      };
-    } on FormatException {
-      // A corrupt file costs the user a Wake button until the computer next
-      // reports its address. Not worth failing the launch over.
-    }
-  }
-
-  /// Records [mac] for [peerId], persisting only when it actually changed.
-  Future<void> remember(DeviceId peerId, MacAddress mac) async {
-    if (state[peerId.value] == mac) return;
-    state = <String, MacAddress>{...state, peerId.value: mac};
-
-    final storage = await _ref.read(identityStoreProvider.future);
-    await storage.write(
-      kWakeAddressesKey,
-      jsonEncode(<String, String>{
-        for (final entry in state.entries) entry.key: entry.value.canonical,
-      }),
-    );
-  }
-
-  /// The address stored for [peerId], if this computer ever reported one.
-  MacAddress? addressFor(DeviceId? peerId) =>
-      peerId == null ? null : state[peerId.value];
-}
-
-final wakeAddressesProvider =
-    StateNotifierProvider<WakeAddressesNotifier, Map<String, MacAddress>>(
-  WakeAddressesNotifier.new,
-);
-
 /// Whether automatic discovery can work on this device and network.
 ///
 /// False on an iPhone without Apple's multicast entitlement, and on networks
@@ -349,15 +281,30 @@ final discoveryProvider = FutureProvider<DiscoveryBackend>((ref) async {
   return backend;
 });
 
-/// Computers currently visible on the network.
+/// Devices currently visible on the network, this phone excluded.
+///
+/// The exclusion is new and not optional. This phone now advertises itself so
+/// that other phones can send to it, and a browser cannot tell its own record
+/// from anyone else's — so without this the device list opens showing the phone
+/// it is running on, offering to connect it to itself. Filtered here rather
+/// than in each backend because everything downstream, the automatic reconnect
+/// included, reads this one provider.
 final discoveredDevicesProvider =
     StreamProvider<List<DiscoveredDevice>>((ref) async* {
   final backend = await ref.watch(discoveryProvider.future);
+  final self = (await ref.watch(identityProvider.future)).id;
+
+  List<DiscoveredDevice> withoutSelf(List<DiscoveredDevice> devices) =>
+      <DiscoveredDevice>[
+        for (final device in devices)
+          if (device.beacon.deviceId != self) device,
+      ];
+
   // The current snapshot comes first so a screen that mounts after discovery
   // started shows the devices immediately instead of appearing empty until the
   // next beacon arrives two seconds later.
-  yield backend.current;
-  yield* backend.devices;
+  yield withoutSelf(backend.current);
+  yield* backend.devices.map(withoutSelf);
 });
 
 /// Whether this phone can be watched and driven from a computer.
@@ -459,12 +406,6 @@ Future<void> _rememberPeerDetails(Ref ref, DeviceInfo info) async {
   final store = await ref.read(trustStoreProvider.future);
   final peer = await store.findById(info.id);
   if (peer == null) return;
-
-  // Recorded while the computer is awake and talking, because that is the only
-  // time it can be: once it is asleep there is nothing left to ask.
-  if (info.macAddress case final mac? when mac.isWakeable) {
-    await ref.read(wakeAddressesProvider.notifier).remember(info.id, mac);
-  }
 
   final needsUpdate = peer.platform != info.platform || peer.name != info.name;
   if (!needsUpdate) return;
@@ -765,6 +706,43 @@ const ThemeMode kDefaultThemeMode = ThemeMode.dark;
 
 final themeModeProvider = StateNotifierProvider<ThemeModeNotifier, ThemeMode>(
   ThemeModeNotifier.new,
+);
+
+/// Whether the user has seen or dismissed the pointer sensitivity tutorial.
+class SensitivityTutorialNotifier extends StateNotifier<bool> {
+  SensitivityTutorialNotifier(this._ref) : super(false) {
+    unawaited(_load());
+  }
+
+  @visibleForTesting
+  SensitivityTutorialNotifier.forTesting(bool initial)
+      : _ref = null,
+        super(initial);
+
+  final Ref? _ref;
+
+  Future<void> _load() async {
+    if (_ref == null) return;
+    final storage = await _ref.read(identityStoreProvider.future);
+    final raw = await storage.read(_sensitivityTutorialSeenKey);
+    if (raw == 'true') {
+      state = true;
+    }
+  }
+
+  Future<void> markSeen() async {
+    if (state) return;
+    state = true;
+    if (_ref != null) {
+      final storage = await _ref.read(identityStoreProvider.future);
+      await storage.write(_sensitivityTutorialSeenKey, 'true');
+    }
+  }
+}
+
+final sensitivityTutorialSeenProvider =
+    StateNotifierProvider<SensitivityTutorialNotifier, bool>(
+  SensitivityTutorialNotifier.new,
 );
 
 /// In-memory log buffer backing the diagnostics view.

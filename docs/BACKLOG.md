@@ -110,7 +110,6 @@ Ranked in `SECURITY.md` §4 and reproduced here with task IDs:
 | Both `widget_test.dart` files are stale `flutter create` scaffolding referencing a nonexistent `MyApp` — `flutter test` does not compile in either app | RL-000 |
 | Android kills the phone's socket seconds after the app leaves the screen, and refuses it a new one until the app is opened again | RL-109 |
 | No CI. No `.github/` directory exists | RL-001 |
-| QR pairing UI: protocol done, display widget and scanner missing | RL-106 |
 | No mobile settings screen (rename device, forget computer, tier request, sync toggles) | RL-700 |
 | ~~The Android manifest advertises a share target and nothing reads the intent~~ — built; shared text goes to the computer's clipboard, shared files become a transfer offer. iOS still needs a share extension | RL-421 |
 | No desktop diagnostics panel; `CommandDispatcher` already counts applied/denied/unsupported and nothing reads them | RL-701 |
@@ -585,9 +584,21 @@ that surfaces as "sometimes it just doesn't sync" with no reproduction.
 
 ---
 
-### RL-106 — QR pairing UI
+### RL-106 — QR pairing UI — DONE
 
 **Priority** P1 · **Size** M
+
+**Shipped.** `apps/desktop/lib/src/ui/pairing_qr.dart` renders the payload and
+`apps/mobile/lib/src/features/pairing/qr_scanner_screen.dart` reads it;
+`PairingScreen.viaScannedCode` skips the digits and fails closed on a
+mismatch. Covered by `apps/desktop/test/pairing_qr_test.dart`,
+`apps/mobile/test/qr_pairing_test.dart`, and the `PairingPayload` parsing
+group in `packages/rl_crypto/test/session_cipher_test.dart`.
+
+Two things went beyond the spec below, both because the QR now carries the
+address: manual address entry and the phone's Wake button were removed. The
+Wake-on-LAN plumbing itself — `rl_core`'s magic packet, `rl_native`'s adapter
+enumeration, and `DeviceInfo.macAddress` — was left in place for RL-530.
 
 **Files**
 - `apps/desktop/lib/src/ui/pairing_qr.dart` (new)

@@ -36,8 +36,8 @@ sealed class RemoteLinkError implements Exception {
 /// safe way to resynchronise a length-prefixed stream.
 @immutable
 final class ProtocolError extends RemoteLinkError {
-  const ProtocolError(String code, String message, {Object? cause})
-      : super(code: 'protocol.$code', message: message, cause: cause);
+  const ProtocolError(String code, String message, {super.cause})
+      : super(code: 'protocol.$code', message: message);
 }
 
 /// Handshake, pairing, authentication, or AEAD failure.
@@ -47,8 +47,8 @@ final class ProtocolError extends RemoteLinkError {
 /// [message] for local logs only.
 @immutable
 final class SecurityError extends RemoteLinkError {
-  const SecurityError(String code, String message, {Object? cause})
-      : super(code: 'security.$code', message: message, cause: cause);
+  const SecurityError(String code, String message, {super.cause})
+      : super(code: 'security.$code', message: message);
 }
 
 /// Socket, discovery, or timeout failure. Usually recoverable by reconnecting.
@@ -57,9 +57,9 @@ final class TransportError extends RemoteLinkError {
   const TransportError(
     String code,
     String message, {
-    Object? cause,
+    super.cause,
     this.retryable = true,
-  }) : super(code: 'transport.$code', message: message, cause: cause);
+  }) : super(code: 'transport.$code', message: message);
 
   /// Whether the reconnect supervisor should retry. `false` for permanent
   /// conditions such as a version mismatch or a revoked device.
@@ -74,8 +74,8 @@ final class NativeError extends RemoteLinkError {
     String code,
     String message, {
     this.osErrorCode,
-    Object? cause,
-  }) : super(code: 'native.$code', message: message, cause: cause);
+    super.cause,
+  }) : super(code: 'native.$code', message: message);
 
   final int? osErrorCode;
 
@@ -87,8 +87,8 @@ final class NativeError extends RemoteLinkError {
 /// The device is known but not permitted to perform the requested action.
 @immutable
 final class PermissionError extends RemoteLinkError {
-  const PermissionError(String code, String message, {Object? cause})
-      : super(code: 'permission.$code', message: message, cause: cause);
+  const PermissionError(String code, String message, {super.cause})
+      : super(code: 'permission.$code', message: message);
 }
 
 /// There is genuinely not enough room on disk for an incoming transfer.
@@ -107,12 +107,11 @@ final class InsufficientSpaceError extends RemoteLinkError {
   const InsufficientSpaceError({
     required this.requiredBytes,
     required this.availableBytes,
-    Object? cause,
+    super.cause,
   }) : super(
           code: 'storage.insufficient_space',
           message: 'transfer needs $requiredBytes bytes '
               'but only $availableBytes are free',
-          cause: cause,
         );
 
   final int requiredBytes;

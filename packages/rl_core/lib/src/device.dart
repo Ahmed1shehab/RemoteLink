@@ -3,11 +3,21 @@ import 'package:meta/meta.dart';
 import 'mac_address.dart';
 
 /// Which side of the connection a process is on.
+/// Which end of a connection a peer is.
+///
+/// About the socket, not the hardware, and the difference started mattering
+/// when a phone learned to listen. The names are the desktop's history: for
+/// most of this app's life the listening end was always a computer and the
+/// dialling end was always a phone, so "server" and "desktop" were the same
+/// word. A phone hosting a file transfer reports [server] because it is the
+/// end that accepted the connection — reading it as "this peer is a computer"
+/// is the mistake this comment exists to prevent. [DeviceInfo.platform] is
+/// what says which kind of machine is over there.
 enum PeerRole {
-  /// Desktop companion. Listens, owns the input/clipboard/screen backends.
+  /// Accepted the connection. Owns whatever backends it has.
   server,
 
-  /// Phone or tablet. Initiates connections and sends commands.
+  /// Opened the connection.
   client,
 }
 

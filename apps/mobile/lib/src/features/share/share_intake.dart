@@ -247,11 +247,11 @@ final class ShareController extends StateNotifier<ShareOutcome> {
               : const ShareFailed('The computer would not take it.');
         case SharedFiles(:final files):
           await _ref.read(transferControllerProvider.notifier).sendFiles(
-                targetPeerId: target.id,
-                targetPeerName: target.name,
-                files: <File>[for (final f in files) f.file],
-                fileNames: <String>[for (final f in files) f.name],
-              );
+            targetPeerId: target.id,
+            targetPeerName: target.name,
+            files: <File>[for (final f in files) f.file],
+            fileNames: <String>[for (final f in files) f.name],
+          );
           state = ShareSent(
             description: _describe(payload),
             peerName: target.name,

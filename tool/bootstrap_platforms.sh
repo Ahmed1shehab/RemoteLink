@@ -67,10 +67,18 @@ say "Generating platform runners"
 # build stops before it compiles a line of this app. Applied here rather than
 # left to whoever next runs `flutter create`, because that is exactly what
 # reintroduces it.
-say "macOS deployment target for the client"
+say "macOS and iOS deployment targets"
 for target in \
-  "apps/mobile/macos/Runner.xcodeproj/project.pbxproj|MACOSX_DEPLOYMENT_TARGET = 10.15;|MACOSX_DEPLOYMENT_TARGET = 11.0;" \
-  "apps/mobile/macos/Podfile|platform :osx, '10.15'|platform :osx, '11.0'"; do
+  "apps/desktop/macos/Runner.xcodeproj/project.pbxproj|MACOSX_DEPLOYMENT_TARGET = 10.15;|MACOSX_DEPLOYMENT_TARGET = 12.0;" \
+  "apps/desktop/macos/Podfile|platform :osx, '10.15'|platform :osx, '12.0'" \
+  "apps/mobile/macos/Runner.xcodeproj/project.pbxproj|MACOSX_DEPLOYMENT_TARGET = 10.15;|MACOSX_DEPLOYMENT_TARGET = 12.0;" \
+  "apps/mobile/macos/Runner.xcodeproj/project.pbxproj|MACOSX_DEPLOYMENT_TARGET = 11.0;|MACOSX_DEPLOYMENT_TARGET = 12.0;" \
+  "apps/mobile/macos/Podfile|platform :osx, '10.15'|platform :osx, '12.0'" \
+  "apps/mobile/macos/Podfile|platform :osx, '11.0'|platform :osx, '12.0'" \
+  "apps/mobile/ios/Runner.xcodeproj/project.pbxproj|IPHONEOS_DEPLOYMENT_TARGET = 12.0;|IPHONEOS_DEPLOYMENT_TARGET = 15.0;" \
+  "apps/mobile/ios/Runner.xcodeproj/project.pbxproj|IPHONEOS_DEPLOYMENT_TARGET = 13.0;|IPHONEOS_DEPLOYMENT_TARGET = 15.0;" \
+  "apps/mobile/ios/Podfile|# platform :ios, '12.0'|platform :ios, '15.0'" \
+  "apps/mobile/ios/Podfile|platform :ios, '13.0'|platform :ios, '15.0'"; do
   file="${target%%|*}"
   rest="${target#*|}"
   [ -f "$file" ] || continue

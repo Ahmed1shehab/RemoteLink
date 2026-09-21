@@ -4,6 +4,20 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
 
+    <!-- Reading the pairing code off the computer's screen, and nothing else.
+
+         The camera is opened only by the scanner screen and closed when it
+         closes. Declared here rather than left to the scanner plugin's own
+         manifest so the permission this app asks for is visible in this app's
+         manifest, next to the reason it asks. A phone whose owner refuses it
+         still pairs: the computer appears in the list on any network that does
+         not block discovery. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- Not required: a tablet or TV box without a camera should still install
+         and work, since scanning is one of two ways in rather than the only
+         one. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+
     <!-- Keeping the link alive while the app is off screen.
 
          `connectedDevice` rather than `dataSync`: Android 15 caps dataSync at

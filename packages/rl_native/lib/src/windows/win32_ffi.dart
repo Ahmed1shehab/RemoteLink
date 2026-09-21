@@ -1,4 +1,4 @@
-// ignore_for_file: constant_identifier_names
+// ignore_for_file: constant_identifier_names, non_constant_identifier_names
 //
 // Win32 constants keep Microsoft's SCREAMING_CAPS spelling so this file can be
 // read side by side with the reference documentation, and so a value can be
@@ -8,7 +8,9 @@
 //
 // The struct names are Microsoft's too, but they need no exemption: the lint
 // objects to underscores, not to capitals. The one union below is *not* a real
-// Win32 name — it models an anonymous union — so it uses Dart casing.
+// Win32 name — it models an anonymous union — so it uses Dart casing. Struct
+// field names such as GUID's `Data1`..`Data4` keep their exact Win32 spelling
+// for the same reason.
 
 import 'dart:ffi';
 

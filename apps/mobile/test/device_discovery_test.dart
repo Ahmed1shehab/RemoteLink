@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:remotelink_mobile/src/features/devices/device_list_screen.dart';
+import 'package:remotelink_mobile/src/features/pairing/qr_scanner_screen.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 
@@ -68,18 +69,19 @@ void main() {
     testWidgets('says what it needs instead of showing a blank address',
         (tester) async {
       await pump(tester, trustStore: await pairedWithoutAddress());
-      expect(find.text('Paired · tap to enter its address'), findsOneWidget);
+      expect(find.text('Paired · tap to scan its code'), findsOneWidget);
     });
 
-    testWidgets('asks for the address when tapped', (tester) async {
+    testWidgets('sends the tap to the scanner', (tester) async {
+      // The row has no address to dial, and the code on the computer's screen
+      // is the only thing that can supply one — so the tap goes there rather
+      // than failing quietly.
       await pump(tester, trustStore: await pairedWithoutAddress());
 
       await tester.tap(find.text('Office Mac'));
       await tester.pumpAndSettle();
 
-      // Named, not generic: the user is answering a question about a machine
-      // they own rather than being asked to configure something.
-      expect(find.text('Where is Office Mac?'), findsOneWidget);
+      expect(find.byType(QrScannerScreen), findsOneWidget);
     });
   });
 
@@ -110,8 +112,8 @@ void main() {
 
       expect(find.text('Search again'), findsOneWidget);
       expect(
-        find.text('Connect by address'),
-        findsOneWidget,
+        find.text('Scan code'),
+        findsWidgets,
         reason: 'the route that works on these networks must stay visible',
       );
     });

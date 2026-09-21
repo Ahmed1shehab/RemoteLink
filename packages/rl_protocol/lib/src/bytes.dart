@@ -29,7 +29,7 @@ final class ByteWriter {
   void _ensure(int extra) {
     final required = _length + extra;
     if (required <= _buffer.length) return;
-    var capacity = _buffer.length == 0 ? 64 : _buffer.length;
+    var capacity = _buffer.isEmpty ? 64 : _buffer.length;
     while (capacity < required) {
       capacity *= 2;
     }

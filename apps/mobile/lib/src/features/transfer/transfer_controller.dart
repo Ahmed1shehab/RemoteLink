@@ -12,6 +12,8 @@ import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
+import '../host/host_providers.dart';
+import '../host/phone_host_service.dart';
 import 'file_picker.dart';
 import 'mobile_transfer_store.dart';
 import 'transfer_model.dart';
@@ -64,6 +66,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
   StreamSubscription<Message>? _messageSubscription;
   StreamSubscription<ClientState>? _stateSubscription;
+  StreamSubscription<InboundMessage>? _inboundSubscription;
 
   final Map<String, FileTransferReceiver> _receivers =
       <String, FileTransferReceiver>{};
@@ -82,16 +85,50 @@ class MobileTransferController extends StateNotifier<TransferState> {
     unawaited(_initStore());
   }
 
+  /// Listens to every link a transfer can arrive on.
+  ///
+  /// Two subscriptions rather than one, because the two links are made in
+  /// opposite directions and neither is a special case of the other. The client
+  /// is the connection this phone opened; the host is every connection opened
+  /// to it. A transfer looks identical once it is under way — which is the
+  /// point — but the session it belongs to is not interchangeable, so the
+  /// session comes through with the message rather than being looked up
+  /// afterwards from whatever happens to be connected.
   Future<void> _listen() async {
     final client = await _ref.read(clientProvider.future);
     _messageSubscription = client.messages.listen(
-      _onMessage,
+      (message) {
+        final session = client.session;
+        if (session != null) unawaited(_onMessage(session, message));
+      },
       cancelOnError: false,
     );
     _stateSubscription = client.states.listen(
       _onClientStateChange,
       cancelOnError: false,
     );
+
+    await _listenToNearbyDevices();
+  }
+
+  /// Subscribes to transfers arriving from devices that connected to us.
+  ///
+  /// Separated and guarded because the two halves fail independently and only
+  /// one of them is load-bearing. A phone whose listening socket could not bind
+  /// — no permission, a port taken, a platform that will not allow it — can
+  /// still send to every computer and every phone it can reach, and that is
+  /// worth strictly more than an exception thrown into the void from a
+  /// constructor.
+  Future<void> _listenToNearbyDevices() async {
+    try {
+      final host = await _ref.read(phoneHostServiceProvider.future);
+      _inboundSubscription = host.messages.listen(
+        (inbound) => unawaited(_onMessage(inbound.session, inbound.message)),
+        cancelOnError: false,
+      );
+    } on Object catch (error) {
+      _log.warn('not listening for nearby devices', error: error);
+    }
   }
 
   Future<void> _initStore() async {
@@ -124,14 +161,9 @@ class MobileTransferController extends StateNotifier<TransferState> {
     }
   }
 
-  Future<void> _onMessage(Message message) async {
-    final client = _ref.read(clientProvider).valueOrNull;
-    final session = client?.session;
-    final peerId = session?.peerId;
-    if (peerId == null || session == null) return;
-
-    final peerName =
-        _ref.read(connectedPeerProvider).valueOrNull?.name ?? peerId.short;
+  Future<void> _onMessage(Session session, Message message) async {
+    final peerId = session.peerId;
+    final peerName = _nameFor(peerId);
 
     switch (message) {
       case FileOffer():
@@ -147,6 +179,51 @@ class MobileTransferController extends StateNotifier<TransferState> {
       default:
         break;
     }
+  }
+
+  /// The session a transfer with [peerId] belongs to, or null if it has gone.
+  ///
+  /// Every entry point below asks for this rather than reaching for
+  /// `client.session`. That used to be the same thing and is not any more: with
+  /// a phone able to listen, "the session" can be one of several, and the one
+  /// that matters is the one this peer is on. Reaching for the client's session
+  /// while accepting a file from a nearby phone would send the acceptance to
+  /// the computer instead, where it means nothing.
+  ///
+  /// Asked of the two objects directly rather than of [peerLinksProvider],
+  /// which is the same answer arrived at a more fragile way. That provider is
+  /// built out of streams — connection state, the peer's identity message — and
+  /// a send is not a rebuild: it happens once, now, and has to work on the
+  /// frame it is called on rather than on the frame after the stream that
+  /// describes the connection has caught up with it.
+  Session? _sessionFor(DeviceId peerId) {
+    final outbound = _ref.read(clientProvider).valueOrNull?.session;
+    if (outbound != null &&
+        outbound.peerId == peerId &&
+        outbound.isEstablished) {
+      return outbound;
+    }
+
+    final host = _ref.read(phoneHostServiceProvider).valueOrNull;
+    final inbound =
+        host?.links.where((link) => link.peerId == peerId).firstOrNull?.session;
+    if (inbound != null && inbound.isEstablished) return inbound;
+
+    return null;
+  }
+
+  /// What to call [peerId] on a transfer row.
+  ///
+  /// Falls back to the short device id rather than to a friendly guess, because
+  /// a row naming the wrong device is worse than a row naming none.
+  String _nameFor(DeviceId peerId) {
+    final reported = _ref.read(connectedPeerProvider).valueOrNull;
+    if (reported != null && reported.id == peerId) return reported.name;
+
+    final host = _ref.read(phoneHostServiceProvider).valueOrNull;
+    final inbound =
+        host?.links.where((link) => link.peerId == peerId).firstOrNull;
+    return inbound?.name ?? peerId.short;
   }
 
   Future<void> _handleFileOffer(
@@ -202,9 +279,8 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
   /// Explicitly accepts an incoming transfer. Never called automatically.
   Future<void> acceptIncomingTransfer(PendingIncomingTransfer request) async {
-    final client = _ref.read(clientProvider).valueOrNull;
-    final session = client?.session;
-    if (session == null || !session.isEstablished) {
+    final session = _sessionFor(request.peerId);
+    if (session == null) {
       _failTransfer(request.transferId, 'Connection lost');
       return;
     }
@@ -272,9 +348,8 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
   /// Explicitly declines an incoming transfer and sends FileAbort.
   Future<void> declineIncomingTransfer(PendingIncomingTransfer request) async {
-    final client = _ref.read(clientProvider).valueOrNull;
-    final session = client?.session;
-    if (session != null && session.isEstablished) {
+    final session = _sessionFor(request.peerId);
+    if (session != null) {
       try {
         await session.send(
           FileAbort(
@@ -648,10 +723,9 @@ class MobileTransferController extends StateNotifier<TransferState> {
     required String text,
     String? customFileName,
   }) async {
-    final client = _ref.read(clientProvider).valueOrNull;
-    final session = client?.session;
-    if (session == null || !session.isEstablished) {
-      throw StateError('Cannot send: not connected to peer');
+    final session = _sessionFor(targetPeerId);
+    if (session == null) {
+      throw StateError('Cannot send: not connected to $targetPeerName');
     }
 
     final bytes = Uint8List.fromList(utf8.encode(text));
@@ -721,10 +795,9 @@ class MobileTransferController extends StateNotifier<TransferState> {
     required List<File> files,
     List<String>? fileNames,
   }) async {
-    final client = _ref.read(clientProvider).valueOrNull;
-    final session = client?.session;
-    if (session == null || !session.isEstablished) {
-      throw StateError('Cannot send: not connected to peer');
+    final session = _sessionFor(targetPeerId);
+    if (session == null) {
+      throw StateError('Cannot send: not connected to $targetPeerName');
     }
 
     if (files.isEmpty) {
@@ -810,10 +883,14 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
   /// Cancels an in-progress transfer and sends FileAbort.
   Future<void> cancelTransfer(String transferId) async {
-    final client = _ref.read(clientProvider).valueOrNull;
-    final session = client?.session;
+    // The row, not the connection, decides where the abort goes. A cancel is
+    // still worth recording locally when the peer has already gone, so a
+    // missing session only costs the notification.
+    final record =
+        state.transfers.where((t) => t.transferId == transferId).firstOrNull;
+    final session = record == null ? null : _sessionFor(record.peerId);
 
-    if (session != null && session.isEstablished) {
+    if (session != null) {
       try {
         await session.send(
           FileAbort(
@@ -858,10 +935,9 @@ class MobileTransferController extends StateNotifier<TransferState> {
       throw StateError('This transfer cannot be retried');
     }
 
-    final client = _ref.read(clientProvider).valueOrNull;
-    final session = client?.session;
-    if (session == null || !session.isEstablished) {
-      throw StateError('Cannot retry: not connected');
+    final session = _sessionFor(record.peerId);
+    if (session == null) {
+      throw StateError('Cannot retry: ${record.peerName} is not connected');
     }
 
     _speedTrackers[transferId] = TransferSpeedTracker();
@@ -940,6 +1016,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
   @override
   void dispose() {
+    unawaited(_inboundSubscription?.cancel());
     _messageSubscription?.cancel();
     _stateSubscription?.cancel();
     for (final receiver in _receivers.values) {
@@ -977,41 +1054,26 @@ String safeOutgoingFileName(
   return sanitiseFileName(fallback);
 }
 
-/// The computer a transfer would go to, or null when nothing is connected.
+/// The peer a transfer would go to, or null when there is nowhere to send.
 ///
 /// A record rather than a `DeviceId`, because the send path needs a name to put
 /// on the transfer row and the two come from different places while a
 /// connection is settling.
 typedef TransferTarget = ({DeviceId id, String name});
 
-/// The only computer this phone can send to: the one it is connected to.
+/// Where a send goes when nothing has chosen otherwise.
 ///
-/// The identity message is preferred and the trust store is the fallback, in
-/// that order, because `DeviceInfoMessage` arrives a moment *after* the session
-/// is established. Watching only the message left the Send tab with no target
-/// for the first second of every connection; watching only the trust store
-/// would show a stale name after a rename.
+/// This used to be *the* target and the app was honest in calling it that:
+/// there was one session, to one computer, and offering any other row would
+/// have sent the file to the connected computer under a different computer's
+/// name. Now that a phone can listen, there can be several real targets at
+/// once, so this is the first of [peerLinksProvider] rather than the only
+/// entry in it — the default for a share arriving from another app with no
+/// chance to ask, not a claim that there is only one.
 final transferTargetProvider = Provider<TransferTarget?>((ref) {
-  // The state stream is watched first, and it is not decoration. `session` is a
-  // plain field on the client, so nothing about reading it makes Riverpod
-  // recompute — without this line the provider is evaluated once, on the build
-  // where there is no session yet, and caches "no target" for the life of the
-  // app. The Send tab then reads "Not connected" against a live connection.
-  final state = ref.watch(clientStateProvider).valueOrNull;
-  if (state != ClientState.connected) return null;
-
-  final client = ref.watch(clientProvider).valueOrNull;
-  final session = client?.session;
-  if (session == null || !session.isEstablished) return null;
-
-  final reported = ref.watch(connectedPeerProvider).valueOrNull;
-  if (reported != null && reported.id == session.peerId) {
-    return (id: reported.id, name: reported.name);
-  }
-
-  final peers = ref.watch(trustedPeersProvider).valueOrNull;
-  final known = peers?.where((peer) => peer.id == session.peerId).firstOrNull;
-  return (id: session.peerId, name: known?.name ?? session.peerId.short);
+  final link = ref.watch(peerLinksProvider).firstOrNull;
+  if (link == null) return null;
+  return (id: link.id, name: link.name);
 });
 
 /// Provider for mobile transfer state.

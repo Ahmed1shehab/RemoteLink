@@ -32,8 +32,51 @@ class ControlScreen extends ConsumerStatefulWidget {
   ConsumerState<ControlScreen> createState() => _ControlScreenState();
 }
 
+/// The five things this screen can be.
+///
+/// An enum rather than an index, because which of them are on screen now
+/// depends on the peer. A phone that connected to another phone can exchange
+/// files and text and nothing else — there is no cursor over there to move —
+/// so the tabs are filtered, and an `int` index into a filtered list means the
+/// selected tab silently changes identity when the list does.
+enum ControlTab {
+  touchpad(Capabilities.mouse),
+  keyboard(Capabilities.keyboard),
+  media(Capabilities.mediaControl),
+  clipboard(Capabilities.clipboardText),
+  send(Capabilities.fileTransfer);
+
+  const ControlTab(this.capability);
+
+  /// The bit that has to be in the session for this tab to be worth showing.
+  final int capability;
+
+  /// Whether the surface *is* a gesture, and so wants the whole screen.
+  ///
+  /// Expanding a list of clipboard entries to fill the screen achieves
+  /// nothing, and a control that does nothing on four tabs out of five is
+  /// worse than a missing one.
+  bool get isGesture => this == ControlTab.touchpad;
+}
+
+/// Which tabs a session with these capabilities can actually offer.
+///
+/// Unknown capabilities mean everything, not nothing. `session` is null for the
+/// moment between the screen appearing and the handshake being read, and hiding
+/// four tabs during it would be a visible flicker on every connection, to
+/// pre-empt a case that only arises on a phone-to-phone link.
+///
+/// A pure function, and public for the same reason [mobileCapabilities] is:
+/// the rule is worth a test, and a test of it should not need a provider
+/// container, a keystore and a socket to reach it.
+@visibleForTesting
+List<ControlTab> visibleTabs(Capabilities? capabilities) => <ControlTab>[
+      for (final tab in ControlTab.values)
+        if (capabilities == null || capabilities.has(tab.capability)) tab,
+    ];
+
 class _ControlScreenState extends ConsumerState<ControlScreen> {
-  int _index = 0;
+  ControlTab _selected = ControlTab.touchpad;
 
   /// Whether the gesture surface has been given the whole screen.
   ///
@@ -41,16 +84,6 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
   /// and a control that hides it has to be the user's choice rather than the
   /// state they find the app in.
   bool _immersive = false;
-
-  /// The tabs whose content *is* a gesture surface.
-  ///
-  /// These get the height the host status strip would otherwise take, and they
-  /// are the only tabs the expand control appears on — expanding a list of
-  /// clipboard entries to fill the screen achieves nothing, and a button that
-  /// does nothing on three tabs out of five is worse than a missing one.
-  static const Set<int> _gestureTabs = <int>{0};
-
-  bool get _onGestureTab => _gestureTabs.contains(_index);
 
   @override
   void initState() {
@@ -82,7 +115,19 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
         capabilities?.has(Capabilities.screenCapture) == true &&
             (tier?.canViewScreen ?? false);
 
-    final expanded = _immersive && _onGestureTab;
+    final tabs = visibleTabs(capabilities);
+    // A peer that offers none of them is not a state the app can be in — the
+    // handshake requires a shared protocol version and every build since the
+    // first has had a clipboard — but falling back to the full list beats a
+    // screen with no body at all if it ever happens.
+    final visible = tabs.isEmpty ? ControlTab.values : tabs;
+    // The chosen tab, unless the peer cannot offer it. Connecting to a phone
+    // while the touchpad was the last thing open must not leave the selection
+    // pointing at a tab that is not there.
+    final current = visible.contains(_selected) ? _selected : visible.first;
+    final onGestureTab = current.isGesture;
+
+    final expanded = _immersive && onGestureTab;
 
     return Scaffold(
       extendBody: true,
@@ -91,7 +136,7 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
         centerTitle: true,
         // The expand control, where a back button would be. Only on the tabs
         // it means something on — see [_gestureTabs].
-        leading: _onGestureTab
+        leading: onGestureTab
             ? IconButton(
                 icon: Icon(
                   expanded
@@ -153,7 +198,7 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
             duration: context.motion(const Duration(milliseconds: 260)),
             curve: Curves.easeOutCubic,
             alignment: Alignment.topCenter,
-            child: _onGestureTab
+            child: onGestureTab
                 ? const SizedBox(width: double.infinity)
                 : const SystemStatusStrip(),
           ),
@@ -167,14 +212,21 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
               padding: EdgeInsets.only(
                 bottom: expanded ? 0 : LiquidNavigationBar.heightOf(context),
               ),
+              // Still an [IndexedStack] over the visible tabs, so each keeps
+              // its state — see the class comment for what rebuilding them
+              // costs.
               child: IndexedStack(
-                index: _index,
+                index: visible.indexOf(current),
                 children: <Widget>[
-                  TouchpadSurfaceView(immersive: expanded),
-                  const KeyboardScreen(),
-                  const MediaScreen(),
-                  const ClipboardView(),
-                  const TransferScreen(),
+                  for (final tab in visible)
+                    switch (tab) {
+                      ControlTab.touchpad =>
+                        TouchpadSurfaceView(immersive: expanded),
+                      ControlTab.keyboard => const KeyboardScreen(),
+                      ControlTab.media => const MediaScreen(),
+                      ControlTab.clipboard => const ClipboardView(),
+                      ControlTab.send => const TransferScreen(),
+                    },
                 ],
               ),
             ),
@@ -184,38 +236,43 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
       bottomNavigationBar: expanded
           ? null
           : LiquidNavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (index) => setState(() => _index = index),
-        destinations: const <LiquidNavDestination>[
-          LiquidNavDestination(
-            icon: Icons.touch_app_outlined,
-            selectedIcon: Icons.touch_app_rounded,
-            label: 'Touchpad',
-          ),
-          LiquidNavDestination(
-            icon: Icons.keyboard_outlined,
-            selectedIcon: Icons.keyboard_rounded,
-            label: 'Keyboard',
-          ),
-          LiquidNavDestination(
-            icon: Icons.play_circle_outline_rounded,
-            selectedIcon: Icons.play_circle_rounded,
-            label: 'Media',
-          ),
-          LiquidNavDestination(
-            icon: Icons.content_paste_outlined,
-            selectedIcon: Icons.content_paste_rounded,
-            label: 'Clipboard',
-          ),
-          LiquidNavDestination(
-            icon: Icons.send_outlined,
-            selectedIcon: Icons.send_rounded,
-                  label: 'Send',
-                ),
+              selectedIndex: visible.indexOf(current),
+              onDestinationSelected: (index) =>
+                  setState(() => _selected = visible[index]),
+              destinations: <LiquidNavDestination>[
+                for (final tab in visible) _destinationFor(tab),
               ],
             ),
     );
   }
+
+  static LiquidNavDestination _destinationFor(ControlTab tab) => switch (tab) {
+        ControlTab.touchpad => const LiquidNavDestination(
+            icon: Icons.touch_app_outlined,
+            selectedIcon: Icons.touch_app_rounded,
+            label: 'Touchpad',
+          ),
+        ControlTab.keyboard => const LiquidNavDestination(
+            icon: Icons.keyboard_outlined,
+            selectedIcon: Icons.keyboard_rounded,
+            label: 'Keyboard',
+          ),
+        ControlTab.media => const LiquidNavDestination(
+            icon: Icons.play_circle_outline_rounded,
+            selectedIcon: Icons.play_circle_rounded,
+            label: 'Media',
+          ),
+        ControlTab.clipboard => const LiquidNavDestination(
+            icon: Icons.content_paste_outlined,
+            selectedIcon: Icons.content_paste_rounded,
+            label: 'Clipboard',
+          ),
+        ControlTab.send => const LiquidNavDestination(
+            icon: Icons.send_outlined,
+            selectedIcon: Icons.send_rounded,
+            label: 'Send',
+          ),
+      };
 }
 
 /// Clipboard status and the two manual actions.

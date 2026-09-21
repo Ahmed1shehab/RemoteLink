@@ -34,6 +34,9 @@ enum Theme {
     /// `primary` — the accent, and the colour the touch glow is drawn in.
     static let primary = Color(hex: 0xB6C8E6)
 
+    /// Dynamic touch dot swelling — #007ACC blue matching the phone.
+    static let dotGlow = Color(hex: 0x007ACC)
+
     /// `outlineVariant` — hairlines.
     static let outlineVariant = Color(hex: 0x39435A)
 

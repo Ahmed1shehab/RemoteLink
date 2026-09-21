@@ -64,7 +64,6 @@ final class _RecordingLinkService implements LinkService {
   @override
   Stream<void> get backgroundReadRefusals => const Stream<void>.empty();
 
-
   @override
   Stream<void> get disconnectRequests => disconnects.stream;
 }
@@ -136,8 +135,8 @@ void main() {
         overrides: <Override>[
           identityStoreProvider
               .overrideWith((ref) async => InMemoryIdentityStore()),
-          identityProvider
-              .overrideWith((ref) => Future<DeviceIdentity>.value(phoneIdentity)),
+          identityProvider.overrideWith(
+              (ref) => Future<DeviceIdentity>.value(phoneIdentity)),
           clientProvider.overrideWith((ref) async => client),
           linkServiceProvider.overrideWithValue(service),
         ],

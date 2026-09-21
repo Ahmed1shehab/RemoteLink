@@ -19,12 +19,13 @@ work that makes milestone 1 trustworthy.
    finally load-bearing. Removes head-of-line blocking so a clipboard image
    cannot delay the cursor.
 4. **Trust-store MAC on mobile.** Closes gap 3.
-5. **QR pairing UI.** The protocol side is done and tested — `PairingPayload`
-   round-trips through its URI form, and `DesktopService.pairingPayload` builds
-   it. What is missing is the display widget on the desktop and the scanner on
-   the phone. Milestone 1 shipped numeric comparison only rather than a QR code
-   the phone could not read, because half a security flow is worse than none:
-   it invites the user to trust a mechanism that is not actually running.
+5. ~~**QR pairing UI.**~~ Done. The desktop's "Pair a phone" button renders
+   `DesktopService.pairingPayload` as a code, and the phone's "Scan code"
+   button reads it and hands the scanned key to the handshake as
+   `expectedServerKey`, so a mismatch fails closed with no fallback to the
+   digits. Typing an address by hand and Wake-on-LAN were removed from the
+   phone at the same time: the code carries the address, and the wake button
+   could not report whether it had done anything.
 6. **Latency measurement harness.** Numbers rather than impressions: finger-to-
    cursor at the 50th and 99th percentile, under an idle network and under load.
 

@@ -36,6 +36,10 @@ dependencies:
   # day the package that was pulling it in stops needing it.
   meta: ^1.15.0
   path_provider: ^2.1.4
+  # Renders the pairing QR. Pure Dart over the `qr` encoder, so it draws on
+  # every desktop platform without a plugin — and nothing here needs a camera,
+  # only a painter.
+  qr_flutter: ^4.1.0
   rl_core: ^0.1.0
   rl_crypto: ^0.1.0
   rl_native: ^0.1.0

@@ -5,10 +5,14 @@ directory — those are names the OS and existing installations already hold, an
 renaming them would orphan every paired device's trust store.</sub>
 
 Control a Windows or macOS computer from an Android or iOS phone over local
-Wi-Fi. No cloud, no account, no internet, no typing in IP addresses.
+Wi-Fi, and send files between two phones the same way. No cloud, no account, no
+internet, no typing in IP addresses.
 
 Install the desktop app once. After that the phone finds the computer,
-connects, and reconnects on its own.
+connects, and reconnects on its own — and where the network blocks that, the
+desktop shows a code the phone scans. Phone to phone needs no computer at all —
+each phone advertises itself, and the first send asks for the same six-digit
+confirmation the desktop does.
 
 ---
 
@@ -31,6 +35,8 @@ such rather than stubbed.
 | Native clipboard | Text complete on both platforms; images deferred. Syncs both ways on its own — the phone half needs the app in the foreground, which is as far as iOS and Android allow |
 | Desktop app | Service, dispatcher with permission enforcement, clipboard sync, tray, pairing UI |
 | Mobile app | Discovery, pairing, touchpad, full keyboard, clipboard, media |
+| Pairing | Two ways in and no third: tap the computer the phone found, or scan the code the desktop shows. The code carries the computer's real public key, so a scanned pairing verifies the handshake against a key that never crossed the network — and a mismatch fails closed with no fallback |
+| Phone to phone | Complete for files and text: the phone runs the same server the desktop does, advertises over Bonjour, and pairs with the same six digits. A listening phone accepts file transfer and clipboard text and refuses everything else, per message — [ADR 0005](docs/adr/0005-a-phone-can-listen.md) says why, and what it deliberately does not do |
 | Auto-connect | Reconnects to the last computer on launch and skips the list |
 | Background clipboard | Android: copy in any app and it reaches the computer, via an accessibility service the user enables by hand — the only route Android allows. Off by default |
 | Share sheet | Android: share text or files into Remote Link from any app — text lands on the computer's clipboard, files become a transfer offer. The one route past Android's clipboard focus rule |

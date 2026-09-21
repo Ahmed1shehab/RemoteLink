@@ -109,6 +109,7 @@ final class RemoteLinkClient {
 
   ClientState _state = ClientState.idle;
   ProtocolErrorCode? _failureCode;
+  Object? _terminalFailure;
   int _connectionAttemptCount = 0;
   int _attempt = 0;
   bool _stopRequested = false;
@@ -122,6 +123,20 @@ final class RemoteLinkClient {
   /// Protocol reason for the current terminal failure, when supplied by the
   /// peer. Cleared when [connect] starts a new connection lifecycle.
   ProtocolErrorCode? get failureCode => _failureCode;
+
+  /// The error that ended this connection for good, retained after the fact.
+  ///
+  /// Kept because the state enum throws away the one distinction that matters
+  /// to a caller reacting to a failure: `ClientState.failed` is the same value
+  /// whether the address was unreachable or the server presented a key that
+  /// was not the expected one. Only [waitUntilConnected] used to see the
+  /// difference, and only if it happened to be parked at the moment the
+  /// supervisor gave up — so a screen built one frame too late got a generic
+  /// "could not connect" for an impersonated server. Held here, the answer
+  /// survives the race.
+  ///
+  /// Cleared when [connect] starts a new connection lifecycle.
+  Object? get terminalFailure => _terminalFailure;
 
   ConnectionTarget? get target => _target;
 
@@ -166,6 +181,7 @@ final class RemoteLinkClient {
     await disconnect();
     _stopRequested = false;
     _failureCode = null;
+    _terminalFailure = null;
     _target = target;
     _attempt = 0;
     unawaited(_runSupervisor());
@@ -235,12 +251,15 @@ final class RemoteLinkClient {
       return Future<Session>.value(existing);
     }
     if (_state == ClientState.failed) {
+      // The recorded cause first, so a caller that arrived after the failure
+      // learns the same thing as one that was already waiting for it.
       return Future<Session>.error(
-        const TransportError(
-          'connect_failed',
-          'the client stopped for a reason retrying cannot fix',
-          retryable: false,
-        ),
+        _terminalFailure ??
+            const TransportError(
+              'connect_failed',
+              'the client stopped for a reason retrying cannot fix',
+              retryable: false,
+            ),
       );
     }
 
@@ -307,12 +326,14 @@ final class RemoteLinkClient {
         // Cryptographic failures are not transient. Retrying a key mismatch
         // just burns battery and hides a real problem from the user.
         _log.error('connection failed permanently', error: e);
+        _terminalFailure = e;
         _setState(ClientState.failed);
         _failWaiters(e);
         return;
       } on TransportError catch (e) {
         if (!e.retryable) {
           _log.error('connection failed permanently', error: e);
+          _terminalFailure = e;
           _setState(ClientState.failed);
           return;
         }
@@ -358,14 +379,14 @@ final class RemoteLinkClient {
         if (message case ErrorMessage(:final code) when !code.isRetryable) {
           _failureCode = code;
           _stopRequested = true;
-          _setState(ClientState.failed);
-          _failWaiters(
-            TransportError(
-              'protocol_${code.name}',
-              'peer reported a terminal protocol error',
-              retryable: false,
-            ),
+          final failure = TransportError(
+            'protocol_${code.name}',
+            'peer reported a terminal protocol error',
+            retryable: false,
           );
+          _terminalFailure = failure;
+          _setState(ClientState.failed);
+          _failWaiters(failure);
           unawaited(session.close(reason: CloseReason.protocolError));
         }
         if (!_messages.isClosed) _messages.add(message);

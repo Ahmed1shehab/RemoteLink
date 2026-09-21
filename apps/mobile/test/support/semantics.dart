@@ -1,4 +1,4 @@
-import 'package:flutter/semantics.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Assertions against the semantics tree — what a screen reader actually
@@ -18,8 +18,19 @@ Iterable<SemanticsNode> allSemanticsNodes(SemanticsNode node) sync* {
 }
 
 /// The root of the live semantics tree. Requires `tester.ensureSemantics()`.
+///
+/// Read off the view's pipeline owner rather than the root one. Since Flutter
+/// grew multi-view support the root owner is a parent that owns no render tree
+/// of its own — its `semanticsOwner` is always null — and the tree a screen
+/// reader consumes hangs off the child owner belonging to the view under test.
+/// Reaching for `rootPipelineOwner.semanticsOwner` compiles, returns null on
+/// every call, and turns every assertion in this file into "semantics are not
+/// enabled in this test".
 SemanticsNode semanticsRoot(WidgetTester tester) {
-  final root = tester.binding.pipelineOwner.semanticsOwner?.rootSemanticsNode;
+  SemanticsNode? root;
+  tester.binding.rootPipelineOwner.visitChildren((PipelineOwner owner) {
+    root ??= owner.semanticsOwner?.rootSemanticsNode;
+  });
   expect(root, isNotNull, reason: 'semantics are not enabled in this test');
   return root!;
 }

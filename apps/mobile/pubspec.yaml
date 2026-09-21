@@ -40,6 +40,12 @@ dependencies:
   # for their camera roll.
   image_picker: ^1.1.2
   meta: ^1.15.0
+  # The QR scanner. Pairing by scanning the computer's code is the only way
+  # in that works on a network where discovery is blocked, and it is the one
+  # that carries the computer's real public key over an optical channel — so
+  # the handshake verifies against a key no attacker on the network ever got
+  # to touch. A hand-typed address can do neither.
+  mobile_scanner: ^7.2.0
   path_provider: ^2.1.4
   rl_core: ^0.1.0
   rl_crypto: ^0.1.0

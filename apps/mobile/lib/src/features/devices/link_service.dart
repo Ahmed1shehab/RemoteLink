@@ -96,10 +96,8 @@ final class PlatformLinkService implements LinkService {
 
   final StreamController<void> _disconnects =
       StreamController<void>.broadcast();
-  final StreamController<String> _copies =
-      StreamController<String>.broadcast();
-  final StreamController<void> _refusals =
-      StreamController<void>.broadcast();
+  final StreamController<String> _copies = StreamController<String>.broadcast();
+  final StreamController<void> _refusals = StreamController<void>.broadcast();
 
   @override
   bool get isSupported => true;
@@ -111,8 +109,7 @@ final class PlatformLinkService implements LinkService {
   Stream<void> get backgroundReadRefusals => _refusals.stream;
 
   @override
-  Future<bool> openAccessibilitySettings() =>
-      _ask('openAccessibilitySettings');
+  Future<bool> openAccessibilitySettings() => _ask('openAccessibilitySettings');
 
   @override
   Future<bool> backgroundClipboardEnabled() =>

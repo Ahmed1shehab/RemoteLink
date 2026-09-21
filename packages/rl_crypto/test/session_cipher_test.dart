@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:rl_core/rl_core.dart';
@@ -196,6 +197,77 @@ void main() {
         PairingPayload.tryParse(
           'remotelink://pair/ABCDEFGHJKMNPQRSTVWXYZ0123'
           '?k=AAAA&h=1.2.3.4&p=1',
+        ),
+        isNull,
+      );
+    });
+
+    test('rejects a remotelink URI that is not a pairing URI', () {
+      // The scheme alone is not enough: a future `remotelink://open/...` deep
+      // link must not be mistaken for an offer to trust a computer.
+      expect(
+        PairingPayload.tryParse(
+          'remotelink://open/ABCDEFGHJKMNPQRSTVWXYZ0123?k=x',
+        ),
+        isNull,
+      );
+      expect(PairingPayload.tryParse('remotelink://pair/'), isNull);
+      expect(PairingPayload.tryParse('remotelink://pair'), isNull);
+    });
+
+    test('rejects a truncated payload', () {
+      // What a half-read code looks like: a camera catching the top of a QR
+      // as the phone moves. Every prefix of a valid URI must fail closed.
+      final valid = PairingPayload(
+        deviceId: const DeviceId('ABCDEFGHJKMNPQRSTVWXYZ0123'),
+        publicKey: Uint8List(32),
+        name: 'Studio PC',
+        host: '192.168.1.42',
+        port: 47811,
+        token: Uint8List(0),
+      ).toUri();
+
+      // Mid-scheme, mid-device-id, and mid-key in turn. Cuts past the key
+      // are deliberately not asserted: the trailing parameters are optional
+      // by design, so a payload missing only its name or its empty token is
+      // complete, not truncated.
+      for (final cut in <int>[10, 30, 60]) {
+        expect(
+          PairingPayload.tryParse(valid.substring(0, cut)),
+          isNull,
+          reason: 'a prefix of $cut characters must not parse',
+        );
+      }
+    });
+
+    test('rejects a payload missing the host or the port', () {
+      const base = 'remotelink://pair/ABCDEFGHJKMNPQRSTVWXYZ0123';
+      final key = base64Url.encode(Uint8List(32)).replaceAll('=', '');
+      expect(PairingPayload.tryParse('$base?k=$key&p=47811'), isNull);
+      expect(PairingPayload.tryParse('$base?k=$key&h=1.2.3.4'), isNull);
+      expect(PairingPayload.tryParse('$base?h=1.2.3.4&p=47811'), isNull);
+    });
+
+    test('rejects an oversized key without throwing', () {
+      // A code can carry a couple of kilobytes, and nothing stops an attacker
+      // filling that space. The length check has to reject it rather than the
+      // decoder falling over on it.
+      final huge = base64Url.encode(Uint8List(2048)).replaceAll('=', '');
+      expect(
+        PairingPayload.tryParse(
+          'remotelink://pair/ABCDEFGHJKMNPQRSTVWXYZ0123'
+          '?k=$huge&h=1.2.3.4&p=47811',
+        ),
+        isNull,
+      );
+    });
+
+    test('rejects a port of zero', () {
+      expect(
+        PairingPayload.tryParse(
+          'remotelink://pair/ABCDEFGHJKMNPQRSTVWXYZ0123'
+          '?k=${base64Url.encode(Uint8List(32)).replaceAll('=', '')}'
+          '&h=1.2.3.4&p=0',
         ),
         isNull,
       );

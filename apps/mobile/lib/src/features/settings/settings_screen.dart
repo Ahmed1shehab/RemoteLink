@@ -12,6 +12,8 @@ import '../../app/brand.dart';
 import '../../app/providers.dart';
 import '../devices/bonjour_discovery.dart';
 import '../devices/link_service.dart';
+import '../host/host_providers.dart';
+import '../host/phone_host_service.dart';
 import '../watch/watch_bridge.dart';
 
 /// Settings screen for configuring device identity, managing paired computers,
@@ -32,6 +34,8 @@ class SettingsScreen extends ConsumerWidget {
           _ThisPhoneSection(),
           SizedBox(height: 16),
           _AppearanceSection(),
+          SizedBox(height: 16),
+          _ReceivingSection(),
           SizedBox(height: 16),
           _PairedComputersSection(),
           SizedBox(height: 16),
@@ -310,7 +314,99 @@ class _AppearanceSection extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 3. PAIRED COMPUTERS
+// 3. RECEIVING
+// ---------------------------------------------------------------------------
+
+/// Whether other devices can find this phone and send to it.
+///
+/// The one switch in this app that turns a feature off rather than on, and it
+/// is here because the feature has a cost that is not obvious from using it:
+/// while it is on, this phone publishes its name on the Wi-Fi and holds a
+/// listening socket. Nothing can arrive unasked — an unknown device still has
+/// to be confirmed by six digits, and a known one still has to have its
+/// transfer accepted — but being *listed* is itself something a person may not
+/// want on a network they do not trust, and that is not a decision this app
+/// gets to make for them.
+class _ReceivingSection extends ConsumerWidget {
+  const _ReceivingSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final wanted = ref.watch(receivingProvider);
+    final live = ref.watch(receivingLiveProvider);
+    final name = ref.watch(deviceNameProvider);
+    final connected =
+        ref.watch(inboundLinksProvider).valueOrNull ?? const <InboundLink>[];
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            _SectionHeader(
+              icon: Icons.wifi_tethering_rounded,
+              title: 'Receiving',
+              color: colorScheme.primary,
+            ),
+            const SizedBox(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: wanted,
+              onChanged: (enabled) =>
+                  ref.read(receivingProvider.notifier).setReceiving(enabled),
+              title: const Text('Let nearby devices send to this phone'),
+              subtitle: Text(
+                wanted
+                    // The state, not the setting. The two differ when the
+                    // socket could not bind or has not come up yet, and a line
+                    // that reported the preference would tell someone they are
+                    // findable at the exact moment they are not.
+                    ? live
+                        ? 'Visible on this Wi-Fi as “$name”'
+                        : 'Starting…'
+                    : 'This phone will not appear on other devices',
+              ),
+            ),
+            if (connected.isNotEmpty) ...<Widget>[
+              const Divider(height: 24),
+              Text(
+                connected.length == 1
+                    ? 'Connected now'
+                    : '${connected.length} connected now',
+                style: theme.textTheme.labelLarge,
+              ),
+              const SizedBox(height: 6),
+              for (final link in connected)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    children: <Widget>[
+                      Icon(
+                        Icons.smartphone_outlined,
+                        size: 18,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child:
+                            Text(link.name, style: theme.textTheme.bodyMedium),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 4. PAIRED DEVICES
 // ---------------------------------------------------------------------------
 
 class _PairedComputersSection extends ConsumerWidget {
@@ -330,7 +426,9 @@ class _PairedComputersSection extends ConsumerWidget {
           children: <Widget>[
             _SectionHeader(
               icon: Icons.devices,
-              title: 'Paired Computers',
+              // Not "Computers" any more: a paired phone lands in the same
+              // trust store and is revoked from the same list.
+              title: 'Paired Devices',
               color: colorScheme.primary,
             ),
             const SizedBox(height: 12),
@@ -1092,7 +1190,8 @@ class _BackgroundClipboardTile extends ConsumerStatefulWidget {
 }
 
 class _BackgroundClipboardTileState
-    extends ConsumerState<_BackgroundClipboardTile> with WidgetsBindingObserver {
+    extends ConsumerState<_BackgroundClipboardTile>
+    with WidgetsBindingObserver {
   bool _enabled = false;
 
   @override
@@ -1311,9 +1410,8 @@ class _AppleWatchSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final availability =
-        ref.watch(watchAvailabilityProvider).valueOrNull ??
-            const WatchAvailability();
+    final availability = ref.watch(watchAvailabilityProvider).valueOrNull ??
+        const WatchAvailability();
 
     if (!availability.supported) return const SizedBox.shrink();
 

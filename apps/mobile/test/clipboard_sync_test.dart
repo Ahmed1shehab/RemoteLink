@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -171,8 +170,8 @@ void main() {
 
       container = ProviderContainer(
         overrides: <Override>[
-          identityStoreProvider.overrideWith((ref) async =>
-              InMemoryIdentityStore()),
+          identityStoreProvider
+              .overrideWith((ref) async => InMemoryIdentityStore()),
           identityProvider.overrideWith((ref) => Future<DeviceIdentity>.value(
                 phoneIdentity,
               )),

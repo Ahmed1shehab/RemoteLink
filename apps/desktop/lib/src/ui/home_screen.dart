@@ -19,6 +19,7 @@ import '../domain/transfer_model.dart';
 import 'clipboard_history_panel.dart';
 import 'diagnostics_screen.dart';
 import 'pairing_code.dart';
+import 'pairing_qr.dart';
 import 'settings_screen.dart';
 
 /// The desktop's only window: status, connected devices, pairing, and file transfers.
@@ -174,6 +175,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       status: status,
                       screenCaptureReady: kScreenSharingShipped &&
                           (screenCapture?.available ?? false),
+                      onPairPhone:
+                          status.localAddresses.isEmpty ? null : _showPairingQr,
                     ),
                   ),
                 ),
@@ -204,10 +207,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                     error: (error, _) => _EmptyState(message: 'Error: $error'),
                     data: (list) => list.isEmpty
-                        ? const _EmptyState(
+                        ? _EmptyState(
                             message:
                                 'No devices connected. Open Remote Link on your '
-                                'phone — it should find this computer automatically.',
+                                'phone — it should find this computer '
+                                'automatically, or you can show it a code to '
+                                'scan.',
+                            action: status.localAddresses.isEmpty
+                                ? null
+                                : _EmptyStateAction(
+                                    label: 'Show pairing code',
+                                    icon: Icons.qr_code_2_rounded,
+                                    onPressed: _showPairingQr,
+                                  ),
                           )
                         : Column(
                             children: <Widget>[
@@ -354,6 +366,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => const SettingsScreen(),
+      ),
+    );
+  }
+
+  /// Shows the code a phone scans to pair.
+  ///
+  /// The service is read here rather than inside the dialog so that the dialog
+  /// stays a pure widget over a payload builder — and so a computer whose
+  /// service has not finished starting simply does not open it, instead of
+  /// rendering a code for an address and port that are not listening yet.
+  Future<void> _showPairingQr() async {
+    final service = await ref.read(desktopServiceProvider.future);
+    if (!mounted) return;
+
+    final addresses = service.localAddresses;
+    if (addresses.isEmpty) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => PairingQrDialog(
+        addresses: addresses,
+        buildPayload: (host) => service.pairingPayload(host: host),
       ),
     );
   }
@@ -1012,8 +1046,7 @@ class _TransferTile extends StatelessWidget {
                 ),
                 _TransferStatusChip(
                   status: transfer.status,
-                  isIncoming:
-                      transfer.direction == TransferDirection.incoming,
+                  isIncoming: transfer.direction == TransferDirection.incoming,
                 ),
               ],
             ),
@@ -1035,8 +1068,7 @@ class _TransferTile extends StatelessWidget {
                   ),
                   if (f.savedPath case final String path) ...<Widget>[
                     IconButton(
-                      onPressed: () =>
-                          unawaited(FileLauncher.revealFile(path)),
+                      onPressed: () => unawaited(FileLauncher.revealFile(path)),
                       icon: const Icon(Icons.folder_open_rounded, size: 18),
                       tooltip: Platform.isMacOS
                           ? 'Show in Finder'
@@ -1492,12 +1524,20 @@ class PermissionRequestDialog extends StatelessWidget {
 }
 
 class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.status, this.screenCaptureReady = false});
+  const _StatusCard({
+    required this.status,
+    this.screenCaptureReady = false,
+    this.onPairPhone,
+  });
 
   final DesktopStatus status;
 
   /// Whether this machine can currently share its screen.
   final bool screenCaptureReady;
+
+  /// Opens the pairing code. Null until the service knows an address to put
+  /// in it — a code pointing nowhere is worse than no button.
+  final Future<void> Function()? onPairPhone;
 
   @override
   Widget build(BuildContext context) {
@@ -1596,33 +1636,54 @@ class _StatusCard extends StatelessWidget {
                 ],
               ),
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: statusColor.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Container(
-                    width: 7,
-                    height: 7,
-                    decoration: BoxDecoration(
-                      color: statusColor,
-                      shape: BoxShape.circle,
-                    ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(999),
                   ),
-                  const SizedBox(width: 7),
-                  Text(
-                    status.isRunning ? 'Online' : 'Offline',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
                           color: statusColor,
-                          fontWeight: FontWeight.w700,
+                          shape: BoxShape.circle,
                         ),
+                      ),
+                      const SizedBox(width: 7),
+                      Text(
+                        status.isRunning ? 'Online' : 'Offline',
+                        style:
+                            Theme.of(context).textTheme.labelMedium?.copyWith(
+                                  color: statusColor,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Setting up a phone is the one thing a new user comes to this
+                // window to do, so it is a button on the status card rather
+                // than an entry in a menu. It sits beside the address the code
+                // encodes, which is also the answer to "which of these is it
+                // going to tell my phone?".
+                if (onPairPhone != null) ...<Widget>[
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: onPairPhone,
+                    icon: const Icon(Icons.qr_code_2_rounded, size: 18),
+                    label: const Text('Pair a phone'),
                   ),
                 ],
-              ),
+              ],
             ),
           ],
         ),
@@ -1946,17 +2007,24 @@ class PairingDialog extends StatelessWidget {
             Text('$peerName wants to control this computer.'),
             const SizedBox(height: 20),
             // Grouped for the eye and announced digit by digit — see
-            // [PairingCodeDisplay]. The entire security of this flow rests on
-            // the user actually comparing both screens, which means the code
-            // has to arrive in a comparable form through whichever sense they
-            // are using.
+            // [PairingCodeDisplay]. The security of the *numeric* flow rests
+            // on the user actually comparing both screens, which means the
+            // code has to arrive in a comparable form through whichever sense
+            // they are using.
+            //
+            // A phone that scanned the code has already settled the question
+            // more strongly than these digits can — it verified the handshake
+            // against a key it read optically — and shows no digits at all.
+            // This computer cannot tell the two cases apart from here, so it
+            // shows the digits either way and the copy below names both.
             Center(
               child: PairingCodeDisplay(digits: shortAuthenticationString),
             ),
             const SizedBox(height: 20),
             Text(
-              'Only approve if your phone is showing exactly these six '
-              'digits. Different numbers mean something is intercepting the '
+              'Approve only if your phone is showing exactly these six '
+              'digits, or if you just scanned the code on this screen with '
+              'it. Different numbers mean something is intercepting the '
               'connection.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
@@ -1985,19 +2053,49 @@ class PairingDialog extends StatelessWidget {
       );
 }
 
+/// A button an empty state can offer as the way out of being empty.
+@immutable
+class _EmptyStateAction {
+  const _EmptyStateAction({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String label;
+  final IconData icon;
+  final Future<void> Function() onPressed;
+}
+
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.message});
+  const _EmptyState({required this.message, this.action});
 
   final String message;
+
+  /// Offered underneath the message, when there is something to do about it.
+  final _EmptyStateAction? action;
 
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 32),
         child: Center(
-          child: Text(
-            message,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              if (action case final action?) ...<Widget>[
+                const SizedBox(height: 16),
+                FilledButton.tonalIcon(
+                  onPressed: action.onPressed,
+                  icon: Icon(action.icon, size: 18),
+                  label: Text(action.label),
+                ),
+              ],
+            ],
           ),
         ),
       );

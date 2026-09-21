@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:remotelink_mobile/src/app/providers.dart';
+import 'package:remotelink_mobile/src/features/host/host_providers.dart';
+import 'package:remotelink_mobile/src/features/host/nearby_prompts.dart';
 import 'package:remotelink_mobile/src/features/transfer/file_exporter.dart';
 import 'package:remotelink_mobile/src/features/transfer/image_preview.dart';
 import 'package:remotelink_mobile/src/features/transfer/mobile_transfer_store.dart';
@@ -251,9 +253,8 @@ void main() {
             ),
           ],
         );
-        final incoming =
-            (await store.prepare(offer, namespace: 'session-full-$index'))[
-                'f-1']!;
+        final incoming = (await store.prepare(offer,
+            namespace: 'session-full-$index'))['f-1']!;
         await incoming.write(0, Uint8List.fromList(<int>[index]));
         await incoming.commit();
       }
@@ -364,7 +365,7 @@ void main() {
   });
 
   group('TransferScreen Widget Tests', () {
-    testWidgets('renders targets with Media first and File second',
+    testWidgets('the send card names its destination and both sources',
         (tester) async {
       final now = DateTime.now();
       final targetPeer = TrustedPeer(
@@ -408,13 +409,18 @@ void main() {
             identityProvider.overrideWith(
               (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
             ),
-            // The screen sends to the connected computer and only that one,
-            // so this is the seam that decides whether Send is live.
-            // Overridden directly rather than by faking a session: the
-            // provider it reads needs an established `Session`, which cannot
-            // be built in a widget test without a socket.
-            transferTargetProvider.overrideWithValue(
-              (id: targetPeer.id, name: targetPeer.name),
+            // Who the screen can send to. A plain list, because the link
+            // carries no `Session` — see [PeerLink] for why the transport is
+            // deliberately absent from what a screen is handed.
+            peerLinksProvider.overrideWithValue(
+              <PeerLink>[
+                PeerLink(
+                  id: targetPeer.id,
+                  name: targetPeer.name,
+                  platform: PlatformKind.macos,
+                  origin: LinkOrigin.outbound,
+                ),
+              ],
             ),
             clientStateProvider.overrideWith(
               (ref) => Stream<ClientState>.value(ClientState.connected),
@@ -441,22 +447,110 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      expect(find.text('Send to device'), findsOneWidget);
-      expect(find.text('Text / URL'), findsNothing);
-      expect(find.text('File'), findsOneWidget);
-      expect(find.text('Media'), findsOneWidget);
-      expect(find.text('Send Media'), findsOneWidget);
-      expect(find.text('Choose media'), findsOneWidget);
+      // The card names the device it would send to. It used to say "Send to
+      // device / Photos, videos, and files" whatever the state was, which is a
+      // caption that cannot be wrong because it says nothing.
+      expect(find.text('Send'), findsOneWidget);
+      expect(find.text('to Ahmed MacBook'), findsOneWidget);
 
-      // Switch to File mode. This used to assert a "File path" text field, in
-      // which the user was expected to type an absolute path by hand — the
-      // screen offers a picker now, and the field is gone.
-      await tester.tap(find.text('File'));
-      await tester.pumpAndSettle();
-      expect(find.text('Choose files'), findsOneWidget);
-      expect(find.text('Send File'), findsOneWidget);
+      // Both sources, always, with no mode to be in first. There is no longer
+      // a segmented control, and asserting its absence is the point: a test
+      // that only checked the new buttons would still pass if the old switch
+      // were left sitting above them.
+      expect(find.widgetWithText(OutlinedButton, 'Media'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Files'), findsOneWidget);
+      expect(find.byType(SegmentedButton<int>), findsNothing);
+
+      // One primary action, which names its destination, and says what it is
+      // waiting for rather than going quietly grey.
+      expect(
+        find.widgetWithText(FilledButton, 'Send to Ahmed MacBook'),
+        findsOneWidget,
+      );
+      expect(find.text('Choose media or files above.'), findsOneWidget);
 
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a second device turns the destination into a choice',
+        (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            identityProvider.overrideWith(
+              (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+            ),
+            peerLinksProvider.overrideWithValue(
+              const <PeerLink>[
+                PeerLink(
+                  id: DeviceId('desktop-1'),
+                  name: 'Work Mac',
+                  platform: PlatformKind.macos,
+                  origin: LinkOrigin.outbound,
+                ),
+                PeerLink(
+                  id: DeviceId('phone-2'),
+                  name: "Sara's Pixel",
+                  platform: PlatformKind.android,
+                  origin: LinkOrigin.inbound,
+                ),
+              ],
+            ),
+            mobileTransferStoreProvider.overrideWith(
+              (ref) async => MobileTransferStore(Directory.systemTemp),
+            ),
+          ],
+          child: const MaterialApp(home: Scaffold(body: TransferScreen())),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      // Both are offered, and the first is the one the button is aimed at.
+      expect(find.widgetWithText(ChoiceChip, 'Work Mac'), findsOneWidget);
+      expect(find.widgetWithText(ChoiceChip, "Sara's Pixel"), findsOneWidget);
+      expect(
+        find.widgetWithText(FilledButton, 'Send to Work Mac'),
+        findsOneWidget,
+      );
+
+      // Choosing the phone re-aims it. This is the case the screen could not
+      // express at all before: there was one session and the UI said so.
+      await tester.tap(find.widgetWithText(ChoiceChip, "Sara's Pixel"));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.widgetWithText(FilledButton, "Send to Sara's Pixel"),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('with nothing connected the card explains instead of teasing',
+        (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            identityProvider.overrideWith(
+              (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+            ),
+            peerLinksProvider.overrideWithValue(const <PeerLink>[]),
+            mobileTransferStoreProvider.overrideWith(
+              (ref) async => MobileTransferStore(Directory.systemTemp),
+            ),
+          ],
+          child: const MaterialApp(home: Scaffold(body: TransferScreen())),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Nowhere to send yet'), findsOneWidget);
+      expect(find.textContaining('another phone'), findsOneWidget);
+      // No picker to fill in and no button to press: the old screen let the
+      // user choose three photos before telling them there was nowhere to put
+      // them.
+      expect(find.widgetWithText(OutlinedButton, 'Media'), findsNothing);
+      expect(find.byType(FilledButton), findsNothing);
     });
 
     testWidgets(
@@ -506,13 +600,18 @@ void main() {
             identityProvider.overrideWith(
               (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
             ),
-            // The screen sends to the connected computer and only that one,
-            // so this is the seam that decides whether Send is live.
-            // Overridden directly rather than by faking a session: the
-            // provider it reads needs an established `Session`, which cannot
-            // be built in a widget test without a socket.
-            transferTargetProvider.overrideWithValue(
-              (id: targetPeer.id, name: targetPeer.name),
+            // Who the screen can send to. A plain list, because the link
+            // carries no `Session` — see [PeerLink] for why the transport is
+            // deliberately absent from what a screen is handed.
+            peerLinksProvider.overrideWithValue(
+              <PeerLink>[
+                PeerLink(
+                  id: targetPeer.id,
+                  name: targetPeer.name,
+                  platform: PlatformKind.macos,
+                  origin: LinkOrigin.outbound,
+                ),
+              ],
             ),
             clientStateProvider.overrideWith(
               (ref) => Stream<ClientState>.value(ClientState.connected),
@@ -599,13 +698,15 @@ void main() {
         final container = ProviderContainer(
           overrides: <Override>[
             clientProvider.overrideWith((ref) async => client),
-            // The screen sends to the connected computer and only that one,
-            // so this is the seam that decides whether Send is live.
-            // Overridden directly rather than by faking a session: the
-            // provider it reads needs an established `Session`, which cannot
-            // be built in a widget test without a socket.
-            transferTargetProvider.overrideWithValue(
-              (id: const DeviceId('desktop-1'), name: 'Work Mac'),
+            peerLinksProvider.overrideWithValue(
+              const <PeerLink>[
+                PeerLink(
+                  id: DeviceId('desktop-1'),
+                  name: 'Work Mac',
+                  platform: PlatformKind.macos,
+                  origin: LinkOrigin.outbound,
+                ),
+              ],
             ),
             clientStateProvider.overrideWith(
               (ref) => Stream<ClientState>.value(ClientState.connected),
@@ -683,13 +784,15 @@ void main() {
             identityProvider.overrideWith(
               (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
             ),
-            // The screen sends to the connected computer and only that one,
-            // so this is the seam that decides whether Send is live.
-            // Overridden directly rather than by faking a session: the
-            // provider it reads needs an established `Session`, which cannot
-            // be built in a widget test without a socket.
-            transferTargetProvider.overrideWithValue(
-              (id: const DeviceId('desktop-1'), name: 'Work Mac'),
+            peerLinksProvider.overrideWithValue(
+              const <PeerLink>[
+                PeerLink(
+                  id: DeviceId('desktop-1'),
+                  name: 'Work Mac',
+                  platform: PlatformKind.macos,
+                  origin: LinkOrigin.outbound,
+                ),
+              ],
             ),
             clientStateProvider.overrideWith(
               (ref) => Stream<ClientState>.value(ClientState.connected),
@@ -722,7 +825,8 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('a received file is something the list can open', (tester) async {
+    testWidgets('a received file is something the list can open',
+        (tester) async {
       // The complaint this answers: tapping the name of a photo that had just
       // arrived did nothing, and the only way to see it was to leave the app
       // and find it in the gallery.
@@ -777,8 +881,15 @@ void main() {
             identityProvider.overrideWith(
               (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
             ),
-            transferTargetProvider.overrideWithValue(
-              (id: const DeviceId('desktop-1'), name: 'Work Mac'),
+            peerLinksProvider.overrideWithValue(
+              const <PeerLink>[
+                PeerLink(
+                  id: DeviceId('desktop-1'),
+                  name: 'Work Mac',
+                  platform: PlatformKind.macos,
+                  origin: LinkOrigin.outbound,
+                ),
+              ],
             ),
             clientStateProvider.overrideWith(
               (ref) => Stream<ClientState>.value(ClientState.connected),
@@ -852,8 +963,15 @@ void main() {
             identityProvider.overrideWith(
               (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
             ),
-            transferTargetProvider.overrideWithValue(
-              (id: const DeviceId('desktop-1'), name: 'Work Mac'),
+            peerLinksProvider.overrideWithValue(
+              const <PeerLink>[
+                PeerLink(
+                  id: DeviceId('desktop-1'),
+                  name: 'Work Mac',
+                  platform: PlatformKind.macos,
+                  origin: LinkOrigin.outbound,
+                ),
+              ],
             ),
             clientStateProvider.overrideWith(
               (ref) => Stream<ClientState>.value(ClientState.connected),
@@ -888,7 +1006,7 @@ void main() {
       );
     });
 
-    testWidgets('shows incoming transfer prompt and handles Accept and Decline',
+    testWidgets('an incoming offer is asked about wherever the user is',
         (tester) async {
       final incomingOffer = FileOffer(
         transferId: 'in-1',
@@ -917,51 +1035,165 @@ void main() {
         destinationPath: '/sdcard/Download/RemoteLink',
       );
 
+      late _DecisionRecordingController recorded;
+
+      // Nothing here is the Send screen, and that is the test. The prompt used
+      // to be part of it, so an offer that arrived while the user was on the
+      // touchpad — or on the device list, or with the app just launched —
+      // produced no sheet at all and the sender watched it time out.
       await tester.pumpWidget(
         ProviderScope(
           overrides: <Override>[
             identityProvider.overrideWith(
               (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
             ),
-            // The screen sends to the connected computer and only that one,
-            // so this is the seam that decides whether Send is live.
-            // Overridden directly rather than by faking a session: the
-            // provider it reads needs an established `Session`, which cannot
-            // be built in a widget test without a socket.
-            transferTargetProvider.overrideWithValue(
-              (id: const DeviceId('desktop-1'), name: 'Work Mac'),
-            ),
-            clientStateProvider.overrideWith(
-              (ref) => Stream<ClientState>.value(ClientState.connected),
-            ),
-            transferControllerProvider.overrideWith((ref) {
-              final controller = MobileTransferController(
+            transferControllerProvider.overrideWith(
+              (ref) => recorded = _DecisionRecordingController(
                 ref,
                 customTransferStore: MobileTransferStore(Directory.systemTemp),
-              );
-              controller.state = TransferState(
-                pendingIncoming: pending,
-              );
-              return controller;
-            }),
+              ),
+            ),
           ],
-          child: const MaterialApp(home: Scaffold(body: TransferScreen())),
+          child: const _PromptHarness(),
         ),
       );
-
-      await tester.pump();
       await tester.pump();
 
-      expect(find.text('Incoming transfer from Work Mac'), findsWidgets);
+      recorded.offer(pending);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Incoming files'), findsOneWidget);
+      expect(find.textContaining('Work Mac'), findsWidgets);
+      // Named rather than counted: "2 files" is not something a decision can
+      // be made from, and the decision is the only reason the sheet is up.
       expect(find.text('report.pdf'), findsOneWidget);
       expect(find.text('notes.txt'), findsOneWidget);
-      expect(find.text('Accept'), findsWidgets);
-      expect(find.text('Decline'), findsWidgets);
-      expect(
-        find.textContaining('First transfer'),
-        findsWidgets,
+      // Where it will land, said before accepting rather than after.
+      expect(find.textContaining('Photos library'), findsOneWidget);
+
+      await tester.tap(find.text('Decline'));
+      await tester.pumpAndSettle();
+
+      expect(recorded.declined, <String>['in-1']);
+      expect(recorded.accepted, isEmpty);
+      expect(find.text('Incoming files'), findsNothing);
+    });
+
+    testWidgets('a second offer is asked about once the first is answered',
+        (tester) async {
+      PendingIncomingTransfer offerOf(String id, String fileName) =>
+          PendingIncomingTransfer(
+            transferId: id,
+            peerId: const DeviceId('desktop-1'),
+            peerName: 'Work Mac',
+            offer: FileOffer(
+              transferId: id,
+              files: <OfferedFile>[
+                OfferedFile(
+                  fileId: 'f-1',
+                  fileName: fileName,
+                  size: 10,
+                  fileType: 'text/plain',
+                ),
+              ],
+            ),
+            isFirstTransferFromDevice: false,
+            destinationPath: '/sdcard/Download/RemoteLink',
+          );
+
+      late _DecisionRecordingController recorded;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            identityProvider.overrideWith(
+              (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+            ),
+            transferControllerProvider.overrideWith(
+              (ref) => recorded = _DecisionRecordingController(
+                ref,
+                customTransferStore: MobileTransferStore(Directory.systemTemp),
+              ),
+            ),
+          ],
+          child: const _PromptHarness(),
+        ),
       );
-      expect(tester.takeException(), isNull);
+      await tester.pump();
+
+      recorded.offer(offerOf('in-1', 'first.txt'));
+      await tester.pumpAndSettle();
+      expect(find.text('first.txt'), findsOneWidget);
+
+      // Queued while the first sheet is up. An earlier version dropped this —
+      // `showModalBottomSheet` returned null because one was already open, and
+      // null read as "declined", so the second device was refused without
+      // anyone being asked.
+      recorded.queue(offerOf('in-2', 'second.txt'));
+      await tester.tap(find.text('Accept'));
+      await tester.pumpAndSettle();
+
+      expect(recorded.accepted, <String>['in-1']);
+      expect(find.text('second.txt'), findsOneWidget);
+
+      await tester.tap(find.text('Accept'));
+      await tester.pumpAndSettle();
+
+      expect(recorded.accepted, <String>['in-1', 'in-2']);
+      expect(find.byType(BottomSheet), findsNothing);
+    });
+
+    testWidgets('dismissing the offer sheet is a decline, not a pause',
+        (tester) async {
+      final pending = PendingIncomingTransfer(
+        transferId: 'in-2',
+        peerId: const DeviceId('desktop-1'),
+        peerName: 'Work Mac',
+        offer: FileOffer(
+          transferId: 'in-2',
+          files: <OfferedFile>[
+            OfferedFile(
+              fileId: 'f-1',
+              fileName: 'one.txt',
+              size: 10,
+              fileType: 'text/plain',
+            ),
+          ],
+        ),
+        isFirstTransferFromDevice: false,
+        destinationPath: '/sdcard/Download/RemoteLink',
+      );
+
+      late _DecisionRecordingController recorded;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            identityProvider.overrideWith(
+              (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+            ),
+            transferControllerProvider.overrideWith(
+              (ref) => recorded = _DecisionRecordingController(
+                ref,
+                customTransferStore: MobileTransferStore(Directory.systemTemp),
+              ),
+            ),
+          ],
+          child: const _PromptHarness(),
+        ),
+      );
+      await tester.pump();
+
+      recorded.offer(pending);
+      await tester.pumpAndSettle();
+      expect(find.text('Incoming file'), findsOneWidget);
+
+      // Tapping the scrim. A sheet that could be got rid of without answering
+      // would leave the sender waiting on a decision nobody is going to make.
+      await tester.tapAt(const Offset(20, 20));
+      await tester.pumpAndSettle();
+
+      expect(recorded.declined, <String>['in-2']);
     });
   });
 }
@@ -991,3 +1223,64 @@ final class _RecordingExporter implements IncomingFileExporter {
 const String _kOnePixelPng =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGMAAQAABQABDQott'
     'AAAAABJRU5ErkJggg==';
+
+/// Stands in for the app root: the one place the prompts are raised from.
+///
+/// Deliberately not [TransferScreen]. The listener under test is wired at the
+/// root in `main.dart` for the same reason the share listener is, and a harness
+/// that mounted the Send screen would prove only that it works on the one
+/// screen it used to be trapped on.
+class _PromptHarness extends ConsumerWidget {
+  const _PromptHarness();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final navigatorKey = GlobalKey<NavigatorState>();
+    listenForNearbyPrompts(ref, navigatorKey);
+    return MaterialApp(
+      navigatorKey: navigatorKey,
+      home: const Scaffold(body: Center(child: Text('somewhere else'))),
+    );
+  }
+}
+
+/// Records the answers instead of putting them on a session that is not there.
+///
+/// The real methods need an established `Session` and would fail the transfer
+/// before recording anything, which would test the guard rather than the
+/// decision that reached it.
+final class _DecisionRecordingController extends MobileTransferController {
+  _DecisionRecordingController(super.ref, {super.customTransferStore});
+
+  final List<String> accepted = <String>[];
+  final List<String> declined = <String>[];
+
+  /// The offer that arrives while another is still being answered.
+  ///
+  /// `TransferState` holds one pending offer at a time, so a real second offer
+  /// would overwrite the first rather than queue behind it. This stands in for
+  /// the queue the controller does not have, which is enough to exercise the
+  /// part under test: whether answering one prompt goes looking for the next.
+  PendingIncomingTransfer? _next;
+
+  /// Puts an offer into the state the way an arriving `FileOffer` would.
+  void offer(PendingIncomingTransfer request) =>
+      state = state.copyWith(pendingIncoming: () => request);
+
+  /// Holds an offer to be raised once the current one is answered.
+  void queue(PendingIncomingTransfer request) => _next = request;
+
+  @override
+  Future<void> acceptIncomingTransfer(PendingIncomingTransfer request) async {
+    accepted.add(request.transferId);
+    final next = _next;
+    _next = null;
+    state = state.copyWith(pendingIncoming: () => next);
+  }
+
+  @override
+  Future<void> declineIncomingTransfer(PendingIncomingTransfer request) async {
+    declined.add(request.transferId);
+    state = state.copyWith(pendingIncoming: () => null);
+  }
+}

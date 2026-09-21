@@ -24,6 +24,9 @@ recorded in [ADR 0004](adr/0004-apple-watch-relays-through-the-phone.md).
 - release builds on both ends
 - Low Power Mode off
 
+A repeat measurement after the Phase 0 investigation stabilised at **230 ms**,
+confirming that the original result was not a sensitivity-setting problem.
+
 200 ms is roughly five pointer updates a second. The cursor is usable for
 coarse pointing and nothing else. Every optimisation available inside the relay
 design has already been applied.
@@ -54,8 +57,8 @@ improve.
    fine; do not add it to the shipping desktop app).
 2. In the existing `RemoteLinkWatch` target, a temporary screen that opens an
    `NWConnection` to that server, sends 12 bytes, waits for 12 back, and
-   displays a smoothed round-trip figure in milliseconds — the same way
-   `WatchLink.roundTripMillis` is displayed today.
+   displays a smoothed round-trip figure in milliseconds — using the same
+   smoothing as the temporary relay RTT instrumentation that preceded it.
 3. Measure under four conditions and write the numbers into this file:
    - iPhone nearby, its app in the foreground
    - iPhone nearby, its app backgrounded / screen off
@@ -67,6 +70,33 @@ nearby is **under ~60 ms**. If it lands near 200 ms in the nearby cases and only
 drops when the phone is off, then the watch is being proxied through the phone,
 this design cannot fix the problem, and you should stop and report that — do not
 implement Phases 1–6. Delete the spike either way.
+
+### Phase 0 result — no-go (2026-08-26)
+
+The direct-TCP proposal is blocked below the routing question. On a physical
+Apple Watch running watchOS 26.6, an `NWConnection` to a verified listening
+12-byte echo server at `192.168.100.44:45454` remained in `.waiting` with POSIX
+`ENETDOWN` (50, “Network is down”). No payload reached the server and therefore
+no numeric round trip existed to smooth or record.
+
+| Condition | Direct TCP result |
+|---|---|
+| iPhone nearby, app foreground | No RTT — blocked with `ENETDOWN` (observed) |
+| iPhone nearby, app backgrounded / screen off | Not run — the transport is unavailable to this class of watch app |
+| iPhone in aeroplane mode | Not run — changing the route cannot enable a blocked API |
+| iPhone powered off | Not run — changing the route cannot enable a blocked API |
+
+This is the documented watchOS behavior, not a transient absence of Wi-Fi.
+Apple's [TN3135: Low-level networking on watchOS](https://developer.apple.com/documentation/technotes/tn3135-low-level-networking-on-watchos)
+states that normal watch apps cannot use low-level networking: an
+`NWConnection` stays in `.waiting` with `ENETDOWN`. The restriction also covers
+`NWBrowser` and Bonjour, so both the proposed discovery and TCP transport are
+unavailable. The four-condition latency experiment cannot produce four numbers;
+the first condition reached a stronger terminal result before route selection.
+
+**Gate decision: no-go.** Phases 1–6 were not implemented. The temporary watch
+screen, local-network plist entry, and echo server were deleted. The existing
+WatchConnectivity relay remains the only supported control path.
 
 ---
 

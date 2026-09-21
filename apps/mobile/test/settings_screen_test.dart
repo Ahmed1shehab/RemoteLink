@@ -70,19 +70,31 @@ void main() {
       expect(find.text(identity.id.value), findsOneWidget);
       expect(find.text('Public-key fingerprint'), findsOneWidget);
 
-      // Section 2: PAIRED COMPUTERS
-      expect(find.text('Paired Computers'), findsOneWidget);
+      // Section 2: RECEIVING
+      expect(find.text('Receiving'), findsOneWidget);
+      expect(
+        find.text('Let nearby devices send to this phone'),
+        findsOneWidget,
+      );
+      // The switch reports the socket, not the preference. With no host
+      // running in a widget test the honest answer is "not yet", and saying
+      // "visible" here would be the app telling the user they are findable at
+      // the moment they are not.
+      expect(find.text('Starting…'), findsOneWidget);
+
+      // Section 3: PAIRED DEVICES
+      expect(find.text('Paired Devices'), findsOneWidget);
       expect(find.text('Living Room PC'), findsOneWidget);
       expect(find.textContaining('Last seen: 192.168.1.50'), findsOneWidget);
 
-      // Section 3: TOUCHPAD
+      // Section 4: TOUCHPAD
       expect(find.text('Appearance'), findsOneWidget);
       expect(find.text('Touchpad'), findsOneWidget);
       expect(find.text('Pointer sensitivity'), findsOneWidget);
       expect(find.text('Natural scrolling'), findsOneWidget);
       expect(find.text('Tap to click'), findsOneWidget);
 
-      // Section 4: CLIPBOARD
+      // Section 5: CLIPBOARD
       expect(find.text('Clipboard'), findsOneWidget);
       expect(find.text('Sync from computer'), findsOneWidget);
       expect(find.text('Sync to computer'), findsOneWidget);
@@ -135,7 +147,8 @@ void main() {
               trustStore: InMemoryTrustStore(),
               deviceName: 'My Test Phone',
             ),
-            linkServiceProvider.overrideWithValue(const _SupportedLinkService()),
+            linkServiceProvider
+                .overrideWithValue(const _SupportedLinkService()),
           ],
           child: const MaterialApp(home: SettingsScreen()),
         ),
@@ -362,7 +375,8 @@ void main() {
       );
     });
 
-    testWidgets('the app opens dark, and the choice round-trips through storage',
+    testWidgets(
+        'the app opens dark, and the choice round-trips through storage',
         (tester) async {
       tester.view.physicalSize = const Size(1080, 2400);
       tester.view.devicePixelRatio = 1.0;
@@ -657,7 +671,6 @@ final class _SupportedLinkService implements LinkService {
 
   @override
   Stream<void> get backgroundReadRefusals => const Stream<void>.empty();
-
 
   @override
   Future<void> start({

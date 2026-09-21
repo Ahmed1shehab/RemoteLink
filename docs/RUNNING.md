@@ -183,8 +183,10 @@ iPhone. Apply for `com.apple.developer.networking.multicast` at
 manual and not instant.
 
 Once granted, add it to `apps/mobile/ios/Runner/Runner.entitlements` and select
-the matching provisioning profile. Until then, a real device will pair only if
-you reach it another way — the Simulator and Android have no such gate.
+the matching provisioning profile. Until then, a real device pairs by scanning:
+click **Pair a phone** on the desktop and tap **Scan code** on the iPhone. The
+code carries the address, so nothing has to be discovered. The Simulator and
+Android have no such gate.
 
 Everything else (free or paid) is unaffected: signing for local development
 works with the automatically managed "Apple Development" certificate Flutter
@@ -196,14 +198,26 @@ already picked up.
 
 The watch app lives in `apps/mobile/ios/RemoteLinkWatch/` and is a target of
 `Runner.xcodeproj`, because a watchOS app has to be embedded in its companion
-iPhone app to install at all. It is a trackpad and nothing else: drag to move
-the pointer, tap to click, turn the Digital Crown to scroll, and three buttons
-for left click, a drag lock, and right click.
+iPhone app to install at all. It is a full-screen trackpad and nothing else:
+drag to move the pointer, tap to click, double tap to double click, and hold for
+450 ms before moving to press and drag. There are no buttons, icons, or status
+row taking space from the touch surface.
 
 It does **not** speak the Remote Link protocol. It talks to the iPhone over
 WatchConnectivity and the iPhone puts what it says on the session it already
 holds — [ADR 0004](adr/0004-apple-watch-relays-through-the-phone.md) has the
-reasoning and states what that costs.
+measured reasoning and states what that costs. A physical-watch spike confirmed
+that watchOS blocks a normal app's `NWConnection` and `NWBrowser` with
+`ENETDOWN`, so a direct TCP client is not available through public APIs.
+
+### Pairing the watch
+
+The watch does not pair independently and never shows a SAS. Pair the iPhone to
+the computer using the six-digit confirmation in the normal client flow, then
+install and open the companion watch app. Keep Remote Link open on the iPhone
+for the first connection. The watch uses that phone's authenticated session; it
+does not copy the phone's private key or appear separately in the desktop trust
+store.
 
 ### One thing that changes for everyone
 
@@ -244,14 +258,14 @@ xcrun simctl install <watch-simulator-id> build/ios/Debug-watchsimulator/RemoteL
 xcrun simctl launch  <watch-simulator-id> com.remotelink.app.watchkitapp
 ```
 
-The watch says which link is down rather than a single "not connected", so the
-header is the fastest diagnostic there is:
+The watch shows text only when there is nothing to control, and says which link
+is down rather than collapsing both into “not connected”:
 
 | The watch says | What is wrong |
 |---|---|
-| `Open on iPhone` | The watch cannot reach the phone app. Launch it on the phone. |
-| `No computer` | The watch reached the phone; the phone is not connected to a computer. |
-| The computer's name | Working. |
+| `Open Remote Link on your iPhone` | The watch cannot reach the phone app. Launch it on the phone. |
+| `Your iPhone isn’t connected to a computer` | The watch reached the phone; the phone is not connected to a computer. |
+| No text; the dot field fills the screen | Working. |
 
 ---
 

@@ -86,6 +86,13 @@ over an optical channel no network attacker can reach, *before* the handshake,
 so there is no window to attack — the handshake either authenticates against
 the scanned key or fails.
 
+That last clause is load-bearing and is enforced in the UI, not only in the
+handshake: a scanned pairing whose key does not match offers **no** way
+onward. Not a retry, not a fall back to comparing digits. Degrading to the
+weaker method on mismatch would hand an attacker a working plan — cause a
+mismatch, wait for the tap — and it is asserted against in
+`apps/mobile/test/qr_pairing_test.dart`.
+
 ---
 
 ## 4. Known gaps, ranked

@@ -264,6 +264,19 @@ final class TransferSpeedTracker {
 }
 
 /// Formats byte counts into human-readable strings.
+/// What happens to a file once it arrives, in one sentence.
+///
+/// Said before the user accepts rather than after, because where a file lands
+/// is not this app's choice to make quietly: a photo goes to the camera roll
+/// and anything else goes wherever the share sheet is pointed. The transfer
+/// list can reopen recent arrivals, but that is a convenience on top of a real
+/// destination, not the destination itself — this app is still not a folder,
+/// and saying otherwise would leave people looking for one.
+const String kIncomingDestinationExplanation =
+    'Photos and videos are saved to your Photos library. Anything else opens '
+    'the share sheet so you can choose where it goes. Recent arrivals stay '
+    'openable from this list.';
+
 String formatBytes(int bytes) {
   if (bytes < 1024) return '$bytes B';
   if (bytes < 1024 * 1024) {

@@ -1493,7 +1493,8 @@ final class DesktopService {
                 // and "open" and "show in folder" in the transfer list have
                 // nothing to point at without it.
                 savedPath: incomingTransferStore is FileTransferStore
-                    ? (incomingTransferStore as FileTransferStore).committedPath(
+                    ? (incomingTransferStore as FileTransferStore)
+                        .committedPath(
                         transferId: message.transferId,
                         fileId: message.fileId,
                       )
@@ -2039,8 +2040,7 @@ final class DesktopService {
           'osascript',
           <String>[
             '-e',
-            'tell app "System Events" to keystroke "q" using '
-                '{command down, control down}',
+            'tell app "System Events" to keystroke "q" using {command down, control down}',
           ],
         ),
       (PlatformKind.macos, PowerAction.logOut) => (
@@ -2299,8 +2299,7 @@ final class DesktopService {
     if (NativeBackends.currentPlatform != PlatformKind.macos) return;
     try {
       await Process.run('open', <String>[
-        'x-apple.systempreferences:com.apple.preference.security'
-            '?Privacy_Accessibility',
+        'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
       ]);
     } on ProcessException catch (e) {
       _log.warn('could not open settings', error: e);
@@ -2323,8 +2322,7 @@ final class DesktopService {
     _screenCapture.requestPermission();
     try {
       await Process.run('open', <String>[
-        'x-apple.systempreferences:com.apple.preference.security'
-            '?Privacy_ScreenCapture',
+        'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
       ]);
     } on ProcessException catch (e) {
       _log.warn('could not open settings', error: e);

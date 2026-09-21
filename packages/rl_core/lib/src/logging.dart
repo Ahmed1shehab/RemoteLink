@@ -129,17 +129,10 @@ final class Log {
 
   final String scope;
 
-  static LogLevel _level = LogLevel.info;
-  static LogSink _sink = const ConsoleLogSink();
-
   /// Minimum severity that reaches [sink].
-  static LogLevel get level => _level;
+  static LogLevel level = LogLevel.info;
 
-  static set level(LogLevel value) => _level = value;
-
-  static LogSink get sink => _sink;
-
-  static set sink(LogSink value) => _sink = value;
+  static LogSink sink = const ConsoleLogSink();
 
   /// Creates a logger for a subsystem, e.g. `Log.scoped('transport.session')`.
   static Log scoped(String scope) => Log._(scope);
@@ -148,7 +141,7 @@ final class Log {
   Log child(String suffix) => Log._('$scope.$suffix');
 
   bool enabledFor(LogLevel candidate) =>
-      candidate.severity >= _level.severity && _level != LogLevel.off;
+      candidate.severity >= level.severity && level != LogLevel.off;
 
   void trace(String Function() message, {Map<String, Object?>? fields}) =>
       _log(LogLevel.trace, message, fields);
@@ -183,7 +176,7 @@ final class Log {
     StackTrace? stackTrace,
   ]) {
     if (!enabledFor(candidate)) return;
-    _sink.write(
+    sink.write(
       LogRecord(
         level: candidate,
         scope: scope,

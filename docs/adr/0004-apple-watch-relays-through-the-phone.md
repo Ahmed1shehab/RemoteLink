@@ -1,86 +1,105 @@
-# ADR 0004 — The Apple Watch is a remote for the phone, not a second client
+# ADR 0004 — The Apple Watch relays through the phone
 
 **Status:** accepted · **Date:** 2026-08-26 · **Milestone:** 1
 
 ## Context
 
-The phone app is a trackpad for a computer on the same Wi-Fi. A watch on the
-same wrist is the natural place to want the same trackpad — glance down, move
-the cursor, click — without taking the phone out.
+The watchOS app is a full-screen trackpad for the computer paired with Remote
+Link on the iPhone. Its original design sends packed input intents over
+WatchConnectivity; the iPhone forwards them on the authenticated Remote Link
+session it already holds.
 
-A watchOS app cannot be written in Flutter. Whatever is on the wrist is Swift,
-and it either speaks the Remote Link protocol itself or it speaks to something
-that does.
+That relay measures 200–230 ms round trip on physical hardware: one
+12-byte binary message in flight, release builds on both ends, and Low Power
+Mode off. A wider three-message window raised latency rather than lowering it,
+confirming that WatchConnectivity serialises the work and that queue tuning
+cannot recover the missing responsiveness. Roughly five pointer updates per
+second—or about four at the repeated 230 ms reading—is usable only for coarse
+pointing.
+
+A direct watch client was proposed to remove the iPhone from the control path.
+It would have used Bonjour discovery and `NWConnection` TCP, with an independent
+X25519 identity, trust store, pairing flow, protocol implementation, and
+encrypted session.
+
+## Phase 0 evidence
+
+The direct-client proposal had a go/no-go spike before its protocol work. A
+temporary server on the Mac echoed 12 bytes over TCP, and a temporary screen in
+the physical watch app opened an `NWConnection` to it.
+
+The server was verified listening at `192.168.100.44:45454`. With the iPhone
+nearby and its app in the foreground, the watch connection remained in
+`.waiting` with POSIX `ENETDOWN` (50, “Network is down”). No payload reached the
+server, so there was no round-trip number to record.
+
+This matches Apple's documented platform policy rather than a broken route.
+[TN3135: Low-level networking on watchOS](https://developer.apple.com/documentation/technotes/tn3135-low-level-networking-on-watchos)
+states that a normal watch app cannot use low-level networking. An
+`NWConnection` is deliberately held in `.waiting` with `ENETDOWN`; `NWBrowser`
+and Bonjour are covered by the same restriction. Changing whether the paired
+phone is foregrounded, in aeroplane mode, or powered off cannot make the API
+available, so the remaining routing conditions were not run.
 
 ## Decision
 
-The watch app is a **thin remote for the phone**. It sends intents — "move by
-this much", "left click", "scroll this many lines" — to the iPhone app over
-WatchConnectivity, and the iPhone puts them on the session it already holds
-open to the computer.
+The watch remains a **thin remote for the phone**. It sends movement, clicks,
+presses, and releases to the iPhone over WatchConnectivity. The iPhone puts
+those intents on its existing Remote Link session to the computer.
 
-The watch never touches the network, never holds a key, and never appears in a
-trust store.
+The watch does not speak the Remote Link wire protocol, hold its own identity,
+pair independently, browse Bonjour, or open a TCP connection. The Phase 0 spike
+was deleted after the no-go result.
 
-## Reasoning
+## Rejected options
 
-### Against a second protocol client on the watch
+### A direct `NWConnection` and Bonjour client
 
-Making the watch a peer would mean reimplementing, in Swift: the X25519
-handshake, the ChaCha20-Poly1305 session layer with its replay window, the
-binary framing, the discovery protocol, and the trust store — every line of
-`packages/`, a second time, in a second language, with a second set of bugs in
-the part of the system that has the worst failure mode.
+Rejected because public watchOS APIs do not permit either operation for a
+normal app. This is stronger than the original concern that watch traffic might
+be proxied through the iPhone: the connection is blocked before watchOS chooses
+a route. The observed `ENETDOWN` is the exact failure Apple documents.
 
-It would also mean pairing. Pairing is a six-digit SAS the user compares
-between two screens; one of those screens would be 40mm across. And it would
-mean the watch had to be on the same Wi-Fi as the computer, which a watch
-frequently is not — it is on the phone's Bluetooth, which is precisely the link
-this design uses.
+### Reclassifying the app to obtain low-level networking
 
-### What relaying costs
+watchOS permits low-level networking for specific active audio-streaming, VoIP,
+and DeviceDiscoveryUI application-service cases. Remote Link is none of those.
+Pretending otherwise would misuse capabilities, constrain the product around an
+unrelated execution mode, and produce an app that cannot be shipped honestly.
 
-Stated plainly, because it is real:
+### A separate HTTP service used through `URLSession`
 
-**One more hop of latency.** Bluetooth to the phone, then Wi-Fi to the
-computer. The watch batches movement at 30 Hz before sending — see
-`WatchLink.flush` — because sending one message per touch update does not make
-the cursor smoother, it fills the queue and the cursor arrives late and keeps
-arriving after the finger has stopped.
+High-level HTTP networking is available on watchOS, but this would not be a
+Swift implementation of the existing Remote Link client. It would require a
+second server and wire protocol on the desktop, a discoverable HTTPS endpoint
+with a workable certificate story on arbitrary local networks, and a separate
+security review. `URLSession` traffic may still be proxied through the paired
+iPhone, so it also does not establish that the 200 ms latency problem is solved.
+That cost is not justified without a new measurement-led proposal of its own.
 
-**The phone has to be within Bluetooth range.** That is the same constraint as
-every other watch app that is not standalone, and the watch says which of the
-two links is down rather than a single "not connected" that would send the user
-to check the wrong device half the time.
+### Delegating pairing or copying the phone identity
 
-**The phone's session has to be alive.** iOS gives no way for an app to hold a
-socket open indefinitely in the background — this is the same limit that means
-Remote Link has an Android background service and no iOS equivalent.
-`WCSession.sendMessage` does wake the phone app to deliver, so the phone need
-not be in the user's hand; but if iOS has torn the socket down, the phone
-reconnects on wake and the first gesture after a long idle can be lost. No
-architecture available on iOS avoids that, so it is documented rather than
-worked around.
+Rejected because neither changes the unavailable transport. Copying a private
+identity between devices would also collapse two trust principals into one and
+make revocation ambiguous; delegated pairing would add protocol and UI without
+creating a usable session.
 
-### Why the pointer acceleration curve is not applied to watch input
+## Costs and consequences
 
-`PointerController`'s acceleration judges speed by the size of each delta. The
-watch has already batched a thirtieth of a second of movement into one delta,
-so every one of them looks fast, and the curve would make the gentlest drag
-leap. The user's *linear* sensitivity is applied and the curve is left to the
-path it was tuned for — a finger on the phone's own glass. See
-`WatchCommandTranslator`.
-
-## Consequences
-
-- The watch target lives inside `Runner.xcodeproj`, because a watch app must be
-  embedded in its companion iPhone app to install at all. It is added by
-  `apps/mobile/ios/tool/add_watch_target.rb` rather than by a hand-merged
-  `project.pbxproj`, which would not survive the next `pod install`.
-- `flutter build ios --simulator` now requires `-d <device-id>`: Flutter refuses
-  to guess which paired watch simulator to build for. Device and archive builds
-  are unaffected.
-- The relay is watched at the app root, next to the background link. iOS
-  launches the phone app in the background purely to deliver a message from the
-  wrist, and in that launch there is no screen — so a listener owned by any
-  screen would not exist at the only moment it was needed.
+- Pointer updates still pay roughly 200 ms round trip through
+  WatchConnectivity. The watch remains suitable for coarse pointing, not
+  trackpad-quality continuous control.
+- The phone must remain reachable. If iOS has suspended its network session,
+  the first gesture after idle can be lost while the phone reconnects.
+- The relay keeps one message in flight and accumulates movement rather than
+  building an unbounded queue. The phone smooths a received movement batch over
+  the fast computer hop; this improves visible stepping but cannot remove the
+  watch-to-phone delay.
+- There is one protocol and crypto implementation rather than a byte-exact
+  Swift duplicate, and the watch holds no long-lived Remote Link secrets.
+- The watch installs as the iPhone app's companion target, created by
+  `apps/mobile/ios/tool/add_watch_target.rb`. It is not a standalone Remote Link
+  peer.
+- If Apple later permits low-level networking for ordinary watch apps, this
+  decision can be revisited. The first step remains a physical direct-RTT spike,
+  not a protocol port.

@@ -55,7 +55,6 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "8A2FFA6348BD23D1CCF04AEE"
             BuildableName = "RemoteLinkWatch.app"
-            BlueprintName = "RemoteLinkWatch"
             ReferencedContainer = "container:Runner.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -72,7 +71,6 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "8A2FFA6348BD23D1CCF04AEE"
             BuildableName = "RemoteLinkWatch.app"
-            BlueprintName = "RemoteLinkWatch"
             ReferencedContainer = "container:Runner.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

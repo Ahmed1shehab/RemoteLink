@@ -14,6 +14,8 @@ import '../../app/motion.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
 import 'pointer_controller.dart';
+import 'sensitivity_tutorial_dialog.dart';
+import '../settings/settings_screen.dart';
 
 /// The main control surface: the whole screen is a trackpad.
 ///
@@ -40,9 +42,13 @@ class TouchpadSurfaceView extends ConsumerStatefulWidget {
       _TouchpadSurfaceViewState();
 }
 
-class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
+class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
+    with SingleTickerProviderStateMixin {
   final PointerController _pointer = PointerController();
   final TapRecogniser _taps = TapRecogniser();
+
+  late final _TouchGlowController _glowController;
+  late final AnimationController _fadeController;
 
   /// Active pointers, keyed by device id, so finger count is always exact.
   final Map<int, Offset> _pointers = <int, Offset>{};
@@ -99,9 +105,22 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
   bool _swipeDispatched = false;
 
   @override
+  void initState() {
+    super.initState();
+    _glowController = _TouchGlowController();
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 180),
+    );
+    _glowController.attachAnimationController(_fadeController);
+  }
+
+  @override
   void dispose() {
     _hintTimer?.cancel();
     _taps.reset();
+    _fadeController.dispose();
+    _glowController.dispose();
     super.dispose();
   }
 
@@ -131,6 +150,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
 
   void _onPointerDown(PointerDownEvent event) {
     _pointers[event.pointer] = event.localPosition;
+    _glowController.onPointerDown(event.pointer, event.localPosition);
     _hideHint();
     _peakFingers =
         _pointers.length > _peakFingers ? _pointers.length : _peakFingers;
@@ -153,6 +173,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
   void _onPointerMove(PointerMoveEvent event) {
     _pointers[event.pointer] = event.localPosition;
     _travelled += event.delta.distance;
+    _glowController.onPointerMove(event.pointer, event.localPosition);
 
     final settings = ref.read(pointerSettingsProvider);
     _pointer.settings = settings;
@@ -282,6 +303,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
 
   void _onPointerUp(PointerUpEvent event) {
     _pointers.remove(event.pointer);
+    _glowController.onPointerUp(event.pointer);
     if (_pointers.isEmpty) _restoreHintLater();
 
     if (_pointers.length < 2) {
@@ -344,6 +366,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
 
   void _onPointerCancel(PointerCancelEvent event) {
     _pointers.remove(event.pointer);
+    _glowController.onPointerCancel(event.pointer);
     if (_pointers.isEmpty) _restoreHintLater();
 
     if (_pointers.length < 2) {
@@ -400,6 +423,8 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
 
   @override
   Widget build(BuildContext context) {
+    _glowController.fadeDuration =
+        context.motion(const Duration(milliseconds: 180));
     final connected =
         ref.watch(clientStateProvider).valueOrNull == ClientState.connected;
 
@@ -464,6 +489,24 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
                     child: _TouchpadSurface(
                       enabled: connected,
                       showHint: _hintVisible,
+                      glowController: _glowController,
+                      showTutorialBanner:
+                          !ref.watch(sensitivityTutorialSeenProvider),
+                      onOpenSettings: () {
+                        ref
+                            .read(sensitivityTutorialSeenProvider.notifier)
+                            .markSeen();
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const SettingsScreen(),
+                          ),
+                        );
+                      },
+                      onOpenTutorial: () =>
+                          SensitivityTutorialDialog.show(context, ref),
+                      onDismissTutorial: () => ref
+                          .read(sensitivityTutorialSeenProvider.notifier)
+                          .markSeen(),
                     ),
                   ),
                 ),
@@ -495,6 +538,8 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
             onRight: () => _click(MouseButton.right),
             onToggleCursorPad: () =>
                 setState(() => _showCursorPad = !showCursorPad),
+            onShowSensitivityTutorial: () =>
+                SensitivityTutorialDialog.show(context, ref),
             cursorPadShowing: showCursorPad,
             enabled: connected,
           ),
@@ -547,11 +592,23 @@ class _TouchpadSurface extends StatelessWidget {
   const _TouchpadSurface({
     required this.enabled,
     required this.showHint,
+    required this.glowController,
+    this.showTutorialBanner = false,
+    this.onOpenSettings,
+    this.onOpenTutorial,
+    this.onDismissTutorial,
   });
 
   final bool enabled;
 
   final bool showHint;
+
+  final _TouchGlowController glowController;
+
+  final bool showTutorialBanner;
+  final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenTutorial;
+  final VoidCallback? onDismissTutorial;
 
   @override
   Widget build(BuildContext context) {
@@ -585,39 +642,34 @@ class _TouchpadSurface extends StatelessWidget {
                 ],
         ),
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(
-          color: scheme.outlineVariant.withValues(alpha: dark ? 0.45 : 0.7),
-        ),
       ),
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
-          if (enabled)
-            // One static layer, and nothing that repaints while a finger is
-            // down. There was a halo here that followed the touch; it looked
-            // good and it cost a repaint per pointer event, on the one path in
-            // this app where latency *is* the product. Even made
-            // allocation-free it still scheduled a frame per move, competing
-            // with the `Listener` callbacks that do the sending — and because
-            // [PointerController] reads speed off event timestamps, work that
-            // delays delivery does not merely look worse, it makes the
-            // acceleration curve under-apply and the cursor read as slow.
-            //
-            // The lattice alone still gives the eye a fixed frame to judge
-            // movement against, which was the part that was actually doing
-            // work.
+          if (enabled) ...<Widget>[
+            // The resting lattice: drawn once into a display list and cached in
+            // its own layer so it never repaints during touch gestures.
             RepaintBoundary(
               child: CustomPaint(
                 painter: _DotFieldPainter(
-                  // Heavier on paper than on ink. The same alpha that reads as
-                  // a faint lattice against a near-black page is barely there
-                  // against a white one, because the contrast it has to work
-                  // against is not the same on both sides.
                   ink: scheme.onSurfaceVariant
                       .withValues(alpha: dark ? 0.18 : 0.30),
                 ),
               ),
             ),
+            // The dynamic touch-reactive field: only repaints its own isolated
+            // layer within the bounding box of active pointers, swelling and
+            // brightening dots in real time with zero widget rebuilds and zero
+            // latency impact on pointer dispatch.
+            RepaintBoundary(
+              child: CustomPaint(
+                painter: _DynamicDotGlowPainter(
+                  controller: glowController,
+                  dotColor: const Color(0xFF007ACC),
+                ),
+              ),
+            ),
+          ],
           Center(
             // Absorbs overflow rather than scrolling. With the pointer controls
             // open at a large text size the surface is squeezed to a couple of
@@ -660,7 +712,8 @@ class _TouchpadSurface extends StatelessWidget {
                             Text(
                               'Drag to move · Tap to click\n'
                               'Two fingers to scroll or right-click\n'
-                              'Hold to drag',
+                              'Hold to drag\n\n'
+                              'Adjust sensitivity anytime in Settings',
                               textAlign: TextAlign.center,
                               // Full-strength `onSurfaceVariant`. This was drawn
                               // at 60% alpha — roughly 2.6:1 on the surface
@@ -681,7 +734,123 @@ class _TouchpadSurface extends StatelessWidget {
                     ),
             ),
           ),
+          if (enabled && showTutorialBanner)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _SensitivityHintBanner(
+                onOpenSettings: onOpenSettings ?? () {},
+                onOpenTutorial: onOpenTutorial ?? () {},
+                onDismiss: onDismissTutorial ?? () {},
+              ),
+            ),
         ],
+      ),
+    );
+  }
+}
+
+/// Floating hint banner informing users about pointer sensitivity settings.
+class _SensitivityHintBanner extends StatelessWidget {
+  const _SensitivityHintBanner({
+    required this.onOpenSettings,
+    required this.onOpenTutorial,
+    required this.onDismiss,
+  });
+
+  final VoidCallback onOpenSettings;
+  final VoidCallback onOpenTutorial;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final dark = colorScheme.brightness == Brightness.dark;
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+        padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
+        decoration: BoxDecoration(
+          color: (dark ? colorScheme.surfaceContainerHigh : Colors.white)
+              .withValues(alpha: dark ? 0.92 : 0.96),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: const Color(0xFF007ACC).withValues(alpha: 0.5),
+            width: 1.2,
+          ),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: Colors.black.withValues(alpha: dark ? 0.35 : 0.08),
+              blurRadius: 14,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          children: <Widget>[
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF007ACC).withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.speed_rounded,
+                color: Color(0xFF007ACC),
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onOpenTutorial,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(
+                      'Pointer Sensitivity',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                    Text(
+                      'Tap for tutorial or adjust in Settings',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                foregroundColor: const Color(0xFF007ACC),
+              ),
+              onPressed: onOpenSettings,
+              child: const Text('Adjust'),
+            ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              iconSize: 18,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              icon: const Icon(Icons.close),
+              tooltip: 'Dismiss hint',
+              onPressed: onDismiss,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -784,6 +953,188 @@ class _DotFieldPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_DotFieldPainter oldDelegate) => oldDelegate.ink != ink;
+}
+
+/// Tracks active touch points on the touchpad to render the dynamic proximity
+/// glow and dot swelling without triggering any widget tree rebuilds.
+final class _TouchGlowController extends ChangeNotifier {
+  final Map<int, Offset> _activeTouches = <int, Offset>{};
+  List<Offset> _cachedFadingTouches = const <Offset>[];
+  double _fade = 0.0;
+  AnimationController? _fadeController;
+  Duration fadeDuration = const Duration(milliseconds: 180);
+
+  void attachAnimationController(AnimationController controller) {
+    _fadeController = controller;
+    _fadeController!.addListener(_onFadeTick);
+  }
+
+  void _onFadeTick() {
+    if (_fadeController == null) return;
+    _fade = _fadeController!.value;
+    if (_fade <= 0.001) {
+      _cachedFadingTouches = const <Offset>[];
+    }
+    notifyListeners();
+  }
+
+  void onPointerDown(int pointer, Offset position) {
+    _activeTouches[pointer] = position;
+    if (_fadeController?.isAnimating ?? false) {
+      _fadeController!.stop();
+    }
+    _fade = 1.0;
+    _cachedFadingTouches = const <Offset>[];
+    notifyListeners();
+  }
+
+  void onPointerMove(int pointer, Offset position) {
+    _activeTouches[pointer] = position;
+    _fade = 1.0;
+    notifyListeners();
+  }
+
+  void onPointerUp(int pointer) {
+    if (_activeTouches.length == 1 && _activeTouches.containsKey(pointer)) {
+      _cachedFadingTouches = _activeTouches.values.toList(growable: false);
+    }
+    _activeTouches.remove(pointer);
+    if (_activeTouches.isEmpty) {
+      if (fadeDuration == Duration.zero) {
+        _fade = 0.0;
+        _cachedFadingTouches = const <Offset>[];
+        notifyListeners();
+      } else if (_fadeController != null) {
+        _fadeController!.duration = fadeDuration;
+        _fadeController!.reverse(from: _fade);
+      } else {
+        _fade = 0.0;
+        notifyListeners();
+      }
+    } else {
+      notifyListeners();
+    }
+  }
+
+  void onPointerCancel(int pointer) {
+    onPointerUp(pointer);
+  }
+
+  Iterable<Offset> get activePoints =>
+      _activeTouches.isNotEmpty ? _activeTouches.values : _cachedFadingTouches;
+
+  double get fade => _fade;
+
+  bool get hasActiveTouches => _activeTouches.isNotEmpty;
+
+  @override
+  void dispose() {
+    _fadeController?.removeListener(_onFadeTick);
+    super.dispose();
+  }
+}
+
+/// Renders the touch-reactive glow and swelling dots around active pointers.
+///
+/// Only repaints when [_TouchGlowController] notifies, and stays completely
+/// inside a [RepaintBoundary] so neither the resting dot field nor any widget
+/// rebuilds during cursor motion.
+final class _DynamicDotGlowPainter extends CustomPainter {
+  _DynamicDotGlowPainter({
+    required this.controller,
+    required this.dotColor,
+  }) : super(repaint: controller);
+
+  final _TouchGlowController controller;
+  final Color dotColor;
+
+  static const double _baseRadius = 1.5;
+  static const double _maxRadius = 7.5;
+  static const double _glowRadius = 220.0;
+  static const double _glowRadiusSq = _glowRadius * _glowRadius;
+
+  final Paint _dotPaint = Paint()
+    ..style = PaintingStyle.fill
+    ..isAntiAlias = true;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final fade = controller.fade;
+    if (fade <= 0.001) return;
+
+    final touches = controller.activePoints;
+    if (touches.isEmpty) return;
+
+    final lattice = _Lattice.of(size);
+    if (lattice == null) return;
+
+    // 1. Determine the bounding box of columns and rows affected by any touch.
+    int minCol = lattice.columns;
+    int maxCol = -1;
+    int minRow = lattice.rows;
+    int maxRow = -1;
+
+    for (final p in touches) {
+      final c0 = (((p.dx - _glowRadius) - lattice.originX) / _Lattice.spacing)
+          .floor()
+          .clamp(0, lattice.columns - 1);
+      final c1 = (((p.dx + _glowRadius) - lattice.originX) / _Lattice.spacing)
+          .ceil()
+          .clamp(0, lattice.columns - 1);
+      final r0 = (((p.dy - _glowRadius) - lattice.originY) / _Lattice.spacing)
+          .floor()
+          .clamp(0, lattice.rows - 1);
+      final r1 = (((p.dy + _glowRadius) - lattice.originY) / _Lattice.spacing)
+          .ceil()
+          .clamp(0, lattice.rows - 1);
+
+      if (c0 < minCol) minCol = c0;
+      if (c1 > maxCol) maxCol = c1;
+      if (r0 < minRow) minRow = r0;
+      if (r1 > maxRow) maxRow = r1;
+    }
+
+    if (maxCol < minCol || maxRow < minRow) return;
+
+    // 2. Draw enlarged, illuminated rounded dots.
+    for (var r = minRow; r <= maxRow; r++) {
+      final dotY = lattice.originY + r * _Lattice.spacing;
+      for (var c = minCol; c <= maxCol; c++) {
+        final dotX = lattice.originX + c * _Lattice.spacing;
+
+        // Find closest touch distance (max proximity)
+        double maxT = 0.0;
+        for (final p in touches) {
+          final dx = dotX - p.dx;
+          final dy = dotY - p.dy;
+          final distSq = dx * dx + dy * dy;
+          if (distSq < _glowRadiusSq) {
+            final dist = math.sqrt(distSq);
+            final t = 1.0 - (dist / _glowRadius);
+            if (t > maxT) maxT = t;
+          }
+        }
+
+        if (maxT <= 0.001) continue;
+
+        // Smoothstep curve for natural organic falloff
+        final curve = maxT * maxT * (3.0 - 2.0 * maxT);
+
+        // Swells from resting radius (1.5) up to peak rounded radius (7.5)
+        final radius = _baseRadius + (_maxRadius - _baseRadius) * curve;
+
+        // Alpha scales up to 0.95 at the contact center
+        final alpha = (0.95 * curve * fade).clamp(0.0, 1.0);
+        _dotPaint.color = dotColor.withValues(alpha: alpha);
+
+        canvas.drawCircle(Offset(dotX, dotY), radius, _dotPaint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DynamicDotGlowPainter oldDelegate) =>
+      oldDelegate.dotColor != dotColor || oldDelegate.controller != controller;
 }
 
 /// Explicit controls that drive the cursor without a gesture.
@@ -984,6 +1335,7 @@ class _ButtonRow extends StatelessWidget {
     required this.onMiddle,
     required this.onRight,
     required this.onToggleCursorPad,
+    required this.onShowSensitivityTutorial,
     required this.cursorPadShowing,
     required this.enabled,
   });
@@ -1000,6 +1352,7 @@ class _ButtonRow extends StatelessWidget {
   final VoidCallback onMiddle;
   final VoidCallback onRight;
   final VoidCallback onToggleCursorPad;
+  final VoidCallback onShowSensitivityTutorial;
   final bool cursorPadShowing;
   final bool enabled;
 
@@ -1055,6 +1408,11 @@ class _ButtonRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Pointer sensitivity tutorial',
+                icon: const Icon(Icons.tune_outlined),
+                onPressed: onShowSensitivityTutorial,
+              ),
               IconButton(
                 tooltip: cursorPadShowing
                     ? 'Hide pointer controls'
