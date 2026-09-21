@@ -14,6 +14,8 @@ import 'package:rl_transport/rl_transport.dart';
 
 typedef DiskSpaceProbe = Future<int> Function(String canonicalPath);
 
+final Log _log = Log.scoped('desktop.transfer.store');
+
 /// Desktop filesystem adapter for the transport-agnostic transfer engine.
 final class FileTransferStore implements IncomingTransferStore {
   FileTransferStore(
@@ -114,15 +116,33 @@ final class FileTransferStore implements IncomingTransferStore {
       final entry = manifest.entries[offered.fileId];
       requiredBytes += offered.size - (entry?.coveredBytes ?? 0);
     }
-    final available = await _diskSpaceProbe(root);
-    final reservedElsewhere = _reservations.entries
-        .where((entry) => entry.key != reservationKey)
-        .fold(0, (total, entry) => total + entry.value);
-    if (requiredBytes > available - reservedElsewhere) {
-      throw InsufficientSpaceError(
-        requiredBytes: requiredBytes,
-        availableBytes: available,
+    // A probe that cannot answer must not stop the transfer. Refusing every
+    // file because free space could not be measured is a worse failure than
+    // the one the check exists to prevent: the disk is usually not full, and
+    // when it is, the write fails with a plain I/O error anyway. Windows shipped
+    // for a while with a broken probe, and the symptom was every incoming file
+    // refused on a machine with hundreds of gigabytes free.
+    int? available;
+    try {
+      available = await _diskSpaceProbe(root);
+    } on Object catch (error, stackTrace) {
+      _log.warn(
+        'could not measure free space; accepting the transfer anyway',
+        error: error,
+        stackTrace: stackTrace,
+        fields: <String, Object?>{'path': root},
       );
+    }
+    if (available != null) {
+      final reservedElsewhere = _reservations.entries
+          .where((entry) => entry.key != reservationKey)
+          .fold(0, (total, entry) => total + entry.value);
+      if (requiredBytes > available - reservedElsewhere) {
+        throw InsufficientSpaceError(
+          requiredBytes: requiredBytes,
+          availableBytes: available,
+        );
+      }
     }
     _reservations[reservationKey] = requiredBytes;
 
@@ -536,22 +556,56 @@ String _join(String parent, String child) =>
 bool _isInside(String candidate, String root) =>
     candidate == root || candidate.startsWith('$root${Platform.pathSeparator}');
 
+/// The `C:` of an absolute Windows path, or `null` when it has no drive.
+///
+/// Null for a UNC path, whose root is a share rather than a volume, and for
+/// anything else that does not start with a letter and a colon.
+String? _windowsDriveOf(String absolutePath) {
+  if (absolutePath.length < 2 || absolutePath[1] != ':') return null;
+  final letter = absolutePath.codeUnitAt(0);
+  const int a = 0x41, z = 0x5A, lowerA = 0x61, lowerZ = 0x7A;
+  final isLetter =
+      (letter >= a && letter <= z) || (letter >= lowerA && letter <= lowerZ);
+  return isLetter ? absolutePath.substring(0, 2) : null;
+}
+
 Future<int> _availableDiskBytes(String canonicalPath) async {
   if (Platform.isWindows) {
-    final drive = Directory(canonicalPath).absolute.path.substring(0, 2);
-    final result = await Process.run(
-      'powershell',
-      <String>[
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        r'(Get-PSDrive -Name $args[0].TrimEnd(":"))[0].Free',
-        drive,
-      ],
-    );
-    if (result.exitCode == 0) {
-      final bytes = int.tryParse(result.stdout.toString().trim());
-      if (bytes != null) return bytes;
+    // The drive, not the path. `DriveInfo` documents a drive letter and a root
+    // as valid arguments and nothing else; handing it `C:\Users\me\Downloads`
+    // depends on which .NET is behind PowerShell, and a probe that works on
+    // one machine and throws on the next is worse than one that never ran.
+    //
+    // A UNC destination (`\\server\share`) has no drive to ask about and
+    // falls through to the throw below, which the caller treats as "unknown"
+    // rather than as a refusal.
+    final absolute = Directory(canonicalPath).absolute.path;
+    final drive = _windowsDriveOf(absolute);
+    if (drive != null) {
+      // The argument is interpolated into the script rather than passed after
+      // it. `powershell -Command <script> <extra>` does not bind `$args` — it
+      // appends the extra words to the command line — so the previous
+      // `$args[0]` was always null, `Get-PSDrive -Name $null` printed nothing
+      // parseable, and every incoming transfer on Windows was refused with
+      // "could not determine available disk space".
+      //
+      // Single quotes because a Windows path may legally contain `$` and
+      // backticks, both of which a double-quoted PowerShell string expands.
+      // A `'` is doubled, which is how PowerShell escapes one.
+      final quoted = drive.replaceAll("'", "''");
+      final result = await Process.run(
+        'powershell',
+        <String>[
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          "(New-Object System.IO.DriveInfo('$quoted')).AvailableFreeSpace",
+        ],
+      );
+      if (result.exitCode == 0) {
+        final bytes = int.tryParse(result.stdout.toString().trim());
+        if (bytes != null) return bytes;
+      }
     }
   } else {
     final result = await Process.run('df', <String>['-Pk', canonicalPath]);

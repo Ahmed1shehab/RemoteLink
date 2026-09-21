@@ -101,6 +101,32 @@ final class _FakeLinkService implements LinkService {
   Future<void> stop() async {}
 }
 
+/// Waits for [condition] to hold, failing the test if it never does.
+///
+/// The alternative, and what this replaced, is `pumpEventQueue(times: 40)`
+/// followed by the assertion. That is a guess at how long a message takes to
+/// cross a real loopback socket and reach the controller, and a loaded CI
+/// machine beats the guess: the assertion reads the state from before the
+/// message landed and fails with a null that never reproduces on a developer's
+/// own machine. Waiting on the thing being waited for is both quicker in the
+/// ordinary case and immune to the slow one.
+Future<void> pumpUntil(
+  bool Function() condition, {
+  Duration timeout = const Duration(seconds: 10),
+  String? reason,
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!condition()) {
+    if (!DateTime.now().isBefore(deadline)) {
+      fail(reason ?? 'the condition was still false after $timeout');
+    }
+    // A real delay as well as a pump: the bytes arrive on a socket, and no
+    // amount of draining the microtask queue makes the OS deliver them sooner.
+    await pumpEventQueue(times: 5);
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -235,8 +261,10 @@ void main() {
           originSequence: 1,
         ),
       );
-      await pumpEventQueue(times: 40);
-      expect(clipboard.text, 'from the computer');
+      await pumpUntil(
+        () => clipboard.text == 'from the computer',
+        reason: 'the computer\'s update never reached the clipboard',
+      );
 
       // Writing the clipboard fires the same notification a user copy does. If
       // that provoked a read, every sync would cost the user an Android toast
@@ -307,7 +335,10 @@ void main() {
           originSequence: 1,
         ),
       );
-      await pumpEventQueue(times: 40);
+      await pumpUntil(
+        () => clipboard.text == 'from the computer',
+        reason: 'the computer\'s update never reached the clipboard',
+      );
 
       final echo = nextUpdate(within: const Duration(milliseconds: 900));
       linkService.copies.add('from the computer');
@@ -473,7 +504,10 @@ void main() {
           originSequence: 1,
         ),
       );
-      await pumpEventQueue(times: 40);
+      await pumpUntil(
+        () => clipboard.text == 'sent from the other phone',
+        reason: 'the other phone\'s text never reached the clipboard',
+      );
 
       expect(clipboard.text, 'sent from the other phone');
       final state = container.read(clipboardControllerProvider);
