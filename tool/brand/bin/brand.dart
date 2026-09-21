@@ -160,10 +160,20 @@ void main(List<String> arguments) {
     'apps/desktop/assets/tray/icon.png',
     encodePng(trayArtwork.asTemplateMask().resized(36, 36)),
   );
+  // Rounded, unlike the mask above it. Windows draws this one as supplied and
+  // the notification area is a row of icons with soft edges, so a hard square
+  // does not read as a tighter crop of the app's icon — it reads as the one
+  // icon in the row that is a rectangle. The mask keeps its square crop
+  // because macOS paints the shape itself and never shows the corners.
+  //
+  // A tighter radius than the launcher tile's: the corners here are cut out of
+  // the middle of the artwork rather than following its own drawn edge, and at
+  // 16 pixels the tile's 22% takes a visible bite out of the mark.
+  final trayTile = trayArtwork.withRoundedCorners(radiusFraction: 0.16);
   write(
     'apps/desktop/assets/tray/icon.ico',
     encodeIco(<Raster>[
-      for (final size in <int>[16, 20, 24, 32]) trayArtwork.resized(size, size),
+      for (final size in <int>[16, 20, 24, 32]) trayTile.resized(size, size),
     ]),
   );
 

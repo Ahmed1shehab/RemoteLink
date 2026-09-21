@@ -143,6 +143,28 @@ void main() {
     expect(entities.whereType<File>(), isEmpty);
   });
 
+  test('a probe that cannot answer accepts the transfer rather than refusing it',
+      () async {
+    // Windows shipped with a probe that always threw, and the symptom was
+    // every incoming file refused on a machine with hundreds of gigabytes
+    // free. An unmeasurable disk is unknown, not full.
+    final store = FileTransferStore(
+      destination,
+      diskSpaceProbe: (path) async =>
+          throw FileSystemException('cannot measure', path),
+    );
+
+    final file = (await store.prepare(_offer('unknown-space', 4),
+        namespace: 'peer-1'))['file-1']!;
+    await file.write(0, Uint8List.fromList(<int>[1, 2, 3, 4]));
+    await file.commit();
+
+    expect(
+      await File('${destination.path}/report.bin').readAsBytes(),
+      <int>[1, 2, 3, 4],
+    );
+  });
+
   test('isolates attacker-controlled transfer IDs by authenticated peer',
       () async {
     final store = FileTransferStore(
