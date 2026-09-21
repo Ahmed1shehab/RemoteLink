@@ -143,7 +143,8 @@ void main() {
     expect(entities.whereType<File>(), isEmpty);
   });
 
-  test('a probe that cannot answer accepts the transfer rather than refusing it',
+  test(
+      'a probe that cannot answer accepts the transfer rather than refusing it',
       () async {
     // Windows shipped with a probe that always threw, and the symptom was
     // every incoming file refused on a machine with hundreds of gigabytes
