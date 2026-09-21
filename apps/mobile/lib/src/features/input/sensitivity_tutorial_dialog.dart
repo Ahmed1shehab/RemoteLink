@@ -16,7 +16,7 @@ class SensitivityTutorialDialog extends ConsumerWidget {
       context: context,
       builder: (_) => const SensitivityTutorialDialog(),
     );
-    ref.read(sensitivityTutorialSeenProvider.notifier).markSeen();
+    await ref.read(sensitivityTutorialSeenProvider.notifier).markSeen();
   }
 
   @override
