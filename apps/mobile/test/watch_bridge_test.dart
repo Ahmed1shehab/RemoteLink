@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
@@ -67,10 +69,16 @@ void main() {
       // Four tenths of a pixel, four times over. Rounded independently every
       // one of these is zero and the cursor never moves, which is exactly what
       // a slow, careful drag on a watch produces.
-      expect(translator.translate(<Object?, Object?>{'t': 'move', 'dx': 0.4, 'dy': 0}), isEmpty);
-      expect(translator.translate(<Object?, Object?>{'t': 'move', 'dx': 0.4, 'dy': 0}), isEmpty);
-      final third =
-          translator.translate(<Object?, Object?>{'t': 'move', 'dx': 0.4, 'dy': 0});
+      expect(
+          translator
+              .translate(<Object?, Object?>{'t': 'move', 'dx': 0.4, 'dy': 0}),
+          isEmpty);
+      expect(
+          translator
+              .translate(<Object?, Object?>{'t': 'move', 'dx': 0.4, 'dy': 0}),
+          isEmpty);
+      final third = translator
+          .translate(<Object?, Object?>{'t': 'move', 'dx': 0.4, 'dy': 0});
       expect(third, hasLength(1));
       expect((third.single as MouseMove).deltaX, 1);
     });
@@ -79,8 +87,8 @@ void main() {
       final translator = WatchCommandTranslator(
         settings: const PointerSettings(sensitivity: 2),
       );
-      final messages =
-          translator.translate(<Object?, Object?>{'t': 'move', 'dx': 5, 'dy': -3});
+      final messages = translator
+          .translate(<Object?, Object?>{'t': 'move', 'dx': 5, 'dy': -3});
       final move = messages.single as MouseMove;
       expect(move.deltaX, 10);
       expect(move.deltaY, -6);
@@ -100,8 +108,8 @@ void main() {
     test('the drag toggle holds the button down without releasing it', () {
       final translator =
           WatchCommandTranslator(settings: const PointerSettings());
-      final down = translator
-          .translate(<Object?, Object?>{'t': 'button', 'b': 'left', 'down': true});
+      final down = translator.translate(
+          <Object?, Object?>{'t': 'button', 'b': 'left', 'down': true});
       expect(down, hasLength(1));
       expect((down.single as MouseButtonEvent).pressed, isTrue);
     });
@@ -113,12 +121,12 @@ void main() {
       final classic = WatchCommandTranslator(
         settings: const PointerSettings(naturalScrolling: false),
       );
-      final up = natural
-          .translate(<Object?, Object?>{'t': 'scroll', 'dy': 3})
-          .single as MouseScroll;
-      final down = classic
-          .translate(<Object?, Object?>{'t': 'scroll', 'dy': 3})
-          .single as MouseScroll;
+      final up =
+          natural.translate(<Object?, Object?>{'t': 'scroll', 'dy': 3}).single
+              as MouseScroll;
+      final down =
+          classic.translate(<Object?, Object?>{'t': 'scroll', 'dy': 3}).single
+              as MouseScroll;
       expect(up.linesY, 3);
       expect(down.linesY, -3);
     });
@@ -191,8 +199,8 @@ void main() {
     });
 
     test('the button edge precedes movement clicks in the same message', () {
-      final translator =
-          WatchCommandTranslator(settings: const PointerSettings(sensitivity: 1));
+      final translator = WatchCommandTranslator(
+          settings: const PointerSettings(sensitivity: 1));
       final messages = translator.translate(<Object?, Object?>{
         't': 'move',
         'dx': 10,
@@ -266,6 +274,189 @@ void main() {
       }
       expect(total, 1);
     });
+    test('a link slower than the old ceiling does not leave the cursor stalled',
+        () {
+      // The bug this guards: the interval estimate used to ignore any gap wider
+      // than 120 ms instead of clamping it, so on a link whose round trip sits
+      // above that it never learned the real rhythm. Every batch was paid out
+      // at the default 33 ms rate, finished early, and the cursor sat still for
+      // the rest of the gap — movement in visible steps rather than a glide.
+      final smoother = WatchMotionSmoother();
+      var now = DateTime(2026);
+      const gap = Duration(milliseconds: 150);
+      const ticksPerGap = 150 ~/ 8;
+
+      // Three batches to let the estimate find the rhythm.
+      for (var batch = 0; batch < 3; batch++) {
+        smoother.addBatch(60, 0, now);
+        for (var tick = 0; tick < ticksPerGap; tick++) {
+          smoother.slice();
+        }
+        now = now.add(gap);
+      }
+
+      var stalledTicks = 0;
+      for (var batch = 0; batch < 3; batch++) {
+        smoother.addBatch(60, 0, now);
+        for (var tick = 0; tick < ticksPerGap; tick++) {
+          smoother.slice();
+          if (smoother.isIdle) stalledTicks++;
+        }
+        now = now.add(gap);
+      }
+
+      expect(stalledTicks, 0,
+          reason: 'the cursor ran dry before the next batch arrived');
+    });
+
+    test('pays a batch out at an even speed, not a decaying one', () {
+      // A payout that takes a fixed fraction of what is left decays: the cursor
+      // sprints at the start of each batch and crawls at the end, so its speed
+      // pulses at the batch rate even though no slice is ever empty. The hand
+      // moves evenly; the cursor has to as well.
+      final smoother = WatchMotionSmoother();
+      var now = DateTime(2026);
+      const gap = Duration(milliseconds: 100);
+      const ticksPerGap = 100 ~/ 8;
+
+      for (var batch = 0; batch < 4; batch++) {
+        smoother.addBatch(80, 0, now);
+        for (var tick = 0; tick < ticksPerGap; tick++) {
+          smoother.slice();
+        }
+        now = now.add(gap);
+      }
+
+      smoother.addBatch(80, 0, now);
+      final steps = <int>[];
+      for (var tick = 0; tick < ticksPerGap; tick++) {
+        final step = smoother.slice();
+        if (step != null) steps.add(step.deltaX);
+      }
+
+      expect(steps, isNotEmpty);
+      final fastest = steps.reduce(math.max);
+      final slowest = steps.reduce(math.min);
+      // One pixel of slack either way is the integer rounding, not a ramp.
+      expect(fastest - slowest, lessThanOrEqualTo(1),
+          reason: 'the speed within one batch was not even: $steps');
+    });
+
+    test('replays the shape of the path, not a straight line', () {
+      // The whole point of sending a path instead of a total: a gesture that
+      // was slow and then fast has to arrive slow and then fast. A total can
+      // only be replayed at one speed, and a curved flick came out as a
+      // straight slide.
+      final smoother = WatchMotionSmoother();
+      smoother.addPath(
+        const <WatchMotionSegment>[
+          (dx: 10, dy: 0, millis: 50),
+          (dx: 90, dy: 0, millis: 50),
+        ],
+        DateTime(2026),
+      );
+
+      // The two halves take the same time, so whatever window they are replayed
+      // over, the second gets the same number of ticks as the first.
+      var slow = 0;
+      var fast = 0;
+      final ticks = <int>[];
+      while (!smoother.isIdle && ticks.length < 200) {
+        ticks.add(smoother.slice()?.deltaX ?? 0);
+      }
+      for (var i = 0; i < ticks.length; i++) {
+        if (i < ticks.length / 2) {
+          slow += ticks[i];
+        } else {
+          fast += ticks[i];
+        }
+      }
+
+      expect(slow + fast, 100, reason: 'the path did not arrive whole');
+      expect(fast, greaterThan(slow * 4),
+          reason: 'the fast half of the gesture was flattened: $ticks');
+    });
+
+    test('the path is scaled by the sensitivity, and keeps its timing', () {
+      final translator = WatchCommandTranslator(
+        settings: const PointerSettings(sensitivity: 2),
+      );
+      final path = translator.motion(<Object?, Object?>{
+        't': 'move',
+        'path': <double>[1, 2, 10, 3, 4, 20],
+      });
+      expect(path, hasLength(2));
+      expect(path[0].dx, 2);
+      expect(path[0].dy, 4);
+      expect(path[0].millis, 10);
+      expect(path[1].dx, 6);
+      expect(path[1].dy, 8);
+      expect(path[1].millis, 20);
+    });
+
+    test('a watch too old to send a path yields none, so the total is used',
+        () {
+      final translator =
+          WatchCommandTranslator(settings: const PointerSettings());
+      expect(
+        translator.motion(<Object?, Object?>{'t': 'move', 'dx': 4, 'dy': 5}),
+        isEmpty,
+      );
+    });
+
+    test('a guess made between batches is given back when the finger lifts',
+        () {
+      // Prediction is movement handed over on spec. It is usually right, and at
+      // the end of a gesture it is always wrong — so whatever it invented must
+      // come back out, or every flick would land a little past where the wrist
+      // put it and the error would build up over a session.
+      final smoother = WatchMotionSmoother(predictMotion: true);
+      smoother.addBatch(100, 0, DateTime(2026));
+
+      var total = 0;
+      var guessed = 0;
+      var drained = false;
+      for (var i = 0; i < 200 && !smoother.isIdle; i++) {
+        final step = smoother.slice()?.deltaX ?? 0;
+        total += step;
+        if (drained) guessed += step;
+        if (total >= 100) drained = true;
+      }
+      expect(guessed, greaterThan(0),
+          reason: 'the cursor stopped dead instead of carrying on');
+
+      smoother.land();
+      for (var i = 0; i < 200 && !smoother.isIdle; i++) {
+        total += smoother.slice()?.deltaX ?? 0;
+      }
+      expect(total, 100,
+          reason: 'the wrist moved 100 pixels and the cursor moved $total');
+    });
+
+    test('a guess is never given back by running the cursor backwards', () {
+      // The debt is folded into the movement that follows it, and a debt larger
+      // than that movement is forgiven rather than reversed. A cursor is a
+      // relative device: a few pixels never repaid are invisible, and a
+      // backwards lurch is not.
+      final smoother = WatchMotionSmoother(predictMotion: true);
+      var now = DateTime(2026);
+      smoother.addBatch(200, 0, now);
+      for (var i = 0; i < 200 && !smoother.isIdle; i++) {
+        smoother.slice();
+      }
+
+      // A crawl, far too small to cover what the sprint before it guessed.
+      now = now.add(const Duration(milliseconds: 150));
+      smoother.addBatch(2, 0, now);
+      final steps = <int>[];
+      for (var i = 0; i < 200 && !smoother.isIdle; i++) {
+        final step = smoother.slice();
+        if (step != null) steps.add(step.deltaX);
+      }
+      expect(steps.every((step) => step >= 0), isTrue,
+          reason: 'the cursor was dragged backwards to settle up: $steps');
+    });
+
     test('a verb it has never heard of is ignored, not thrown on', () {
       // A watch updated ahead of the phone will send exactly this. Silence is
       // the right answer; an exception on the user's wrist is not.

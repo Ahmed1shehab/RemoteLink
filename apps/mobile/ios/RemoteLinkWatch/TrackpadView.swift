@@ -40,6 +40,10 @@ struct TrackpadView: View {
     /// Fires if the finger stays still long enough to mean "hold", not "tap".
     @State private var holdTimer: Timer?
 
+    /// Active touch location and fade for touch-reactive swelling dot feedback.
+    @State private var touchLocation: CGPoint?
+    @State private var touchFade: Double = 0.0
+
     /// Past these, a gesture was a drag and not a tap.
     private static let tapSlop: CGFloat = 8
     private static let tapDuration: TimeInterval = 0.4
@@ -61,40 +65,22 @@ struct TrackpadView: View {
 
     /// How far the cursor moves per point of finger travel.
     ///
-    /// The watch surface is roughly 170pt across and a 1440pt-wide display is
-    /// not, so at 1:1 crossing the screen takes five full swipes. The phone
-    /// applies its own linear sensitivity on top of whatever arrives, so this is
-    /// a flat gain and nothing cleverer — two curves multiplied together are
-    /// impossible to aim.
-    private static let gain: Double = 3.6
+    /// The watch screen is physically small (~170pt across), so finger gestures
+    /// are tight and delicate. A slow sensitivity (~1:1 desktop pixels per watch
+    /// point with default phone sensitivity) allows the user to aim precisely
+    /// and move the pointer smoothly without jumping or overshooting.
+    private static let gain: Double = 0.6
 
     var body: some View {
         ZStack {
             Theme.canvas
 
             if link.status.canSend {
-                // The lattice and nothing else. A halo used to follow the
-                // finger here; on a watch it meant re-rendering a layer on
-                // every touch update, on the same main thread that has to hand
-                // the movement to WatchConnectivity — so it bought a look and
-                // paid in the only thing this app is for. Nothing on screen now
-                // changes while a finger is down.
+                // Resting lattice rasterised once.
                 DotField()
 
-                // Temporary, and only here to answer one question: what is the
-                // round trip to the phone actually costing? Every judgement
-                // about this link so far has been a guess. Delete this block —
-                // and `roundTripMillis` with it — once the number is known.
-                if let rtt = link.roundTripMillis {
-                    VStack {
-                        Text("\(Int(rtt.rounded())) ms")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Theme.onSurfaceVariant)
-                            .padding(.top, 2)
-                        Spacer()
-                    }
-                    .allowsHitTesting(false)
-                }
+                // Dynamic touch-reactive swelling dots around the active swipe point.
+                DynamicTouchDotField(touchLocation: touchLocation, fade: touchFade)
             } else {
                 Text(link.status.message)
                     .font(.system(size: 13))
@@ -154,6 +140,8 @@ struct TrackpadView: View {
                     began = Date()
                     travelled = 0
                     startHoldTimer()
+                    touchLocation = value.location
+                    touchFade = 1.0
                     return
                 }
                 let dx = value.location.x - previous.x
@@ -164,6 +152,9 @@ struct TrackpadView: View {
                 // no longer on its way to becoming a hold.
                 if travelled >= Self.tapSlop { cancelHoldTimer() }
                 link.move(dx: Double(dx) * Self.gain, dy: Double(dy) * Self.gain)
+
+                touchLocation = value.location
+                touchFade = 1.0
             }
             .onEnded { _ in
                 cancelHoldTimer()
@@ -191,9 +182,18 @@ struct TrackpadView: View {
                     }
                 }
 
+                // Whatever the gesture turned out to be, it is over, and the
+                // phone has no other way of knowing that — see
+                // `WatchLink.endGesture`.
+                link.endGesture()
+
                 lastPoint = nil
                 began = nil
                 travelled = 0
+
+                withAnimation(.easeOut(duration: 0.18)) {
+                    touchFade = 0.0
+                }
             }
     }
 }

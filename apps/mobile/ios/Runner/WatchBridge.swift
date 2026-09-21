@@ -188,68 +188,152 @@ extension WatchBridge: WCSessionDelegate {
             "dx": input.dx,
             "dy": input.dy,
         ]
+        // The path, when the watch sent one, flattened to dx, dy, millis per
+        // slice. Flat rather than nested because the standard Flutter codec
+        // carries a list of numbers for nothing and a list of lists for rather
+        // more, and there is no ambiguity in a list whose length is a multiple
+        // of three. Dart replays this and ignores the summed `dx`/`dy` above,
+        // which are kept for a phone talking to a watch too old to send a path.
+        if !input.path.isEmpty { payload["path"] = input.path }
         if input.clicks > 0 {
             payload["clicks"] = input.clicks
             payload["clickCount"] = input.clickCount
         }
-        if input.button != 0 { payload["button"] = Int(input.button) }
+        if input.button == 3 {
+            // Not a button edge at all: the finger left the glass. Named rather
+            // than passed through as a code, because Dart treats it as the end
+            // of the gesture and not as something to press.
+            payload["ended"] = true
+        } else if input.button != 0 {
+            payload["button"] = Int(input.button)
+        }
         deliver(payload)
     }
 }
 
 /// The phone's half of the packed layout in `WatchLink.swift`.
 ///
+/// Kind 3, the current one:
+///
+///     0      kind, always 3
+///     1      clicks, UInt8      how many click events
+///     2      clickCount, UInt8  what each counts as: 1 single, 2 double
+///     3      button, UInt8      0 none, 1 press and hold, 2 release,
+///                               3 the finger left the glass
+///     4      samples, UInt8     how many path slices follow
+///     then, per slice, ten bytes:
+///     +0..3  dx, Float32
+///     +4..7  dy, Float32
+///     +8..9  millis, UInt16     how long the slice covers
+///
+/// Kind 2, still accepted:
+///
 ///     0      kind, always 2
 ///     1..4   dx, Float32
 ///     5..8   dy, Float32
-///     9      clicks, UInt8      how many click events
-///     10     clickCount, UInt8  what each counts as: 1 single, 2 double
-///     11     button, UInt8      0 none, 1 press and hold, 2 release
+///     9      clicks, UInt8
+///     10     clickCount, UInt8
+///     11     button, UInt8
 ///
-/// Returns nil for anything it does not recognise. A watch updated ahead of the
-/// phone will send a kind this build has never seen, and reading those bytes as
-/// something they are not would move the cursor somewhere arbitrary — so an
-/// unknown message is dropped, which costs one batch of movement.
+/// Both are read because the watch and the phone are updated independently by
+/// the App Store, and a phone that has run ahead of the watch on the wrist must
+/// keep working. Returns nil for anything else: reading unknown bytes as one of
+/// these would move the cursor somewhere arbitrary, so an unrecognised message
+/// is dropped, which costs one batch of movement.
 struct WatchInput {
-    static let kind: UInt8 = 2
-    static let size = 12
-
+    /// Total movement in the message, whatever shape it arrived in.
     let dx: Double
     let dy: Double
+
+    /// The path, flattened to dx, dy, millis per slice. Empty for a kind 2
+    /// message, which carries only the total.
+    let path: [Double]
+
     let clicks: Int
     let clickCount: Int
     let button: UInt8
 
     init?(_ data: Data) {
-        guard data.count >= Self.size else { return nil }
-        let base = data.startIndex
-        guard data[base] == Self.kind else { return nil }
+        guard let kind = data.first else { return nil }
+        switch kind {
+        case 3: self.init(path: data)
+        case 2: self.init(total: data)
+        default: return nil
+        }
+    }
 
-        func float(at offset: Int) -> Double {
-            // Assembled byte by byte: `Data` off the wire carries no alignment
-            // guarantee, and a misaligned load of a UInt32 is undefined rather
-            // than merely slow.
-            let i = base + offset
-            let bits = UInt32(data[i])
-                | UInt32(data[i + 1]) << 8
-                | UInt32(data[i + 2]) << 16
-                | UInt32(data[i + 3]) << 24
-            return Double(Float32(bitPattern: bits))
+    /// Kind 3: a path of slices.
+    private init?(path data: Data) {
+        let header = 5
+        let stride = 10
+        guard data.count >= header else { return nil }
+        let base = data.startIndex
+        let count = Int(data[base + 4])
+        guard data.count >= header + count * stride else { return nil }
+
+        var flattened: [Double] = []
+        flattened.reserveCapacity(count * 3)
+        var totalX = 0.0
+        var totalY = 0.0
+        for index in 0..<count {
+            let offset = header + index * stride
+            let x = data.float32(at: base + offset)
+            let y = data.float32(at: base + offset + 4)
+            // A NaN or an infinity here would reach `MouseMove` and be rounded
+            // to an arbitrary integer. Nothing legitimate produces one, so
+            // anything that does is corrupt and the message is dropped whole
+            // rather than partly replayed.
+            guard x.isFinite, y.isFinite else { return nil }
+            let millis = Double(data.uint16(at: base + offset + 8))
+            totalX += x
+            totalY += y
+            flattened.append(contentsOf: [x, y, millis])
         }
 
-        let x = float(at: 1)
-        let y = float(at: 5)
-        // A NaN or an infinity here would reach `MouseMove` and be rounded to
-        // an arbitrary integer. Nothing legitimate produces one, so anything
-        // that does is corrupt and is dropped whole.
+        dx = totalX
+        dy = totalY
+        path = flattened
+        clicks = Int(data[base + 1])
+        clickCount = max(1, Int(data[base + 2]))
+        let raw = data[base + 3]
+        button = raw <= 3 ? raw : 0
+    }
+
+    /// Kind 2: one summed delta, from a watch older than the path format.
+    private init?(total data: Data) {
+        guard data.count >= 12 else { return nil }
+        let base = data.startIndex
+        let x = data.float32(at: base + 1)
+        let y = data.float32(at: base + 5)
         guard x.isFinite, y.isFinite else { return nil }
         dx = x
         dy = y
+        path = []
         clicks = Int(data[base + 9])
         clickCount = max(1, Int(data[base + 10]))
         // Anything outside the three it knows is treated as "no change", which
         // leaves the button exactly as it was rather than guessing at an edge.
         let raw = data[base + 11]
         button = raw <= 2 ? raw : 0
+    }
+}
+
+extension Data {
+    /// Reads four little-endian bytes as a `Float32`.
+    ///
+    /// Assembled byte by byte: `Data` off the wire carries no alignment
+    /// guarantee, and a misaligned load of a `UInt32` is undefined rather than
+    /// merely slow.
+    func float32(at index: Index) -> Double {
+        let bits = UInt32(self[index])
+            | UInt32(self[index + 1]) << 8
+            | UInt32(self[index + 2]) << 16
+            | UInt32(self[index + 3]) << 24
+        return Double(Float32(bitPattern: bits))
+    }
+
+    /// Reads two little-endian bytes as a `UInt16`.
+    func uint16(at index: Index) -> UInt16 {
+        UInt16(self[index]) | UInt16(self[index + 1]) << 8
     }
 }

@@ -61,13 +61,40 @@ enum LinkStatus: Equatable {
 final class WatchLink: NSObject, ObservableObject {
     @Published private(set) var status: LinkStatus = .starting
 
-    /// Movement and clicks that have not been sent yet.
+    /// The path the finger has drawn since the last message went out.
     ///
-    /// Accumulated rather than sent per event, because a finger produces touch
-    /// updates far faster than WatchConnectivity will carry them.
-    private var pendingX: Double = 0
-    private var pendingY: Double = 0
+    /// A list rather than one running total, because a total is a straight
+    /// line. A round trip takes 200 ms on this link, and a great deal happens
+    /// to a finger in 200 ms: it curves, it speeds up, it stops. Summing all of
+    /// that into one delta throws the shape away, and the phone can only replay
+    /// what it is given — so a flick that curved arrived as a straight slide at
+    /// a constant speed, which is a large part of why the watch does not feel
+    /// like the phone's own glass.
+    ///
+    /// Each entry is one slice of that path with the time it took. Eight of
+    /// them cost sixty bytes more on a link that carries eighty-five without
+    /// noticing, and no extra latency whatever: the message goes out at exactly
+    /// the same moment it did before, carrying more of what happened.
+    private var pendingSamples: [MotionSample] = []
+
+    /// When the last movement event arrived, so a slice knows how long it
+    /// covers. Kept across messages because the finger does not stop moving
+    /// just because a message went out.
+    private var lastMoveAt: Date?
+
     private var pendingClicks: Int = 0
+
+    /// How finely the path is recorded.
+    ///
+    /// Short enough that the curve survives, long enough that eight slices
+    /// still cover a whole round trip. Below the rate the touch events arrive
+    /// at there would be nothing to gain — a slice per event and no more.
+    private static let sampleInterval: TimeInterval = 0.025
+
+    /// The ceiling on slices per message. Past it the newest movement is merged
+    /// into the last slice rather than dropped: a coarser tail is a small loss,
+    /// and losing the movement outright is a cursor that stops.
+    private static let maximumSamples = 8
 
     /// What the queued clicks count *as* — 1 for a single, 2 for a double.
     private var pendingClickCount: Int = 1
@@ -105,7 +132,11 @@ final class WatchLink: NSObject, ObservableObject {
     /// wait behind the first, and the measured round trip went from about 60 ms
     /// to 182 — the queue had simply come back with a bound on it. Widening a
     /// window over a serialised transport buys nothing and costs everything it
-    /// appears to buy.
+    /// appears to buy. The figures above are from that experiment and are
+    /// relative to each other; the round trip this link actually runs at, on
+    /// device and in release builds, is 200–230 ms — see ADR 0004. Anything
+    /// downstream that needs a number should take it from there rather than
+    /// from here.
     ///
     /// So the wire carries one message, and the next goes out only when that
     /// one is answered: the send rate becomes the link's own rate and cannot
@@ -128,13 +159,6 @@ final class WatchLink: NSObject, ObservableObject {
     private var lastSend: Date?
     private var scheduled: Timer?
 
-    /// Round trip to the phone and back, smoothed. Nil until the first reply.
-    ///
-    /// Measured rather than assumed, because every guess about this link so far
-    /// has been wrong, and the right design depends on whether the answer is
-    /// 20 ms or 200.
-    @Published private(set) var roundTripMillis: Double?
-
     private var session: WCSession { .default }
 
     override init() {
@@ -149,10 +173,30 @@ final class WatchLink: NSObject, ObservableObject {
 
     // MARK: - Gestures
 
-    /// Adds movement to the next message.
+    /// Adds movement to the next message, as part of the path it draws.
     func move(dx: Double, dy: Double) {
-        pendingX += dx
-        pendingY += dy
+        let now = Date()
+        // The slice starts where the previous movement left off, so the slices
+        // butt up against each other and their durations add up to the time the
+        // finger was actually moving.
+        let start = lastMoveAt ?? now.addingTimeInterval(-Self.sampleInterval)
+        lastMoveAt = now
+
+        let merge = pendingSamples.count >= Self.maximumSamples
+            || (pendingSamples.last.map {
+                now.timeIntervalSince($0.start) < Self.sampleInterval
+            } ?? false)
+
+        if merge, var last = pendingSamples.popLast() {
+            last.dx += dx
+            last.dy += dy
+            last.end = now
+            pendingSamples.append(last)
+        } else {
+            pendingSamples.append(
+                MotionSample(dx: dx, dy: dy, start: start, end: now)
+            )
+        }
         pump()
     }
 
@@ -188,6 +232,22 @@ final class WatchLink: NSObject, ObservableObject {
         pump()
     }
 
+    /// The finger has left the glass.
+    ///
+    /// Sent even when the gesture produced nothing else, because the phone
+    /// cannot work it out. Messages only go out while the finger is moving, so
+    /// from the phone's side a finger that has stopped and a finger whose next
+    /// batch is still in the air look exactly alike for as long as the round
+    /// trip lasts. The phone guesses ahead to cover that gap, and this is what
+    /// tells it to stop guessing and settle up — see `WatchMotionSmoother`.
+    ///
+    /// One extra message per gesture, at the end of it, never in the middle:
+    /// it costs nothing on the path that matters.
+    func endGesture() {
+        pendingButtons.append(3)
+        pump()
+    }
+
     // MARK: - Sending
 
     /// Sends whatever has accumulated, if the window has room.
@@ -197,7 +257,7 @@ final class WatchLink: NSObject, ObservableObject {
     /// busier.
     private func pump() {
         guard inFlight < Self.window else { return }
-        guard pendingX != 0 || pendingY != 0 || pendingClicks > 0
+        guard !pendingSamples.isEmpty || pendingClicks > 0
             || !pendingButtons.isEmpty else { return }
         guard session.activationState == .activated, session.isReachable else {
             status = .phoneUnreachable
@@ -221,20 +281,16 @@ final class WatchLink: NSObject, ObservableObject {
         scheduled = nil
 
         let payload = WatchInput(
-            dx: pendingX,
-            dy: pendingY,
+            samples: pendingSamples,
             clicks: pendingClicks,
             clickCount: pendingClickCount,
             button: pendingButtons.isEmpty ? 0 : pendingButtons.removeFirst()
         )
-        pendingX = 0
-        pendingY = 0
+        pendingSamples.removeAll(keepingCapacity: true)
         pendingClicks = 0
         pendingClickCount = 1
         inFlight += 1
         lastSend = Date()
-        let sentAt = Date()
-
         // `sendMessageData`, not `sendMessage`. A dictionary is serialised as a
         // property list at both ends — a couple of hundred bytes of keys and
         // type tags, plus the encode and decode, for what is two numbers and a
@@ -244,7 +300,7 @@ final class WatchLink: NSObject, ObservableObject {
         // empty and irrelevant.
         session.sendMessageData(payload.encoded, replyHandler: { [weak self] _ in
             Task { @MainActor in
-                self?.completed(sentAt: sentAt)
+                self?.completed()
             }
         }, errorHandler: { [weak self] _ in
             Task { @MainActor in
@@ -255,12 +311,8 @@ final class WatchLink: NSObject, ObservableObject {
         })
     }
 
-    private func completed(sentAt: Date) {
+    private func completed() {
         inFlight = max(0, inFlight - 1)
-        let sample = Date().timeIntervalSince(sentAt) * 1000
-        // Smoothed, because a single sample on a radio link says very little
-        // and a figure that flickers is a figure nobody can read.
-        roundTripMillis = roundTripMillis.map { $0 * 0.8 + sample * 0.2 } ?? sample
         pump()
     }
 
@@ -338,44 +390,76 @@ extension WatchLink: WCSessionDelegate {
     }
 }
 
+/// One slice of the path the finger drew, and the span it covers.
+struct MotionSample {
+    var dx: Double
+    var dy: Double
+    var start: Date
+    var end: Date
+
+    /// How long the slice covers, in milliseconds.
+    ///
+    /// Clamped rather than trusted. A watch that has been idle leaves a stale
+    /// timestamp behind, and the first slice after it would otherwise claim to
+    /// have taken an hour — which the phone would dutifully replay.
+    var millis: UInt16 {
+        let span = end.timeIntervalSince(start) * 1000
+        return UInt16(min(max(span, 1), 1000))
+    }
+}
+
 /// One batch of input, packed for the wire.
 ///
-/// Ten bytes, little-endian, and written out by hand rather than through
-/// `Codable`: `JSONEncoder` would put this straight back into the string-keyed
-/// serialisation this exists to avoid, and the layout has to be matched byte
-/// for byte by `WatchBridge.swift` on the phone — which is far easier to keep
-/// honest against a table than against a synthesised encoder.
+/// Written out by hand rather than through `Codable`: `JSONEncoder` would put
+/// this straight back into the string-keyed serialisation this exists to avoid,
+/// and the layout has to be matched byte for byte by `WatchBridge.swift` on the
+/// phone — which is far easier to keep honest against a table than against a
+/// synthesised encoder.
 ///
-///     0      kind, always 2
-///     1..4   dx, Float32
-///     5..8   dy, Float32
-///     9      clicks, UInt8      how many click events
-///     10     clickCount, UInt8  what each counts as: 1 single, 2 double
-///     11     button, UInt8      0 none, 1 press and hold, 2 release
+///     0      kind, always 3
+///     1      clicks, UInt8      how many click events
+///     2      clickCount, UInt8  what each counts as: 1 single, 2 double
+///     3      button, UInt8      0 none, 1 press and hold, 2 release,
+///                               3 the finger left the glass
+///     4      samples, UInt8     how many path slices follow
+///     then, per slice, ten bytes:
+///     +0..3  dx, Float32
+///     +4..7  dy, Float32
+///     +8..9  millis, UInt16     how long the slice covers
+///
+/// Kind 2 was the same message with one summed `dx`/`dy` and no path. The phone
+/// still decodes it, because a watch and a phone are updated independently by
+/// the App Store and a phone that has run ahead must not stop working for a
+/// watch that has not.
 struct WatchInput {
     /// Distinguishes this from whatever another build sends. A phone that does
     /// not recognise the kind drops the message rather than reading the bytes
     /// as something they are not.
-    static let kind: UInt8 = 2
-    static let size = 12
+    static let kind: UInt8 = 3
+    static let headerSize = 5
+    static let sampleSize = 10
 
-    let dx: Double
-    let dy: Double
+    let samples: [MotionSample]
     let clicks: Int
     let clickCount: Int
     let button: UInt8
 
     var encoded: Data {
-        var data = Data(capacity: Self.size)
+        let count = min(samples.count, 255)
+        var data = Data(capacity: Self.headerSize + count * Self.sampleSize)
         data.append(Self.kind)
-        data.appendLittleEndian(Float32(dx).bitPattern)
-        data.appendLittleEndian(Float32(dy).bitPattern)
         // Saturated rather than truncated: 255 taps inside one round trip is
         // not a thing a wrist can do, but a wrap to zero would silently swallow
         // the click if it ever were.
         data.append(UInt8(min(clicks, 255)))
         data.append(UInt8(min(max(clickCount, 1), 255)))
         data.append(button)
+        data.append(UInt8(count))
+        for sample in samples.prefix(count) {
+            data.appendLittleEndian(Float32(sample.dx).bitPattern)
+            data.appendLittleEndian(Float32(sample.dy).bitPattern)
+            data.appendLittleEndian(sample.millis)
+        }
         return data
     }
 }
@@ -391,5 +475,11 @@ extension Data {
         append(UInt8((value >> 8) & 0xFF))
         append(UInt8((value >> 16) & 0xFF))
         append(UInt8((value >> 24) & 0xFF))
+    }
+
+    /// Appends two bytes, least significant first.
+    mutating func appendLittleEndian(_ value: UInt16) {
+        append(UInt8(value & 0xFF))
+        append(UInt8((value >> 8) & 0xFF))
     }
 }

@@ -73,12 +73,17 @@ final class WatchAvailability {
 /// moves this many pixels" is the part worth testing, and it does not need a
 /// platform to exercise.
 ///
-/// The pointer *acceleration* curve is not applied here, and that is a
-/// decision rather than an omission. The watch batches movement at 30 Hz before
-/// sending it, so every delta that arrives looks like a fast one to a curve
-/// that judges speed by delta size — the cursor would leap on the gentlest
-/// drag. The user's linear sensitivity is applied; the curve is left to the
-/// path it was tuned for, which is a finger on the phone's own glass.
+/// The pointer *acceleration* curve is not applied here. It was originally left
+/// out because it could not be applied correctly: the watch summed movement
+/// into one delta per round trip, so every delta that arrived looked like a
+/// fast one to a curve that judges speed by delta size, and the cursor would
+/// have leapt on the gentlest drag.
+///
+/// That obstacle is gone — [motion] carries each slice's duration, so real
+/// velocity is a division away — but the curve is still not applied, because
+/// nobody has tuned it for this path yet. The user's linear sensitivity is
+/// applied, and the curve is left to the path it was tuned for, which is a
+/// finger on the phone's own glass.
 final class WatchCommandTranslator {
   WatchCommandTranslator({required this.settings});
 
@@ -159,6 +164,43 @@ final class WatchCommandTranslator {
     }
   }
 
+  /// The path the finger drew in [raw], in pixels, slice by slice.
+  ///
+  /// Empty when the message carries only a total — a watch older than the path
+  /// format — in which case the caller falls back to the `MouseMove` in
+  /// [translate]'s output. The two are alternatives and never both: they
+  /// describe the same travel, and replaying both would move the cursor twice
+  /// as far as the wrist did.
+  ///
+  /// Scaled but not rounded. The protocol carries integer deltas, but these are
+  /// not protocol messages yet — [WatchMotionSmoother] re-cuts them into slices
+  /// of its own and carries the sub-pixel remainder across those. Rounding here
+  /// would throw away resolution that the very next step needs.
+  List<WatchMotionSegment> motion(Map<Object?, Object?> raw) {
+    if (raw['t'] != 'move') return const <WatchMotionSegment>[];
+    final path = raw['path'];
+    if (path is! List || path.length < 3) return const <WatchMotionSegment>[];
+
+    final segments = <WatchMotionSegment>[];
+    for (var i = 0; i + 2 < path.length; i += 3) {
+      final dx = (path[i] as num?)?.toDouble() ?? 0;
+      final dy = (path[i + 1] as num?)?.toDouble() ?? 0;
+      final millis = (path[i + 2] as num?)?.toDouble() ?? 0;
+      if (!dx.isFinite || !dy.isFinite || !millis.isFinite) {
+        return const <WatchMotionSegment>[];
+      }
+      segments.add((
+        dx: dx * settings.sensitivity,
+        dy: dy * settings.sensitivity,
+        // A slice has to take some time or it cannot be replayed over any. The
+        // watch clamps this too; a message that has been through a channel and
+        // a codec is not something to take on trust.
+        millis: millis.clamp(1.0, 1000.0),
+      ));
+    }
+    return segments;
+  }
+
   List<Message> _move(double dx, double dy) {
     // The residual is what makes slow movement work at all. A gentle drag
     // produces deltas well under a pixel once scaled; rounding each one
@@ -204,114 +246,417 @@ final class WatchCommandTranslator {
   }
 }
 
-/// Spreads one batch of watch movement across several small cursor moves.
+/// One slice of the path the finger drew, in pixels, and how long it took.
+typedef WatchMotionSegment = ({double dx, double dy, double millis});
+
+/// One slice being paid out. Mutable, because a slice is consumed a tick at a
+/// time and what is left of it is the state that matters.
+final class _Slice {
+  _Slice(this.dx, this.dy, this.millis);
+
+  double dx;
+  double dy;
+  double millis;
+}
+
+/// Replays one batch of watch movement as the path the finger actually drew.
 ///
 /// ## Why this exists
 ///
 /// The watch cannot send continuously — see `WatchLink.pump` — so movement
 /// arrives in batches, each carrying everything the finger did since the last
-/// one. Handed to the computer as a single `MouseMove`, a batch is a single
-/// instantaneous jump: at a batch every 30 ms and a hand moving at any speed,
-/// the cursor advances in thirty visible steps a second. That is not latency —
-/// the cursor is exactly where it should be, at the right time — but it reads
-/// as skipped frames, which is worse to use than being slightly behind.
+/// one, roughly five times a second. Handed to the computer as a single
+/// `MouseMove`, a batch is a single instantaneous jump: the cursor advances in
+/// five visible steps a second. That is not latency — the cursor is exactly
+/// where it should be, at the right time — but it reads as skipped frames,
+/// which is worse to use than being slightly behind.
 ///
 /// So the batch is paid out over the interval the *next* one is expected in,
-/// measured from the batches already seen rather than assumed. The cursor
-/// glides instead of stepping. The cost is at most one batch interval of extra
-/// delay on the final pixel of any movement, on a link where that interval is a
-/// fraction of the Bluetooth round trip that produced it — and the first pixels
-/// still move immediately.
+/// measured from the batches already seen rather than assumed, and paid out as
+/// the path the watch recorded rather than as a straight line. The cursor
+/// glides, and it glides along the curve the finger drew. The cost is at most
+/// one batch interval of extra delay on the final pixel of any movement, on a
+/// link where that interval is a fraction of the Bluetooth round trip that
+/// produced it — and the first pixels still move immediately.
+///
+/// ## Why the payout is at a constant speed
+///
+/// Paying out a fixed *fraction* of what is left each tick decays: the cursor
+/// sprints at the start of every batch and crawls at the end of it, so its
+/// speed pulses at the batch rate even when no tick is ever empty. The hand
+/// moves evenly and the cursor does not. Each slice is therefore paid out at
+/// its own constant speed, and the slices together carry the variation that was
+/// really there.
 ///
 /// Nothing here depends on a timer of its own: the caller drives it. That keeps
 /// it a plain, testable object, and means the ticker can be stopped when the
 /// wrist is still rather than running all day for nothing.
 final class WatchMotionSmoother {
+  WatchMotionSmoother({this.predictMotion = false});
+
+  /// Whether to keep the cursor moving between batches on the last known
+  /// velocity — see [_predict]. Off by default, because a smoother that
+  /// invents movement is a poor thing to get by accident; the app turns it on
+  /// explicitly.
+  final bool predictMotion;
+
   /// How often [slice] is expected to be called.
   static const Duration tickInterval = Duration(milliseconds: 8);
 
-  /// The gap assumed before enough batches have arrived to measure one, and the
-  /// ceiling on the measurement. A watch that has been idle produces an
-  /// enormous apparent interval, and paying a batch out over four seconds would
-  /// leave the cursor drifting long after the finger stopped.
-  static const double _defaultIntervalMillis = 33;
-  static const double _maximumIntervalMillis = 120;
+  static const double _tickMillis = 8;
 
-  /// Movement handed over but not yet passed on, in pixels.
-  double _outstandingX = 0;
-  double _outstandingY = 0;
+  /// The gap assumed before any batch has been timed.
+  ///
+  /// Near the low end of what the link actually does — ADR 0004 measured the
+  /// relay at 200–230 ms on device — so the first batch of a gesture is paid
+  /// out a little fast rather than a lot slow. Guessing high would hold the
+  /// first movement of every gesture back behind a window that has not been
+  /// earned yet.
+  static const double _defaultIntervalMillis = 120;
 
-  /// Sub-pixel remainder, carried between slices. Without it every slice
-  /// smaller than a pixel rounds to nothing and slow movement never arrives.
+  /// The ceiling on the estimate, well above the measured round trip so an
+  /// ordinary slow batch is recorded rather than clipped. Only a gap this side
+  /// of a stall is a measurement of the link; beyond it, smoothing cannot hide
+  /// what is happening anyway.
+  static const double _maximumIntervalMillis = 350;
+
+  /// Past this the wrist stopped and started again. The pause is not a
+  /// measurement of the link and must not be folded into one.
+  static const double _restartIntervalMillis = 1000;
+
+  /// How much longer than the estimated gap a batch is paid out over.
+  ///
+  /// The estimate is a mean and the link is not: a batch that arrives later
+  /// than average would find the queue already empty, and an empty queue is a
+  /// stopped cursor. Draining slightly slower than the batches arrive keeps a
+  /// little movement in hand for exactly that case, and the leftover is folded
+  /// into the next batch rather than paid out as a tail.
+  static const double _slack = 1.2;
+
+  /// How far ahead [_predict] will guess, in milliseconds of travel.
+  ///
+  /// Everything guessed has to be given back, so this is the size of the worst
+  /// correction the cursor can be asked to make. Prediction is usually right —
+  /// a batch is late far more often than a finger stops — but it is wrong at
+  /// the end of every gesture, by definition, and this is what bounds the cost
+  /// of being wrong.
+  static const double _predictionCapMillis = 56;
+
+  /// How quickly a guess loses confidence. Movement that is still going gets
+  /// most of its first tick; a finger that has stopped costs a few tens of
+  /// pixels of overshoot rather than a slide across the screen.
+  static const double _predictionHalfLifeMillis = 40;
+
+  /// The path still to be paid out, oldest slice first.
+  final List<_Slice> _queue = <_Slice>[];
+
+  /// Sub-pixel remainder, carried between ticks. Without it every tick smaller
+  /// than a pixel rounds to nothing and slow movement never arrives.
   double _residualX = 0;
   double _residualY = 0;
 
   double _intervalMillis = _defaultIntervalMillis;
   DateTime? _lastBatch;
 
-  /// Whether there is anything left to pay out.
-  bool get isIdle => _outstandingX == 0 && _outstandingY == 0;
+  /// The speed the path was running at when it ran out, in pixels per
+  /// millisecond, and how far past the end the guess has already gone.
+  double _velocityX = 0;
+  double _velocityY = 0;
+  double _predictedMillis = 0;
 
-  /// Takes one batch from the watch, and notes how long it has been since the
-  /// last one so the next payout matches the rhythm actually being observed.
-  void addBatch(double dx, double dy, DateTime now) {
+  /// Movement handed to the computer on spec and not yet earned back.
+  double _debtX = 0;
+  double _debtY = 0;
+
+  /// Whether the cursor is known to have arrived, so there is nothing left to
+  /// guess about.
+  ///
+  /// Set by [land] and [flush], cleared by the next batch. Without it the
+  /// gliding stop looks to [_take] exactly like ordinary movement running out,
+  /// and prediction carries on into the correction — guessing the cursor
+  /// further backwards, then owing that too.
+  bool _settled = true;
+
+  /// Whether there is anything left to do — real movement or a guess still
+  /// worth making.
+  bool get isIdle => _queue.isEmpty && !_canPredict;
+
+  bool get _canPredict =>
+      predictMotion &&
+      !_settled &&
+      _predictedMillis < _predictionCapMillis &&
+      (_velocityX != 0 || _velocityY != 0);
+
+  /// Takes one batch from the watch as a single delta, with no path.
+  ///
+  /// What a watch older than the path format sends, and the shape the tests use
+  /// when the path is not what is under test.
+  void addBatch(double dx, double dy, DateTime now) =>
+      addPath(<WatchMotionSegment>[(dx: dx, dy: dy, millis: 1)], now);
+
+  /// Takes one batch from the watch as the path it drew, and notes how long it
+  /// has been since the last one so the payout matches the rhythm actually
+  /// being observed.
+  void addPath(List<WatchMotionSegment> path, DateTime now) {
     final previous = _lastBatch;
     _lastBatch = now;
     if (previous != null) {
       final gap = now.difference(previous).inMicroseconds / 1000;
-      if (gap > 0 && gap <= _maximumIntervalMillis) {
-        // Smoothed: one late batch should bend the estimate, not replace it.
-        _intervalMillis = _intervalMillis * 0.7 + gap * 0.3;
+      if (gap > 0 && gap < _restartIntervalMillis) {
+        // Clamped, not discarded. Throwing away every gap over the ceiling
+        // taught the estimate only from the batches that happened to arrive
+        // quickly, and this link averages 200 ms. The estimate settled far
+        // under the real rhythm, so every batch finished paying out before the
+        // next one landed and the cursor moved, stopped, moved, stopped — which
+        // is the stepping this class exists to remove. A slow batch is the most
+        // informative sample there is; it is the one that must not be dropped.
+        final sample = math.min(gap, _maximumIntervalMillis);
+        // Asymmetric on purpose. Guessing the gap too short strands the cursor
+        // between batches and is plainly visible; guessing it too long costs a
+        // few milliseconds of lag and is not. So the estimate jumps to meet a
+        // slow batch and drifts back down only once the link has stayed fast.
+        final weight = sample > _intervalMillis ? 0.6 : 0.15;
+        _intervalMillis = _intervalMillis * (1 - weight) + sample * weight;
       }
     }
-    _outstandingX += dx;
-    _outstandingY += dy;
+
+    // A slice that goes nowhere is dropped rather than queued. The watch only
+    // records a slice when the finger moved, so an empty one carries no pause
+    // worth replaying — it would just hold a share of the window doing nothing
+    // while real movement waited behind it.
+    final slices = <_Slice>[
+      for (final segment in path)
+        if (segment.dx != 0 || segment.dy != 0)
+          _Slice(segment.dx, segment.dy, math.max(segment.millis, 1)),
+    ];
+
+    // What the last window did not finish, less whatever was handed over on
+    // spec and has not been earned back. The old queue goes entirely: its
+    // slices were timed against a window that has now been replaced, and what
+    // is owed is a distance, not a shape.
+    var carriedX = -_debtX;
+    var carriedY = -_debtY;
+    for (final slice in _queue) {
+      carriedX += slice.dx;
+      carriedY += slice.dy;
+    }
+    _queue.clear();
+    _debtX = 0;
+    _debtY = 0;
+    _predictedMillis = 0;
+    _settled = false;
+
+    if (slices.isEmpty) {
+      // Nothing new to draw the carry along, so it goes out as its own short
+      // slice rather than being dropped — it is movement the wrist really made.
+      if (carriedX == 0 && carriedY == 0) return;
+      slices.add(_Slice(carriedX, carriedY, 1));
+      carriedX = 0;
+      carriedY = 0;
+    }
+
+    _carryInto(slices, carriedX, carriedY);
+    _queue.addAll(slices);
+    _retime();
+  }
+
+  /// Folds what is still owed into the path about to be replayed.
+  ///
+  /// Scaled along the path rather than prepended to it. A correction of its own
+  /// is a jump, and a jump is the thing this class exists to remove; spread
+  /// along the path, the same pixels arrive as a slightly faster version of the
+  /// movement the finger actually made, and the shape survives untouched.
+  ///
+  /// Never past a standstill: a debt larger than the batch that follows it
+  /// would otherwise scale the path negative and run the cursor backwards. What
+  /// cannot be paid without reversing is simply forgiven. The cursor is a
+  /// relative device with no absolute reference — a few pixels never repaid are
+  /// invisible, and a backwards lurch is not.
+  void _carryInto(List<_Slice> slices, double dx, double dy) {
+    if (dx == 0 && dy == 0) return;
+
+    var totalX = 0.0;
+    var totalY = 0.0;
+    var totalMillis = 0.0;
+    for (final slice in slices) {
+      totalX += slice.dx;
+      totalY += slice.dy;
+      totalMillis += slice.millis;
+    }
+
+    // Where an axis did not move at all there is no shape to scale, so the
+    // carry is spread evenly over the time instead.
+    final scaleX = totalX.abs() > 1e-9;
+    final scaleY = totalY.abs() > 1e-9;
+    final factorX = scaleX ? math.max(1 + dx / totalX, 0.0) : 1.0;
+    final factorY = scaleY ? math.max(1 + dy / totalY, 0.0) : 1.0;
+
+    for (final slice in slices) {
+      final share = slice.millis / totalMillis;
+      slice.dx = scaleX ? slice.dx * factorX : slice.dx + dx * share;
+      slice.dy = scaleY ? slice.dy * factorY : slice.dy + dy * share;
+    }
+  }
+
+  /// Stretches the whole queue so it drains over one window.
+  ///
+  /// The slices keep their durations relative to each other — that is the shape
+  /// of the gesture — and the window they share is what the link's rhythm
+  /// decides.
+  void _retime() {
+    if (_queue.isEmpty) return;
+    var total = 0.0;
+    for (final slice in _queue) {
+      total += slice.millis;
+    }
+    if (total <= 0) return;
+    final window = math.max(_intervalMillis * _slack, _tickMillis);
+    final scale = window / total;
+    for (final slice in _queue) {
+      slice.millis *= scale;
+    }
   }
 
   /// The next slice of movement, or null when there is nothing to send.
   MouseMove? slice() {
-    if (isIdle) return null;
+    if (_queue.isNotEmpty) {
+      final (dx, dy) = _take(_tickMillis);
+      // Rounding, and clearing the remainder, only once there is nothing left
+      // to carry it into. A tail that asymptotes towards zero is a cursor that
+      // keeps creeping after the finger has stopped — but while a guess is
+      // still to come, the remainder has somewhere to go.
+      return _emit(dx, dy, last: _queue.isEmpty && !_canPredict);
+    }
+    return _predict();
+  }
 
-    final fraction =
-        (tickInterval.inMicroseconds / 1000) / math.max(_intervalMillis, 1);
-    // Never hold anything back on the last slice: below a pixel there is
-    // nothing left to smooth, and a tail that asymptotes towards zero is a
-    // cursor that keeps creeping after the finger has stopped.
-    final takeAll = fraction >= 1 ||
-        (_outstandingX.abs() < 1 && _outstandingY.abs() < 1);
-
-    final stepX = takeAll ? _outstandingX : _outstandingX * fraction;
-    final stepY = takeAll ? _outstandingY : _outstandingY * fraction;
-    _outstandingX -= stepX;
-    _outstandingY -= stepY;
-    if (takeAll) {
-      _outstandingX = 0;
-      _outstandingY = 0;
+  /// Consumes [millis] of the queued path, returning the pixels it covers.
+  (double, double) _take(double millis) {
+    var dx = 0.0;
+    var dy = 0.0;
+    var remaining = millis;
+    while (remaining > 0 && _queue.isNotEmpty) {
+      final head = _queue.first;
+      if (head.millis <= remaining) {
+        dx += head.dx;
+        dy += head.dy;
+        remaining -= head.millis;
+        _queue.removeAt(0);
+        continue;
+      }
+      final fraction = remaining / head.millis;
+      final stepX = head.dx * fraction;
+      final stepY = head.dy * fraction;
+      dx += stepX;
+      dy += stepY;
+      head.dx -= stepX;
+      head.dy -= stepY;
+      head.millis -= remaining;
+      remaining = 0;
     }
 
-    return _emit(stepX, stepY, last: takeAll);
+    // What the path was doing as it ran out, for the guess that may follow it.
+    final elapsed = millis - remaining;
+    if (elapsed > 0) {
+      _velocityX = dx / elapsed;
+      _velocityY = dy / elapsed;
+    }
+    return (dx, dy);
+  }
+
+  /// Keeps the cursor moving on the last known velocity while the next batch is
+  /// in the air.
+  ///
+  /// The round trip is 200 ms, so the cursor can only ever show where the
+  /// finger was 200 ms ago — and between batches it shows nothing at all, which
+  /// is the part that can be fixed. A finger that was moving is overwhelmingly
+  /// likely to still be moving, so the payout continues on the last velocity
+  /// rather than stopping dead, and what it invents is remembered as a debt and
+  /// taken back out of the next batch.
+  ///
+  /// The guess decays, and it is capped. A finger that really did stop costs a
+  /// few pixels of overshoot, paid back into the next movement; without the cap
+  /// it would cost a slide across the screen.
+  MouseMove? _predict() {
+    if (!_canPredict) return null;
+    final decay =
+        math.pow(0.5, _predictedMillis / _predictionHalfLifeMillis).toDouble();
+    final stepX = _velocityX * _tickMillis * decay;
+    final stepY = _velocityY * _tickMillis * decay;
+    _predictedMillis += _tickMillis;
+    _debtX += stepX;
+    _debtY += stepY;
+    return _emit(stepX, stepY, last: !_canPredict);
   }
 
   /// Everything still outstanding, at once.
   ///
-  /// Used before a click: a button pressed while movement is still being paid
-  /// out lands where the cursor has got to, not where the finger aimed it.
+  /// Used before a click, and when the watch says the finger has left the
+  /// glass. A button pressed while movement is still being paid out lands where
+  /// the cursor has got to, not where the finger aimed it.
+  ///
+  /// Any debt is settled here too, and this is the only place it can be. Until
+  /// the watch says the gesture ended, the phone cannot tell a finger that has
+  /// stopped from one whose next batch is still in the air — so a guess that
+  /// overshot is given back at the one moment the cursor is known to have
+  /// arrived.
   MouseMove? flush() {
-    if (isIdle) return null;
-    final stepX = _outstandingX;
-    final stepY = _outstandingY;
-    _outstandingX = 0;
-    _outstandingY = 0;
-    return _emit(stepX, stepY, last: true);
+    var dx = -_debtX;
+    var dy = -_debtY;
+    for (final slice in _queue) {
+      dx += slice.dx;
+      dy += slice.dy;
+    }
+    _queue.clear();
+    _debtX = 0;
+    _debtY = 0;
+    _velocityX = 0;
+    _velocityY = 0;
+    _predictedMillis = 0;
+    _settled = true;
+    if (dx == 0 && dy == 0) return null;
+    return _emit(dx, dy, last: true);
+  }
+
+  /// Eases to a stop, because the finger has left the glass.
+  ///
+  /// Everything outstanding is queued to run out over half a window, and any
+  /// guess that overshot is given back along the way. A stop is the one moment
+  /// the cursor is known to have arrived, and it is the only moment a debt can
+  /// be settled — but it is still movement, and it still glides. Paid back as a
+  /// jump it would read as the cursor bouncing at the end of every flick, which
+  /// is a worse fault than the stall it was covering for.
+  void land() {
+    var dx = -_debtX;
+    var dy = -_debtY;
+    for (final slice in _queue) {
+      dx += slice.dx;
+      dy += slice.dy;
+    }
+    _queue.clear();
+    _debtX = 0;
+    _debtY = 0;
+    // Nothing more is coming, so there is nothing left to guess about.
+    _velocityX = 0;
+    _velocityY = 0;
+    _predictedMillis = 0;
+    _settled = true;
+    if (dx == 0 && dy == 0) return;
+    _queue.add(_Slice(dx, dy, math.max(_intervalMillis * 0.5, _tickMillis)));
   }
 
   /// Drops everything. Called when the link goes away, so movement from before
   /// an outage does not arrive after it.
   void reset() {
-    _outstandingX = 0;
-    _outstandingY = 0;
+    _queue.clear();
     _residualX = 0;
     _residualY = 0;
+    _velocityX = 0;
+    _velocityY = 0;
+    _predictedMillis = 0;
+    _debtX = 0;
+    _debtY = 0;
+    _settled = true;
     _lastBatch = null;
     _intervalMillis = _defaultIntervalMillis;
   }
@@ -395,7 +740,10 @@ final watchBridgeProvider = Provider<void>((ref) {
     (_, next) => translator.settings = next,
   );
 
-  final smoother = WatchMotionSmoother();
+  // Prediction on: the round trip is 200 ms, and a cursor that stops dead
+  // between batches feels further behind than one that keeps going. Flip this
+  // to false to get the plain replay back — it is the one switch.
+  final smoother = WatchMotionSmoother(predictMotion: true);
   Timer? ticker;
 
   Future<void> deliver(Message message) async {
@@ -426,8 +774,30 @@ final watchBridgeProvider = Provider<void>((ref) {
 
   Future<void> dispatch(Object? event) async {
     if (event is! Map) return;
+    final raw = event.cast<Object?, Object?>();
 
-    for (final message in translator.translate(event.cast<Object?, Object?>())) {
+    // The path the finger drew, when the watch sent one. Preferred over the
+    // summed delta below because a path can be replayed and a total can only be
+    // jumped — and the total is then zeroed out of the message, because the two
+    // describe the same travel and replaying both would move the cursor twice
+    // as far as the wrist did.
+    final path = translator.motion(raw);
+    if (path.isNotEmpty) {
+      smoother.addPath(path, DateTime.now());
+      startTicker();
+    }
+    final rest =
+        path.isEmpty ? raw : <Object?, Object?>{...raw, 'dx': 0, 'dy': 0};
+
+    // The finger has left the glass. Nothing further is coming, so whatever is
+    // still queued runs out and the smoother stops guessing — see
+    // `WatchMotionSmoother.land`.
+    if (raw['ended'] == true) {
+      smoother.land();
+      startTicker();
+    }
+
+    for (final message in translator.translate(rest)) {
       if (message is MouseMove) {
         smoother.addBatch(
           message.deltaX.toDouble(),
