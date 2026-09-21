@@ -175,6 +175,59 @@ final class PendingPairing {
   final DateTime requestedAt;
 }
 
+/// A trusted device waiting to be let in.
+///
+/// Separate from [PendingPairing] because the question is different and so is
+/// the answer's weight. Pairing decides whether a device may ever connect and
+/// hangs on six digits the user has to compare; this decides whether a device
+/// they already trust may connect *now*, and there is nothing to compare —
+/// the handshake already verified the stored key. Showing six digits here
+/// would teach people to approve digits they have no way to check.
+final class PendingConnection {
+  PendingConnection({
+    required this.session,
+    required this.peerId,
+    required this.peerName,
+    required this.platform,
+    required this.requestedAt,
+  });
+
+  final ServerSession session;
+  final DeviceId peerId;
+
+  /// The name this computer stored when the device paired.
+  ///
+  /// From the trust store, never from the connecting device. A paired peer is
+  /// far from the stranger a pairing prompt faces, but it is still the party
+  /// asking for something, and a name it could rewrite between connections is
+  /// a name that can impersonate the other phone in the list.
+  final String peerName;
+
+  final PlatformKind platform;
+  final DateTime requestedAt;
+
+  String get address => session.address;
+}
+
+/// A connected device this computer could stop asking about.
+///
+/// Raised once per device, after it is already in — never while it is being
+/// held — because it is a question about *future* connections and asking it at
+/// the door would be two questions in one dialog, one of which nobody read.
+final class PendingRemember {
+  PendingRemember({
+    required this.session,
+    required this.peerId,
+    required this.peerName,
+  });
+
+  final ServerSession session;
+  final DeviceId peerId;
+
+  /// The stored name, as everywhere else a peer is named on screen.
+  final String peerName;
+}
+
 /// A permission elevation request waiting on the user.
 final class PendingPermissionRequest {
   PendingPermissionRequest({
@@ -367,6 +420,10 @@ final class DesktopService {
       StreamController<List<ConnectedDevice>>.broadcast();
   final StreamController<PendingPairing> _pairingRequests =
       StreamController<PendingPairing>.broadcast();
+  final StreamController<PendingConnection> _connectionRequests =
+      StreamController<PendingConnection>.broadcast();
+  final StreamController<PendingRemember> _rememberRequests =
+      StreamController<PendingRemember>.broadcast();
   final StreamController<PendingPermissionRequest> _permissionRequests =
       StreamController<PendingPermissionRequest>.broadcast();
   final StreamController<PendingIncomingTransfer> _incomingTransferRequests =
@@ -385,6 +442,20 @@ final class DesktopService {
 
   /// Pairing requests awaiting the user's confirmation.
   Stream<PendingPairing> get pairingRequests => _pairingRequests.stream;
+
+  /// Trusted devices waiting to be let in, as they knock.
+  Stream<PendingConnection> get connectionRequests =>
+      _connectionRequests.stream;
+
+  /// Connected devices this computer could be told to stop asking about.
+  Stream<PendingRemember> get rememberRequests => _rememberRequests.stream;
+
+  /// Trusted devices waiting to be let in right now.
+  ///
+  /// The snapshot beside the stream, so a UI that can only show one question at
+  /// a time can come back for the next one instead of leaving it to time out.
+  List<PendingConnection> get pendingConnections =>
+      _pendingConnections.values.toList(growable: false);
 
   /// Permission elevation requests awaiting user approval.
   Stream<PendingPermissionRequest> get permissionRequests =>
@@ -626,6 +697,52 @@ final class DesktopService {
   /// Whether new devices may pair right now.
   bool acceptsNewPairings = true;
 
+  /// Whether a device this computer already trusts is asked about each time it
+  /// connects.
+  ///
+  /// On by default. Pairing is a promise about a *device*, and until this
+  /// existed it was also, silently, a promise about every future moment: a
+  /// phone that was paired once reached this computer from then on with nobody
+  /// told, which is fine while the phone is in its owner's pocket and is the
+  /// whole problem when it is not.
+  ///
+  /// Asked once per device per run of this app, not once per connection — see
+  /// [_admittedThisRun]. Wi-Fi drops, a laptop lid, and a phone that sleeps its
+  /// radio all produce reconnects the user did not ask for and cannot tell
+  /// apart from the first one, and a prompt on each of them would be trained
+  /// away within a day.
+  bool get asksBeforeConnecting => _asksBeforeConnecting;
+
+  set asksBeforeConnecting(bool value) {
+    _asksBeforeConnecting = value;
+    // Applied to the live server, not only to the next launch: the switch is
+    // in the same window as the list of connected devices, and a setting that
+    // takes effect on restart reads as one that does nothing.
+    _server?.asksBeforeAdmitting = value;
+  }
+
+  bool _asksBeforeConnecting = true;
+
+  /// Devices a person has let in since this app started.
+  ///
+  /// Deliberately not persisted. "Until you quit" is a sentence a user can hold
+  /// in their head, and it is the one window in which the answer they gave is
+  /// still evidently theirs — a stored approval is a decision made by someone
+  /// who may no longer be in the room.
+  final Set<String> _admittedThisRun = <String>{};
+
+  /// Held connections the user has not answered yet, by device id.
+  final Map<String, PendingConnection> _pendingConnections =
+      <String, PendingConnection>{};
+
+  /// Remember-this-device agreements in progress, by device id.
+  ///
+  /// One per live session and gone with it. An agreement that did not settle
+  /// before the link dropped is not half an agreement — it is no agreement, and
+  /// the question is put again the next time both ends are up.
+  final Map<String, RememberAgreement> _agreements =
+      <String, RememberAgreement>{};
+
   /// Starts listening and announcing.
   Future<void> start() async {
     if (_server != null) return;
@@ -648,7 +765,7 @@ final class DesktopService {
       trustStore: trustStore,
       clock: _clock,
       port: servicePort,
-    );
+    )..asksBeforeAdmitting = _asksBeforeConnecting;
     await _loadPeerClipboardSettings();
     await server.start();
     _server = server;
@@ -858,11 +975,88 @@ final class DesktopService {
       return;
     }
 
-    // A trusted device gets its tier and the current clipboard immediately, so
-    // the first paste after connecting already has the right content rather
-    // than waiting for the next copy.
+    if (session.awaitingApproval) {
+      // Held by the transport because the setting says to ask. Whether anyone
+      // is actually asked is decided here: a device both ends agreed to
+      // remember, or one let in earlier this run, is admitted without a second
+      // prompt — the first because two people said so and it survives a
+      // restart, the second because a Wi-Fi drop must not become a dialog.
+      if (peer?.autoAdmit == true ||
+          _admittedThisRun.contains(session.peerId.value)) {
+        await _admit(session, tier);
+        return;
+      }
+      await _hold(session, peer?.name ?? session.peerId.short,
+          peer?.platform ?? PlatformKind.unknown);
+      return;
+    }
+
+    await _admit(session, tier);
+  }
+
+  /// Puts a trusted device's connection in front of the user.
+  Future<void> _hold(
+    ServerSession session,
+    String peerName,
+    PlatformKind platform,
+  ) async {
+    final pending = PendingConnection(
+      session: session,
+      peerId: session.peerId,
+      peerName: peerName,
+      platform: platform,
+      requestedAt: _clock.now(),
+    );
+    _pendingConnections[session.peerId.value] = pending;
+
+    // Told before asked. The phone is otherwise looking at a session that
+    // behaves exactly like a dead one, and the only thing worse than waiting
+    // is waiting without being told that is what you are doing.
+    try {
+      await session.session.send(
+        ConnectionRequest(
+          deviceName: describeSelf().name,
+          timeoutSeconds: kConnectionApprovalWindow.inSeconds,
+        ),
+      );
+    } on TransportError {
+      // The phone gave up already. Nothing to ask about.
+      _pendingConnections.remove(session.peerId.value);
+      return;
+    }
+
+    if (!_connectionRequests.isClosed) _connectionRequests.add(pending);
+    _scheduleApprovalExpiry(pending);
+
+    _log.info(
+      'holding a connection until someone answers',
+      fields: <String, Object?>{'peer': session.peerId.value},
+    );
+  }
+
+  /// Turns an unanswered request away rather than leaving the phone spinning.
+  void _scheduleApprovalExpiry(PendingConnection pending) {
+    unawaited(() async {
+      await _clock.delay(kConnectionApprovalWindow);
+      if (_pendingConnections[pending.peerId.value] != pending) return;
+      _log.info(
+        'nobody answered a held connection',
+        fields: <String, Object?>{'peer': pending.peerId.value},
+      );
+      await _refuse(pending, ConnectionAnswer.timedOut);
+    }());
+  }
+
+  /// Lets a session through and tells it everything a new session is owed.
+  ///
+  /// A trusted device gets its tier and the current clipboard immediately, so
+  /// the first paste after connecting already has the right content rather
+  /// than waiting for the next copy.
+  Future<void> _admit(ServerSession session, PermissionTier tier) async {
+    session.session.admit();
     await session.session.send(PermissionGrant(tier: tier));
     await session.session.send(DeviceInfoMessage(describeSelf()));
+    await _maybeAskToRemember(session);
 
     // Before the first tap, not on request. A phone that has to ask for the
     // layout would spend its first absolute move addressing the whole virtual
@@ -872,6 +1066,176 @@ final class DesktopService {
 
     final snapshot = await clipboard.snapshot(peerId: session.peerId);
     if (snapshot != null) await session.session.send(snapshot);
+  }
+
+  /// Lets a held connection in, and stops asking about that device this run.
+  Future<void> approveConnection(PendingConnection request) async {
+    if (_pendingConnections.remove(request.peerId.value) != request) return;
+    _admittedThisRun.add(request.peerId.value);
+
+    final device = _devices[request.peerId.value];
+    final tier = device?.tier ?? PermissionTier.readOnly;
+
+    // The decision first, then the welcome. The phone unblocks its own screen
+    // on this message, and sending the grant ahead of it would have the user
+    // looking at a spinner while the session behind it was already live.
+    await request.session.session.send(
+      const ConnectionDecision(ConnectionAnswer.allowed),
+    );
+    await _admit(request.session, tier);
+
+    _log.info(
+      'let a trusted device in',
+      fields: <String, Object?>{'peer': request.peerId.value},
+    );
+  }
+
+  /// Turns a held connection away.
+  Future<void> declineConnection(PendingConnection request) async {
+    if (_pendingConnections.remove(request.peerId.value) != request) return;
+    await _refuse(request, ConnectionAnswer.declined);
+  }
+
+  Future<void> _refuse(
+    PendingConnection request,
+    ConnectionAnswer answer,
+  ) async {
+    _pendingConnections.remove(request.peerId.value);
+    try {
+      await request.session.session.send(ConnectionDecision(answer));
+    } on TransportError {
+      // Already gone. The close below is still worth attempting and costs
+      // nothing if the socket has died underneath it.
+    }
+    await request.session.session.close(reason: CloseReason.userRequested);
+
+    _log.info(
+      'turned a connection away',
+      fields: <String, Object?>{
+        'peer': request.peerId.value,
+        'answer': answer.name,
+      },
+    );
+  }
+
+  /// Puts "should we stop asking about this device?" to the user, once.
+  ///
+  /// Silent for a device that is already remembered, one whose owner has
+  /// already said no, and one that has not finished pairing — see
+  /// [shouldAskToRemember]. Nothing is sent to the peer here: the peer is
+  /// asking its own user the same question at the same moment, and what goes
+  /// on the wire is each side's answer, not each side's prompt.
+  Future<void> _maybeAskToRemember(ServerSession session) async {
+    final peer = await trustStore.findByPublicKey(
+      session.handshake.peerStaticPublicKey,
+    );
+    if (!shouldAskToRemember(peer)) return;
+    if (_agreements.containsKey(session.peerId.value)) return;
+
+    final agreement = RememberAgreement(
+      peerId: session.peerId,
+      peerName: peer!.name,
+    );
+    _agreements[session.peerId.value] = agreement;
+
+    if (_rememberRequests.isClosed) return;
+    _rememberRequests.add(
+      PendingRemember(
+        session: session,
+        peerId: session.peerId,
+        peerName: peer.name,
+      ),
+    );
+  }
+
+  /// Records what the user said and tells the peer.
+  ///
+  /// The answer goes out whichever way it went. A peer waiting on a question
+  /// of its own has a dialog up that only an answer can take down, and leaving
+  /// it there because this end said no is how one refusal strands two devices.
+  Future<void> answerRemember(
+    PendingRemember request, {
+    required bool agreed,
+  }) async {
+    final agreement = _agreements[request.peerId.value];
+    if (agreement == null) return;
+    if (!agreement.recordMine(agreed: agreed)) return;
+
+    try {
+      await request.session.session.send(
+        RememberConnection(agreed: agreed),
+      );
+    } on TransportError {
+      // The link went while the question was on screen. The local half of the
+      // answer is still worth keeping — a no stays a no — and the settle below
+      // will write it down without the peer's half, which is to say without
+      // remembering anything.
+    }
+
+    await _settleRemember(request.peerId);
+  }
+
+  /// The peer's half of the agreement.
+  Future<void> _onPeerRemember(
+    ServerSession session, {
+    required bool agreed,
+  }) async {
+    final agreement = _agreements[session.peerId.value];
+    if (agreement == null) {
+      // Nothing was asked on this end, which means this computer already
+      // remembers the device — see [shouldAskToRemember]. Its answer is
+      // therefore already yes, and saying so is what lets a peer that has
+      // forgotten us agree again without a second round.
+      final peer = await trustStore.findById(session.peerId);
+      if (peer == null || !peer.autoAdmit) return;
+      try {
+        await session.session.send(const RememberConnection(agreed: true));
+      } on TransportError {
+        // Nothing left to tell.
+      }
+      return;
+    }
+
+    if (!agreement.recordTheirs(agreed: agreed)) return;
+    await _settleRemember(session.peerId);
+  }
+
+  /// Writes down a settled agreement, and only a settled one.
+  Future<void> _settleRemember(DeviceId peerId) async {
+    final agreement = _agreements[peerId.value];
+    // Nothing is written before this device's own user has answered. The peer
+    // saying yes on its own is not a record of anything having been asked here.
+    if (agreement == null || agreement.mine == null) return;
+    // Kept alive while it is only half answered, so the peer's answer arriving
+    // later in this same session can still settle it into a promise.
+    if (agreement.isSettled) _agreements.remove(peerId.value);
+
+    final peer = await trustStore.findById(peerId);
+    if (peer == null) return;
+    await trustStore.upsert(agreement.applyTo(peer));
+
+    _log.info(
+      switch ((agreement.isAgreed, agreement.isSettled)) {
+        (true, _) => 'both ends agreed to remember each other',
+        (_, true) => 'this connection will not be remembered',
+        (_, false) => 'answered here; waiting on the other end',
+      },
+      fields: <String, Object?>{'peer': peerId.value},
+    );
+  }
+
+  /// Turns remembering on or off for a device from the device list.
+  ///
+  /// The way out of an agreement, and the only one. Switching it off here does
+  /// not un-pair the device — it goes back to being asked about, which is where
+  /// it was before anyone agreed to anything.
+  Future<void> setAutoAdmit(DeviceId peerId, {required bool remember}) async {
+    final peer = await trustStore.findById(peerId);
+    if (peer == null) return;
+    await trustStore.upsert(
+      peer.copyWith(autoAdmit: remember, rememberAsked: true),
+    );
+    if (!remember) _admittedThisRun.remove(peerId.value);
   }
 
   @visibleForTesting
@@ -896,6 +1260,9 @@ final class DesktopService {
           clipboardSyncEnabled: device.clipboardSyncEnabled,
         );
         _publishDevices();
+
+      case RememberConnection(:final agreed):
+        await _onPeerRemember(session, agreed: agreed);
 
       case ClipboardRequest():
         final snapshot = await clipboard.snapshot(peerId: session.peerId);
@@ -928,6 +1295,11 @@ final class DesktopService {
   }
 
   Future<void> _onEnded(ServerSession session) async {
+    _pendingConnections.remove(session.peerId.value);
+    // An agreement that did not settle is dropped rather than kept for the next
+    // session. Half of it is on a device that is no longer here, and a stored
+    // half-yes is a yes waiting to be completed by whoever connects next.
+    _agreements.remove(session.peerId.value);
     _grantExpiryGenerations[session.peerId.value] =
         (_grantExpiryGenerations[session.peerId.value] ?? 0) + 1;
     await _messageSubscriptions.remove(session.peerId.value)?.cancel();
@@ -2373,6 +2745,8 @@ final class DesktopService {
     _devices.clear();
     await _deviceChanges.close();
     await _pairingRequests.close();
+    await _connectionRequests.close();
+    await _rememberRequests.close();
     await _permissionRequests.close();
     await _incomingTransferRequests.close();
     await _transferChanges.close();

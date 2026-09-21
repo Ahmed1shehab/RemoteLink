@@ -97,6 +97,49 @@ final class PendingInboundPairing {
   String get provisionalName => peerId.short;
 }
 
+/// A device this phone already trusts, waiting to be let in.
+///
+/// The counterpart to [PendingInboundPairing] for a device that has paired
+/// before. There are no digits to compare — the handshake already verified the
+/// stored key — so this carries a name instead, and the name comes from the
+/// trust store rather than from the connecting device.
+@immutable
+final class PendingInboundConnection {
+  const PendingInboundConnection({
+    required this.session,
+    required this.peerId,
+    required this.peerName,
+    required this.platform,
+    required this.requestedAt,
+  });
+
+  final ServerSession session;
+  final DeviceId peerId;
+  final String peerName;
+  final PlatformKind platform;
+  final DateTime requestedAt;
+}
+
+/// A connected device this phone could stop asking about.
+///
+/// Raised once the device is already in, never while it is being held — the
+/// question is about future connections, and stacking it on the one in front of
+/// the user turns two decisions into one tap.
+@immutable
+final class PendingInboundRemember {
+  const PendingInboundRemember({
+    required this.session,
+    required this.peerId,
+    required this.peerName,
+  });
+
+  final ServerSession session;
+  final DeviceId peerId;
+
+  /// The stored name, as everywhere else a peer is named on screen.
+  final String peerName;
+}
+
 /// A message that arrived over an inbound session and is allowed through.
 @immutable
 final class InboundMessage {
@@ -174,11 +217,42 @@ final class PhoneHostService {
   final Map<String, InboundLink> _links = <String, InboundLink>{};
   final Map<String, PendingInboundPairing> _pending =
       <String, PendingInboundPairing>{};
+  final Map<String, PendingInboundConnection> _pendingConnections =
+      <String, PendingInboundConnection>{};
+
+  /// Remember-this-device agreements in progress, by device id.
+  ///
+  /// One per live session and gone with it: an agreement that did not settle
+  /// before the link dropped is no agreement at all, and the question is put
+  /// again the next time both ends are up.
+  final Map<String, RememberAgreement> _agreements =
+      <String, RememberAgreement>{};
+
+  /// Questions raised and not yet answered, by device id.
+  ///
+  /// Kept as a list beside the stream because the prompts are drained one at a
+  /// time — see `listenForNearbyPrompts` — and a question that arrived while
+  /// another sheet was up has to still be there when the loop comes back for
+  /// it, rather than having been a stream event nobody was listening to.
+  final Map<String, PendingInboundRemember> _pendingRemembers =
+      <String, PendingInboundRemember>{};
+
+  /// Devices a person has let in since the app started.
+  ///
+  /// Not persisted, for the same reason the desktop's is not: "until you close
+  /// the app" is a window the user can hold in their head, and a stored answer
+  /// is one given by whoever was holding the phone last time.
+  final Set<String> _admittedThisRun = <String>{};
 
   final StreamController<List<InboundLink>> _linkChanges =
       StreamController<List<InboundLink>>.broadcast();
   final StreamController<List<PendingInboundPairing>> _pendingChanges =
       StreamController<List<PendingInboundPairing>>.broadcast();
+  final StreamController<List<PendingInboundConnection>>
+      _pendingConnectionChanges =
+      StreamController<List<PendingInboundConnection>>.broadcast();
+  final StreamController<List<PendingInboundRemember>> _rememberRequests =
+      StreamController<List<PendingInboundRemember>>.broadcast();
   final StreamController<InboundMessage> _messages =
       StreamController<InboundMessage>.broadcast();
 
@@ -197,6 +271,22 @@ final class PhoneHostService {
   Stream<List<PendingInboundPairing>> get pendingChanges =>
       _pendingChanges.stream;
 
+  /// Trusted devices waiting for someone to allow the connection.
+  List<PendingInboundConnection> get pendingConnections =>
+      _pendingConnections.values.toList(growable: false);
+
+  /// Trusted devices waiting to be allowed, as they knock and are answered.
+  Stream<List<PendingInboundConnection>> get pendingConnectionChanges =>
+      _pendingConnectionChanges.stream;
+
+  /// Connected devices this phone could be told to stop asking about.
+  List<PendingInboundRemember> get pendingRemembers =>
+      _pendingRemembers.values.toList(growable: false);
+
+  /// The same, as they are raised and answered.
+  Stream<List<PendingInboundRemember>> get rememberChanges =>
+      _rememberRequests.stream;
+
   /// Allowed messages from connected devices, paired with the session they came
   /// in on so a reply goes back to the sender rather than to whoever happens to
   /// be connected.
@@ -214,6 +304,23 @@ final class PhoneHostService {
   /// is up or it is no use.
   bool acceptsNewPairings = true;
 
+  /// Whether a device this phone already trusts is asked about each time it
+  /// connects.
+  ///
+  /// The same promise the desktop makes, and it matters more here rather than
+  /// less: a phone is handed around, left on a table, and carried into range of
+  /// people its owner has paired with once. Asked once per device per run of
+  /// the app — a phone's link drops every time the screen locks, and a prompt
+  /// on each of those would be tapped away without being read.
+  bool get asksBeforeConnecting => _asksBeforeConnecting;
+
+  set asksBeforeConnecting(bool value) {
+    _asksBeforeConnecting = value;
+    _server?.asksBeforeAdmitting = value;
+  }
+
+  bool _asksBeforeConnecting = true;
+
   /// Starts listening and announcing.
   ///
   /// Nothing here is fatal to the app. A phone that cannot host is a phone that
@@ -230,7 +337,7 @@ final class PhoneHostService {
       trustStore: trustStore,
       clock: _clock,
       port: _port,
-    );
+    )..asksBeforeAdmitting = _asksBeforeConnecting;
 
     try {
       await server.start();
@@ -299,8 +406,10 @@ final class PhoneHostService {
 
     _links.clear();
     _pending.clear();
+    _pendingConnections.clear();
     _publishLinks();
     _publishPending();
+    _publishPendingConnections();
 
     _log.info('this phone is no longer discoverable');
   }
@@ -309,6 +418,8 @@ final class PhoneHostService {
     await stop();
     await _linkChanges.close();
     await _pendingChanges.close();
+    await _pendingConnectionChanges.close();
+    await _rememberRequests.close();
     await _messages.close();
   }
 
@@ -354,7 +465,117 @@ final class PhoneHostService {
     final peer = await trustStore.findByPublicKey(
       session.handshake.peerStaticPublicKey,
     );
+
+    // A device both ends agreed to remember is let straight in, and so is one
+    // already allowed this run: the first because two people said so and it
+    // survives a restart, the second because a Wi-Fi drop must not become a
+    // dialog.
+    if (session.awaitingApproval &&
+        peer?.autoAdmit != true &&
+        !_admittedThisRun.contains(session.peerId.value)) {
+      await _hold(session, peer);
+      return;
+    }
+
     await _admit(session, name: peer?.name, platform: peer?.platform);
+  }
+
+  /// A device this phone has paired with, asking to come in now.
+  Future<void> _hold(ServerSession session, TrustedPeer? peer) async {
+    final pending = PendingInboundConnection(
+      session: session,
+      peerId: session.peerId,
+      // The stored name, never one the peer sent with this connection. A
+      // paired device is not a stranger, but it is still the party asking, and
+      // a name it can rewrite between connections is a name that can wear
+      // another device's in the prompt.
+      peerName: peer?.name ?? session.peerId.short,
+      platform: peer?.platform ?? PlatformKind.unknown,
+      requestedAt: _clock.now(),
+    );
+    _pendingConnections[session.peerId.value] = pending;
+
+    // Told before asked, so the other device shows "waiting" rather than a
+    // session that behaves exactly like a dead one.
+    try {
+      await session.session.send(
+        ConnectionRequest(
+          deviceName: _describeName(),
+          timeoutSeconds: kConnectionApprovalWindow.inSeconds,
+        ),
+      );
+    } on Object catch (e) {
+      _pendingConnections.remove(session.peerId.value);
+      _log.debug(() => 'could not tell a peer it was waiting: $e');
+      return;
+    }
+
+    _publishPendingConnections();
+    _scheduleApprovalExpiry(pending);
+  }
+
+  /// Turns an unanswered request away rather than leaving the peer spinning.
+  void _scheduleApprovalExpiry(PendingInboundConnection pending) {
+    unawaited(() async {
+      await _clock.delay(kConnectionApprovalWindow);
+      if (_pendingConnections[pending.peerId.value] != pending) return;
+      await _refuse(pending, ConnectionAnswer.timedOut);
+    }());
+  }
+
+  /// Lets a held connection in, and stops asking about that device this run.
+  Future<void> approveConnection(PendingInboundConnection request) async {
+    if (_pendingConnections.remove(request.peerId.value) != request) return;
+    _publishPendingConnections();
+    _admittedThisRun.add(request.peerId.value);
+
+    // The decision first, then the welcome: the peer unblocks its own screen
+    // on this message, and the grant that [_admit] sends would otherwise arrive
+    // while it still believed it was waiting.
+    await request.session.session.send(
+      const ConnectionDecision(ConnectionAnswer.allowed),
+    );
+    await _admit(
+      request.session,
+      name: request.peerName,
+      platform: request.platform,
+    );
+
+    _log.info(
+      'let a trusted device in',
+      fields: <String, Object?>{'peer': request.peerId.value},
+    );
+  }
+
+  /// Turns a held connection away.
+  Future<void> declineConnection(PendingInboundConnection request) async {
+    if (_pendingConnections.remove(request.peerId.value) != request) return;
+    _publishPendingConnections();
+    await _refuse(request, ConnectionAnswer.declined);
+  }
+
+  Future<void> _refuse(
+    PendingInboundConnection request,
+    ConnectionAnswer answer,
+  ) async {
+    if (_pendingConnections.remove(request.peerId.value) != null) {
+      _publishPendingConnections();
+    }
+    try {
+      await request.session.session.send(ConnectionDecision(answer));
+    } on Object catch (e) {
+      // The peer may already be gone, and the answer was "no" either way.
+      _log.debug(() => 'could not tell the peer it was turned away: $e');
+    }
+    await request.session.session.close(reason: CloseReason.userRequested);
+
+    _log.info(
+      'turned a connection away',
+      fields: <String, Object?>{
+        'peer': request.peerId.value,
+        'answer': answer.name,
+      },
+    );
   }
 
   /// A device that has never paired with this phone.
@@ -398,6 +619,12 @@ final class PhoneHostService {
     String? name,
     PlatformKind? platform,
   }) async {
+    // A no-op for a session that was never held, and the whole of the
+    // difference for one that was: until this runs the session drops every
+    // message outside the handshake and trust subsystems, including the grant
+    // and the device info sent at the bottom of this method.
+    session.session.admit();
+
     _links[session.peerId.value] = InboundLink(
       session: session.session,
       peerId: session.peerId,
@@ -419,9 +646,119 @@ final class PhoneHostService {
       const PermissionGrant(tier: PermissionTier.standard),
     );
     await session.session.send(DeviceInfoMessage(describeSelf()));
+    await _maybeAskToRemember(session);
+  }
+
+  /// Puts "should we stop asking about this device?" to the user, once.
+  ///
+  /// Nothing goes on the wire here: the peer is asking its own user the same
+  /// question at the same moment, and what is sent is each side's answer.
+  Future<void> _maybeAskToRemember(ServerSession session) async {
+    final peer = await trustStore.findByPublicKey(
+      session.handshake.peerStaticPublicKey,
+    );
+    if (!shouldAskToRemember(peer)) return;
+    if (_agreements.containsKey(session.peerId.value)) return;
+
+    _agreements[session.peerId.value] = RememberAgreement(
+      peerId: session.peerId,
+      peerName: peer!.name,
+    );
+    final pending = PendingInboundRemember(
+      session: session,
+      peerId: session.peerId,
+      peerName: peer.name,
+    );
+    _pendingRemembers[session.peerId.value] = pending;
+    _publishPendingRemembers();
+  }
+
+  void _publishPendingRemembers() {
+    if (_rememberRequests.isClosed) return;
+    _rememberRequests.add(pendingRemembers);
+  }
+
+  /// Records what the user said and tells the peer.
+  ///
+  /// The answer goes out whichever way it went: a peer with its own copy of
+  /// this question on screen has no way to take it down but an answer.
+  Future<void> answerRemember(
+    PendingInboundRemember request, {
+    required bool agreed,
+  }) async {
+    if (_pendingRemembers.remove(request.peerId.value) != null) {
+      _publishPendingRemembers();
+    }
+    final agreement = _agreements[request.peerId.value];
+    if (agreement == null) return;
+    if (!agreement.recordMine(agreed: agreed)) return;
+
+    try {
+      await request.session.session.send(RememberConnection(agreed: agreed));
+    } on Object catch (e) {
+      _log.debug(() => 'could not send a remember answer: $e');
+    }
+    await _settleRemember(request.peerId);
+  }
+
+  /// The peer's half of the agreement.
+  Future<void> _onPeerRemember(
+    ServerSession session, {
+    required bool agreed,
+  }) async {
+    final agreement = _agreements[session.peerId.value];
+    if (agreement == null) {
+      // Nothing was asked here, so this phone already remembers the device and
+      // its answer is already yes. Saying so lets a peer that has forgotten us
+      // agree again without a round that could never complete.
+      final peer = await trustStore.findById(session.peerId);
+      if (peer == null || !peer.autoAdmit) return;
+      try {
+        await session.session.send(const RememberConnection(agreed: true));
+      } on Object catch (_) {
+        // Nothing left to tell.
+      }
+      return;
+    }
+    if (!agreement.recordTheirs(agreed: agreed)) return;
+    await _settleRemember(session.peerId);
+  }
+
+  /// Writes down a settled agreement, and only a settled one.
+  Future<void> _settleRemember(DeviceId peerId) async {
+    final agreement = _agreements[peerId.value];
+    // Nothing is written before this device's own user has answered. The peer
+    // saying yes on its own is not a record of anything having been asked here.
+    if (agreement == null || agreement.mine == null) return;
+    // Kept alive while it is only half answered, so the peer's answer arriving
+    // later in this same session can still settle it into a promise.
+    if (agreement.isSettled) _agreements.remove(peerId.value);
+
+    final peer = await trustStore.findById(peerId);
+    if (peer == null) return;
+    await trustStore.upsert(agreement.applyTo(peer));
+    await onTrustChanged();
+
+    _log.info(
+      switch ((agreement.isAgreed, agreement.isSettled)) {
+        (true, _) => 'both ends agreed to remember each other',
+        (_, true) => 'this connection will not be remembered',
+        (_, false) => 'answered here; waiting on the other end',
+      },
+      fields: <String, Object?>{'peer': peerId.value},
+    );
   }
 
   void _onMessage(ServerSession session, Message message) {
+    // Answered here rather than forwarded, for the same reason as the device
+    // info below: its effect is on this class's own state, and it is not a
+    // request for the phone to *do* anything — see [isAllowedFromPeer], which
+    // is about that second question and rightly refuses this one.
+    if (message is RememberConnection) {
+      unawaited(_onPeerRemember(session, agreed: message.agreed));
+      return;
+    }
+
     // Learning the peer's name is handled here rather than passed through,
     // because it is the one message whose effect is on this class's own state.
     if (message is DeviceInfoMessage) {
@@ -432,6 +769,7 @@ final class PhoneHostService {
           .withName(sanitised ?? existing.name)
           .withPlatform(message.info.platform);
       _publishLinks();
+      unawaited(_rememberPeerInfo(session.peerId, message.info));
       return;
     }
 
@@ -452,10 +790,18 @@ final class PhoneHostService {
 
   Future<void> _onEnded(ServerSession session) async {
     await _messageSubscriptions.remove(session.peerId.value)?.cancel();
+    // Half an agreement is not kept for the next session: the other half is on
+    // a device that is no longer here.
+    _agreements.remove(session.peerId.value);
+    if (_pendingRemembers.remove(session.peerId.value) != null) {
+      _publishPendingRemembers();
+    }
     final wasLinked = _links.remove(session.peerId.value) != null;
     final wasPending = _pending.remove(session.peerId.value) != null;
+    final wasHeld = _pendingConnections.remove(session.peerId.value) != null;
     if (wasLinked) _publishLinks();
     if (wasPending) _publishPending();
+    if (wasHeld) _publishPendingConnections();
   }
 
   /// Approves a device the user has confirmed the six digits with.
@@ -505,9 +851,47 @@ final class PhoneHostService {
     await request.session.session.close(reason: CloseReason.userRequested);
   }
 
+  /// Gracefully closes an inbound link with [peerId].
+  Future<void> disconnectPeer(DeviceId peerId) async {
+    final link = _links[peerId.value];
+    if (link != null) {
+      await link.session.close(reason: CloseReason.userRequested);
+    }
+  }
+
   /// Disconnects a device and forgets it.
   Future<void> revoke(DeviceId peerId) async {
     await _server?.revokePeer(peerId);
+    await onTrustChanged();
+  }
+
+  Future<void> _rememberPeerInfo(DeviceId peerId, DeviceInfo info) async {
+    final peer = await trustStore.findById(peerId);
+    if (peer == null) return;
+    final sanitised = sanitiseDeviceName(info.name);
+    final newName = sanitised ?? peer.name;
+    if (peer.name == newName && peer.platform == info.platform) return;
+    await trustStore.upsert(
+      TrustedPeer(
+        id: peer.id,
+        publicKey: peer.publicKey,
+        name: newName,
+        platform: info.platform != PlatformKind.unknown
+            ? info.platform
+            : peer.platform,
+        pairedAt: peer.pairedAt,
+        permissionTier: peer.permissionTier,
+        lastSeenAt: _clock.now(),
+        lastAddress: peer.lastAddress,
+        revoked: peer.revoked,
+        // Carried across explicitly: this rebuilds the record rather than
+        // copying it, so a field left out here is a field silently reset — and
+        // resetting these two would un-remember a device because it told us
+        // its name.
+        autoAdmit: peer.autoAdmit,
+        rememberAsked: peer.rememberAsked,
+      ),
+    );
     await onTrustChanged();
   }
 
@@ -517,6 +901,12 @@ final class PhoneHostService {
 
   void _publishPending() {
     if (!_pendingChanges.isClosed) _pendingChanges.add(pending);
+  }
+
+  void _publishPendingConnections() {
+    if (!_pendingConnectionChanges.isClosed) {
+      _pendingConnectionChanges.add(pendingConnections);
+    }
   }
 }
 

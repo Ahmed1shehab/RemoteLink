@@ -267,6 +267,185 @@ void main() {
       );
     });
   });
+
+  group('a paired device asking to connect now', () {
+    test('is asked about by default', () async {
+      // The default is the feature. A phone is handed around, left on a table
+      // and carried into range of people its owner paired with once, and a
+      // setting nobody finds protects nobody.
+      final host = await _startHost(asksBeforeConnecting: true);
+      addTearDown(host.service.dispose);
+      expect(host.service.asksBeforeConnecting, isTrue);
+    });
+
+    test('waits, and what it sends while waiting is dropped', () async {
+      final peer = await DeviceIdentity.generate();
+      final host = await _startHost(asksBeforeConnecting: true);
+      addTearDown(host.service.dispose);
+      await _trust(host, peer);
+
+      final waiting = host.service.pendingConnectionChanges.firstWhere(
+        (pending) => pending.isNotEmpty,
+      );
+      final known = await _dial(host, identity: peer);
+      addTearDown(known.client.dispose);
+
+      final pending =
+          (await waiting.timeout(const Duration(seconds: 10))).single;
+      expect(pending.peerId, peer.id);
+      // The stored name, not one the connecting device sent with this
+      // connection.
+      expect(pending.peerName, 'A Known Phone');
+
+      // Not a link yet: a device in this state must not be offered as
+      // somewhere to send to.
+      expect(host.service.links, isEmpty);
+
+      final delivered = <Message>[];
+      final subscription = host.service.messages.listen(
+        (inbound) => delivered.add(inbound.message),
+      );
+      addTearDown(subscription.cancel);
+
+      await _until(() => known.client.session != null);
+      await known.client.send(
+        FileOffer(transferId: 'held', files: const <OfferedFile>[]),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(delivered, isEmpty);
+
+      await host.service.approveConnection(pending);
+      await known.client.send(
+        FileOffer(transferId: 'allowed', files: const <OfferedFile>[]),
+      );
+      await _until(() => delivered.isNotEmpty);
+      expect((delivered.single as FileOffer).transferId, 'allowed');
+      expect(host.service.links.single.peerId, peer.id);
+    });
+
+    test('is not asked about twice in one run of the app', () async {
+      // A phone's link drops every time the screen locks. A prompt on each of
+      // those would be tapped away without being read, which is worse than not
+      // asking at all.
+      final peer = await DeviceIdentity.generate();
+      final host = await _startHost(asksBeforeConnecting: true);
+      addTearDown(host.service.dispose);
+      await _trust(host, peer);
+
+      final waiting = host.service.pendingConnectionChanges.firstWhere(
+        (pending) => pending.isNotEmpty,
+      );
+      final first = await _dial(host, identity: peer);
+      await host.service.approveConnection(
+        (await waiting.timeout(const Duration(seconds: 10))).single,
+      );
+      // Connected, not merely admitted. The host finishes first, and a client
+      // disposed in the gap never had a session to close — the socket would
+      // stay open and this test would be waiting on a link that cannot go.
+      await _until(() => first.client.isConnected);
+      await first.client.dispose();
+      await _until(() => host.service.links.isEmpty);
+
+      final second = await _dial(host, identity: peer);
+      addTearDown(second.client.dispose);
+
+      await _until(() => host.service.links.isNotEmpty);
+      expect(host.service.pendingConnections, isEmpty);
+    });
+
+    test('turning it away leaves no link and tells it so', () async {
+      final peer = await DeviceIdentity.generate();
+      final host = await _startHost(asksBeforeConnecting: true);
+      addTearDown(host.service.dispose);
+      await _trust(host, peer);
+
+      final waiting = host.service.pendingConnectionChanges.firstWhere(
+        (pending) => pending.isNotEmpty,
+      );
+      final known = await _dial(host, identity: peer);
+      addTearDown(known.client.dispose);
+      final pending =
+          (await waiting.timeout(const Duration(seconds: 10))).single;
+
+      await host.service.declineConnection(pending);
+      await _until(() => known.client.refusal != null);
+
+      expect(known.client.refusal, ConnectionAnswer.declined);
+      expect(host.service.links, isEmpty);
+      expect(host.service.pendingConnections, isEmpty);
+      // Still paired. Refusing a connection is not the same as forgetting a
+      // device, and conflating them would make "not now" unrecoverable.
+      expect(await host.trustStore.activePeers(), hasLength(1));
+    });
+  });
+
+  group('remembering a device', () {
+    test('a remembered device is let straight in, with nobody asked', () async {
+      final peer = await DeviceIdentity.generate();
+      final host = await _startHost(asksBeforeConnecting: true);
+      addTearDown(host.service.dispose);
+      await _trust(host, peer, autoAdmit: true, rememberAsked: true);
+
+      final known = await _dial(host, identity: peer);
+      addTearDown(known.client.dispose);
+
+      await _until(() => host.service.links.isNotEmpty);
+      expect(host.service.pendingConnections, isEmpty);
+      expect(host.service.links.single.peerId, peer.id);
+    });
+
+    test('two yeses are what make a device remembered', () async {
+      final peer = await DeviceIdentity.generate();
+      final host = await _startHost();
+      addTearDown(host.service.dispose);
+      await _trust(host, peer);
+
+      final asked = host.service.rememberChanges.firstWhere(
+        (pending) => pending.isNotEmpty,
+      );
+      final known = await _dial(host, identity: peer);
+      addTearDown(known.client.dispose);
+
+      final pending = (await asked.timeout(const Duration(seconds: 10))).single;
+      expect(pending.peerName, 'A Known Phone');
+
+      // The peer's answer alone changes nothing: this phone has not agreed.
+      await _until(() => known.client.session != null);
+      await known.client.send(const RememberConnection(agreed: true));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect((await host.trustStore.findById(peer.id))?.autoAdmit, isFalse);
+
+      await host.service.answerRemember(pending, agreed: true);
+      await _untilStored(host, peer.id, (stored) => stored?.autoAdmit ?? false);
+      expect(host.service.pendingRemembers, isEmpty);
+    });
+
+    test('a no is asked once and then left alone', () async {
+      final peer = await DeviceIdentity.generate();
+      final host = await _startHost();
+      addTearDown(host.service.dispose);
+      await _trust(host, peer);
+
+      final asked = host.service.rememberChanges.firstWhere(
+        (pending) => pending.isNotEmpty,
+      );
+      final known = await _dial(host, identity: peer);
+      addTearDown(known.client.dispose);
+      final pending = (await asked.timeout(const Duration(seconds: 10))).single;
+
+      await _until(() => known.client.session != null);
+      await known.client.send(const RememberConnection(agreed: true));
+      await host.service.answerRemember(pending, agreed: false);
+
+      await _untilStored(
+        host,
+        peer.id,
+        (stored) => stored?.rememberAsked ?? false,
+      );
+      expect((await host.trustStore.findById(peer.id))?.autoAdmit, isFalse);
+      expect(host.service.pendingRemembers, isEmpty);
+    });
+  });
 }
 
 /// A running host, and the pieces a test needs to reach into it.
@@ -284,10 +463,17 @@ typedef _Host = ({
 /// beacon would bind a multicast socket — a test that joined a multicast group
 /// would be a test that behaves differently depending on what else is on the
 /// network.
+/// [asksBeforeConnecting] is off unless a test says otherwise, which is the
+/// opposite of the app's own default. A test about what a paired device may do
+/// once it is in should not also be a test about being let in — left on, every
+/// one of them would assert against a session the transport is holding, and the
+/// first failure would look like a bug in the thing under test. Being let in
+/// has its own group below.
 Future<_Host> _startHost({
   String name = 'Test Phone',
   String Function()? nameSource,
   Future<void> Function()? onTrustChanged,
+  bool asksBeforeConnecting = false,
 }) async {
   final identity = await DeviceIdentity.generate();
   final trustStore = InMemoryTrustStore();
@@ -302,7 +488,7 @@ Future<_Host> _startHost({
     // Port 0 so nothing collides with a suite running beside this one, and so
     // no test can accidentally depend on the real one.
     port: 0,
-  );
+  )..asksBeforeConnecting = asksBeforeConnecting;
   await service.start();
 
   return (
@@ -312,6 +498,26 @@ Future<_Host> _startHost({
     port: service.boundPort,
   );
 }
+
+/// Records [identity] as a device this host has already paired with.
+Future<void> _trust(
+  _Host host,
+  DeviceIdentity identity, {
+  bool autoAdmit = false,
+  bool rememberAsked = false,
+}) =>
+    host.trustStore.upsert(
+      TrustedPeer(
+        id: identity.id,
+        publicKey: identity.publicKey,
+        name: 'A Known Phone',
+        platform: PlatformKind.android,
+        pairedAt: DateTime.now(),
+        permissionTier: PermissionTier.standard.wireValue,
+        autoAdmit: autoAdmit,
+        rememberAsked: rememberAsked,
+      ),
+    );
 
 /// A device connecting to the host under test.
 typedef _Caller = ({RemoteLinkClient client, DeviceIdentity identity});
@@ -339,6 +545,22 @@ Future<_Caller> _dial(_Host host, {DeviceIdentity? identity}) async {
 ///
 /// A `delayed` long enough to be reliable is a suite that takes minutes, and
 /// one short enough to be quick is a suite that fails on a loaded machine.
+/// The same, for a condition that has to be read out of the trust store.
+Future<void> _untilStored(
+  _Host host,
+  DeviceId peerId,
+  bool Function(TrustedPeer?) condition, {
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!condition(await host.trustStore.findById(peerId))) {
+    if (DateTime.now().isAfter(deadline)) {
+      fail('the trust store never reached the expected state');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+}
+
 Future<void> _until(
   bool Function() condition, {
   Duration timeout = const Duration(seconds: 10),

@@ -30,6 +30,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_riverpod: ^2.5.1
+  flutter_svg: ^2.0.17
   # `@visibleForTesting` on the hooks the screen-capture tests drive. It was
   # arriving transitively through the rl_* packages, which analysis flags for
   # good reason: a direct import wants a direct dependency, or it breaks the
@@ -60,6 +61,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/icons/
     # The tray icon is loaded by path at runtime, so it must be bundled. A
     # missing asset here is a launch-time crash, not a compile error.
     - assets/tray/

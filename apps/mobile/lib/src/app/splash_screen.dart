@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import '../features/devices/device_list_screen.dart';
@@ -71,6 +69,13 @@ class _LaunchScreenState extends State<LaunchScreen>
       parent: _controller,
       curve: const Interval(_fadeStart, 1, curve: Curves.easeOutCubic),
     );
+    // The mark and the name arrive together, over the first third of the cap,
+    // so the splash reads as the app introducing itself rather than as a frame
+    // that happened to be caught mid-load.
+    final entrance = CurvedAnimation(
+      parent: _controller,
+      curve: const Interval(0, 0.34, curve: Curves.easeOutCubic),
+    );
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
@@ -85,34 +90,32 @@ class _LaunchScreenState extends State<LaunchScreen>
               child: ColoredBox(
                 color: scheme.surface,
                 child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      ExcludeSemantics(
-                        // The octahedron has six vertices and twelve edges, so
-                        // its triangular outline remains recognisable at 144dp
-                        // where a more detailed wireframe would turn to noise.
-                        child: RepaintBoundary(
-                          child: CustomPaint(
-                            size: const Size.square(144),
-                            painter: _LaunchSolidPainter(
-                              progress: _controller,
-                              strokeColor: scheme.primary,
+                  child: FadeTransition(
+                    opacity: entrance,
+                    child: ScaleTransition(
+                      // A small rise from 96%, not a pop: the icon is the same
+                      // artwork the launcher just showed, and anything larger
+                      // would read as a second, different animation on top of
+                      // the system's own icon-to-app transition.
+                      scale:
+                          Tween<double>(begin: 0.96, end: 1).animate(entrance),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          const ExcludeSemantics(child: BrandMark(size: 120)),
+                          const SizedBox(height: 28),
+                          ExcludeSemantics(
+                            child: Text(
+                              kProductName,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .headlineMedium
+                                  ?.copyWith(color: scheme.onSurface),
                             ),
                           ),
-                        ),
+                        ],
                       ),
-                      const SizedBox(height: 28),
-                      ExcludeSemantics(
-                        child: Text(
-                          kProductName,
-                          style: Theme.of(context)
-                              .textTheme
-                              .headlineMedium
-                              ?.copyWith(color: scheme.onSurface),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -122,80 +125,4 @@ class _LaunchScreenState extends State<LaunchScreen>
       ],
     );
   }
-}
-
-class _LaunchSolidPainter extends CustomPainter {
-  _LaunchSolidPainter({required this.progress, required this.strokeColor})
-      : super(repaint: progress);
-
-  final Animation<double> progress;
-  final Color strokeColor;
-
-  static const List<({double x, double y, double z})> _vertices =
-      <({double x, double y, double z})>[
-    (x: 1, y: 0, z: 0),
-    (x: -1, y: 0, z: 0),
-    (x: 0, y: 1, z: 0),
-    (x: 0, y: -1, z: 0),
-    (x: 0, y: 0, z: 1),
-    (x: 0, y: 0, z: -1),
-  ];
-
-  static const List<({int a, int b})> _edges = <({int a, int b})>[
-    (a: 0, b: 2),
-    (a: 0, b: 3),
-    (a: 0, b: 4),
-    (a: 0, b: 5),
-    (a: 1, b: 2),
-    (a: 1, b: 3),
-    (a: 1, b: 4),
-    (a: 1, b: 5),
-    (a: 2, b: 4),
-    (a: 2, b: 5),
-    (a: 3, b: 4),
-    (a: 3, b: 5),
-  ];
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final angle = progress.value * math.pi * 2;
-    final sinY = math.sin(angle);
-    final cosY = math.cos(angle);
-    final sinX = math.sin(angle * 0.7);
-    final cosX = math.cos(angle * 0.7);
-    final scale = size.shortestSide * 0.31;
-    final center = size.center(Offset.zero);
-    final projected = <Offset>[];
-
-    for (final vertex in _vertices) {
-      final x = vertex.x;
-      final y = vertex.y;
-      final z = vertex.z;
-      final rotatedX = x * cosY - z * sinY;
-      final rotatedZ = x * sinY + z * cosY;
-      final rotatedY = y * cosX - rotatedZ * sinX;
-      final depth = rotatedZ * cosX + y * sinX;
-      final perspective = 1 / (2.9 - depth * 0.35);
-      projected.add(
-        center +
-            Offset(
-              rotatedX * scale * perspective,
-              rotatedY * scale * perspective,
-            ),
-      );
-    }
-
-    final paint = Paint()
-      ..color = strokeColor
-      ..strokeWidth = 1.7
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-    for (final edge in _edges) {
-      canvas.drawLine(projected[edge.a], projected[edge.b], paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_LaunchSolidPainter oldDelegate) =>
-      oldDelegate.strokeColor != strokeColor;
 }

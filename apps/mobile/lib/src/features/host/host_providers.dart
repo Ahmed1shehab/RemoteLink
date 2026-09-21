@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
+import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
@@ -124,12 +125,73 @@ final inboundLinksProvider = StreamProvider<List<InboundLink>>((ref) async* {
   yield* service.linkChanges;
 });
 
+/// Storage key for whether a trusted device is asked about on each connection.
+const String _askBeforeConnectingKey = 'remotelink.host.askBeforeConnecting';
+
+/// Whether a device this phone already trusts is asked about each time it
+/// connects, persisted.
+///
+/// On by default, unlike [receivingProvider]'s neighbours in Settings. Pairing
+/// is a promise about a device, not a standing invitation to whoever is holding
+/// it, and a phone is handed around far more than a computer is.
+final class AskBeforeConnectingNotifier extends StateNotifier<bool> {
+  AskBeforeConnectingNotifier(this._ref) : super(true) {
+    unawaited(_load());
+  }
+
+  final Ref _ref;
+
+  Future<void> _load() async {
+    final storage = await _ref.read(identityStoreProvider.future);
+    final stored = await storage.read(_askBeforeConnectingKey);
+    if (stored == null) return;
+    if (!mounted) return;
+    state = stored == 'true';
+    await _apply(state);
+  }
+
+  Future<void> set({required bool enabled}) async {
+    if (state == enabled) return;
+    state = enabled;
+    final storage = await _ref.read(identityStoreProvider.future);
+    await storage.write(_askBeforeConnectingKey, '$enabled');
+    await _apply(enabled);
+  }
+
+  /// Pushes the answer at the running host, not only at the next launch.
+  Future<void> _apply(bool enabled) async {
+    final service = await _ref.read(phoneHostServiceProvider.future);
+    service.asksBeforeConnecting = enabled;
+  }
+}
+
+final askBeforeConnectingProvider =
+    StateNotifierProvider<AskBeforeConnectingNotifier, bool>(
+  AskBeforeConnectingNotifier.new,
+);
+
+/// Trusted devices waiting for someone to allow the connection.
+final inboundConnectionsProvider =
+    StreamProvider<List<PendingInboundConnection>>((ref) async* {
+  final service = await ref.watch(phoneHostServiceProvider.future);
+  yield service.pendingConnections;
+  yield* service.pendingConnectionChanges;
+});
+
 /// Devices waiting at the door.
 final inboundPairingsProvider =
     StreamProvider<List<PendingInboundPairing>>((ref) async* {
   final service = await ref.watch(phoneHostServiceProvider.future);
   yield service.pending;
   yield* service.pendingChanges;
+});
+
+/// Connected devices this phone could be told to stop asking about.
+final inboundRememberProvider =
+    StreamProvider<List<PendingInboundRemember>>((ref) async* {
+  final service = await ref.watch(phoneHostServiceProvider.future);
+  yield service.pendingRemembers;
+  yield* service.rememberChanges;
 });
 
 /// Allowed messages arriving from devices connected to this phone.
@@ -272,4 +334,80 @@ final _outboundLinkProvider = Provider<PeerLink?>((ref) {
     platform: known?.platform ?? PlatformKind.unknown,
     origin: LinkOrigin.outbound,
   );
+});
+
+/// All device IDs currently connected to this phone, whether outbound or inbound.
+final connectedDeviceIdsProvider = Provider<Set<DeviceId>>((ref) {
+  final ids = <DeviceId>{};
+  final outboundId = ref.watch(connectedDeviceIdProvider);
+  if (outboundId != null) ids.add(outboundId);
+
+  final inbound =
+      ref.watch(inboundLinksProvider).valueOrNull ?? const <InboundLink>[];
+  for (final link in inbound) {
+    if (link.session.isEstablished) {
+      ids.add(link.peerId);
+    }
+  }
+  return Set<DeviceId>.unmodifiable(ids);
+});
+
+/// The capabilities of the current session or the target being connected to.
+///
+/// Resolves capabilities ahead of the handshake completion so that phone-to-phone
+/// connections do not briefly render desktop-only tabs (like the Touchpad)
+/// during loading.
+final activeCapabilitiesProvider = Provider<Capabilities?>((ref) {
+  // 1. If an established outbound session already has capabilities, use them.
+  final client = ref.watch(clientProvider).valueOrNull;
+  final sessionCap = client?.session?.capabilities;
+  if (sessionCap != null) return sessionCap;
+
+  // 2. If connected via an inbound link, it is a phone host connection.
+  final inbound =
+      ref.watch(inboundLinksProvider).valueOrNull ?? const <InboundLink>[];
+  if (inbound.any((link) => link.session.isEstablished)) {
+    return kPhoneHostCapabilities;
+  }
+
+  // 3. Inspect target being connected to.
+  final target = client?.target;
+  if (target != null) {
+    // 3a. Target port matches the phone host port.
+    if (target.port == kPhoneHostPort) {
+      return kPhoneHostCapabilities;
+    }
+
+    // 3b. Discovered beacon capabilities for target device.
+    final discovered = ref.watch(discoveredDevicesProvider).valueOrNull;
+    if (discovered != null) {
+      for (final device in discovered) {
+        if ((target.deviceId != null && device.id == target.deviceId) ||
+            (device.address == target.host && device.port == target.port)) {
+          return device.beacon.capabilities;
+        }
+      }
+    }
+
+    // 3c. Trusted peer platform is a phone.
+    final peers = ref.watch(trustedPeersProvider).valueOrNull;
+    if (peers != null && target.deviceId != null) {
+      for (final peer in peers) {
+        if (peer.id == target.deviceId) {
+          if (peer.platform == PlatformKind.android ||
+              peer.platform == PlatformKind.ios) {
+            return kPhoneHostCapabilities;
+          }
+        }
+      }
+    }
+  }
+
+  // 4. Inbound peer link is handheld.
+  final peerLinks = ref.watch(peerLinksProvider);
+  if (peerLinks.any((p) => p.isHandheld)) {
+    return kPhoneHostCapabilities;
+  }
+
+  return null;
 });

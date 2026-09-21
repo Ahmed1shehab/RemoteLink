@@ -192,6 +192,16 @@ final trustStoreProvider = FutureProvider<TrustStore>((ref) async {
             pairedAt: DateTime.tryParse(entry['pairedAt'] as String? ?? '') ??
                 DateTime.now(),
             permissionTier: entry['permissionTier'] as int? ?? 2,
+            lastSeenAt: DateTime.tryParse(entry['lastSeenAt'] as String? ?? ''),
+            // Read back so a launch can dial the computer directly instead of
+            // waiting for a beacon. Without it every reconnect depended on
+            // discovery, which is exactly what is missing on the networks —
+            // and the iPhones — where it matters most.
+            lastAddress: entry['lastAddress'] as String?,
+            // Absent reads as false: a file written before this existed
+            // records nobody having agreed to anything.
+            autoAdmit: entry['autoAdmit'] == true,
+            rememberAsked: entry['rememberAsked'] == true,
           ),
         );
       }
@@ -218,6 +228,10 @@ Future<void> persistTrustStore(TrustStore store, IdentityStore storage) async {
           'platform': peer.platform.wireValue,
           'pairedAt': peer.pairedAt.toIso8601String(),
           'permissionTier': peer.permissionTier,
+          'lastSeenAt': peer.lastSeenAt?.toIso8601String(),
+          'lastAddress': peer.lastAddress,
+          'autoAdmit': peer.autoAdmit,
+          'rememberAsked': peer.rememberAsked,
         },
     ]),
   );
@@ -425,6 +439,12 @@ Future<void> _rememberPeerDetails(Ref ref, DeviceInfo info) async {
       lastSeenAt: DateTime.now(),
       lastAddress: peer.lastAddress,
       revoked: peer.revoked,
+      // Carried across explicitly. This rebuilds the record rather than
+      // copying it, so every field left out here is a field silently reset —
+      // and resetting these two would un-remember a device because it told us
+      // its name.
+      autoAdmit: peer.autoAdmit,
+      rememberAsked: peer.rememberAsked,
     ),
   );
   await persistTrustStore(store, await ref.read(identityStoreProvider.future));
@@ -715,9 +735,7 @@ class SensitivityTutorialNotifier extends StateNotifier<bool> {
   }
 
   @visibleForTesting
-  SensitivityTutorialNotifier.forTesting(bool initial)
-      : _ref = null,
-        super(initial);
+  SensitivityTutorialNotifier.forTesting(super.initial) : _ref = null;
 
   final Ref? _ref;
 

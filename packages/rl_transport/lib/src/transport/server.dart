@@ -38,8 +38,20 @@ final class ServerSession {
 
   DeviceId get peerId => session.peerId;
 
-  /// True while the peer is authenticated but not yet approved by the user.
-  bool get awaitingPairing => session.state == SessionState.pairing;
+  /// True while the peer is authenticated but not yet let through.
+  ///
+  /// Two different questions end here — see [awaitingPairing] and
+  /// [awaitingApproval] — and a caller almost always means one of them rather
+  /// than the pair. The copy on screen is not interchangeable: one asks the
+  /// user to compare six digits with a stranger, the other asks whether a
+  /// device they already trust may come in now.
+  bool get isHeld => session.state == SessionState.pairing;
+
+  /// True while a device that has never paired waits to be confirmed.
+  bool get awaitingPairing => isHeld && handshake.requiresPairing;
+
+  /// True while an already trusted device waits to be let in.
+  bool get awaitingApproval => isHeld && !handshake.requiresPairing;
 }
 
 /// Accepts connections and turns them into authenticated sessions.
@@ -68,6 +80,17 @@ final class RemoteLinkServer {
   final TrustStore trustStore;
   final int port;
   final int maxSessions;
+
+  /// Whether a trusted device is held until someone allows the connection.
+  ///
+  /// Mutable, like [capabilities], and for the same kind of reason: it is a
+  /// preference the user changes while the server is up, and a `final` field
+  /// would freeze whichever answer happened to be stored at launch into every
+  /// session until the app restarted.
+  ///
+  /// Only ever *adds* a gate. An unpaired device is held regardless, and
+  /// nothing here can let one through — see `HandshakeDriver.runServer`.
+  bool asksBeforeAdmitting = false;
 
   /// Whether to bind any free port when [port] is unavailable.
   ///
@@ -213,6 +236,7 @@ final class RemoteLinkServer {
         capabilities: capabilities,
         clock: _clock,
         lookupPeer: _lookupPeerForHandshake,
+        holdKnownPeers: asksBeforeAdmitting,
       );
 
       // The crypto handshake cannot return session keys when its lookup sees a

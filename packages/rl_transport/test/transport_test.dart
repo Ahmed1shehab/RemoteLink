@@ -13,6 +13,34 @@ const Capabilities _caps = Capabilities(
   Capabilities.mouse | Capabilities.keyboard | Capabilities.clipboardText,
 );
 
+/// Records [identity] as a device the listener has already paired with.
+Future<void> _trust(
+  InMemoryTrustStore store,
+  DeviceIdentity identity,
+) =>
+    store.upsert(
+      TrustedPeer(
+        id: identity.id,
+        publicKey: identity.publicKey,
+        name: 'Test Phone',
+        platform: PlatformKind.android,
+        pairedAt: DateTime.now(),
+        permissionTier: PermissionTier.standard.wireValue,
+      ),
+    );
+
+/// A target that verifies against the listener's real key, as a reconnect does.
+ConnectionTarget _targetFor(
+  RemoteLinkServer server,
+  DeviceIdentity serverIdentity,
+) =>
+    ConnectionTarget(
+      host: '127.0.0.1',
+      port: server.boundPort,
+      deviceId: serverIdentity.id,
+      serverPublicKey: serverIdentity.publicKey,
+    );
+
 void main() {
   group('Beacon', () {
     Beacon sample({BeaconKind kind = BeaconKind.announce}) => Beacon(
@@ -993,6 +1021,103 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 300));
 
       expect(client.grantedTier, PermissionTier.admin);
+    });
+
+    test('a trusted device is held when the listener asks before admitting',
+        () async {
+      // The gate this whole feature rests on. A held session is authenticated
+      // and useless: everything outside the handshake and trust subsystems is
+      // dropped, so a phone that was let through by accident would be able to
+      // move the cursor before anyone had been asked about it.
+      await _trust(trustStore, phoneIdentity);
+      server.asksBeforeAdmitting = true;
+
+      final accepted = server.accepted.first;
+      await client.connect(_targetFor(server, desktopIdentity));
+      final session = await accepted.timeout(const Duration(seconds: 10));
+
+      expect(session.awaitingApproval, isTrue);
+      expect(session.awaitingPairing, isFalse,
+          reason: 'this device has paired; it is waiting to be let in');
+
+      // What the phone sends while it waits reaches nothing.
+      final live = await client.waitUntilConnected();
+      final delivered = <Message>[];
+      final subscription = session.session.messages.listen(delivered.add);
+      addTearDown(subscription.cancel);
+      await live.send(const ClipboardRequest());
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(delivered, isEmpty);
+
+      // And once it is let in, the same message arrives.
+      session.session.admit();
+      await live.send(const ClipboardRequest());
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(delivered.single, isA<ClipboardRequest>());
+    });
+
+    test('a held phone reports that it is waiting, not that it is connected',
+        () async {
+      await _trust(trustStore, phoneIdentity);
+      server.asksBeforeAdmitting = true;
+
+      final accepted = server.accepted.first;
+      await client.connect(_targetFor(server, desktopIdentity));
+      final session = await accepted.timeout(const Duration(seconds: 10));
+
+      final waiting = client.states.firstWhere(
+        (state) => state == ClientState.awaitingApproval,
+      );
+      await session.session.send(
+        const ConnectionRequest(deviceName: 'Study Mac', timeoutSeconds: 60),
+      );
+      await waiting.timeout(const Duration(seconds: 10));
+
+      expect(client.heldBy, 'Study Mac');
+      expect(client.isConnected, isFalse,
+          reason: 'nothing it sends would arrive, so it is not connected');
+
+      final admitted = client.states.firstWhere(
+        (state) => state == ClientState.connected,
+      );
+      session.session.admit();
+      await session.session
+          .send(const ConnectionDecision(ConnectionAnswer.allowed));
+      await admitted.timeout(const Duration(seconds: 10));
+      expect(client.heldBy, isNull);
+      expect(client.refusal, isNull);
+    });
+
+    test('a refused connection is not retried', () async {
+      // The supervisor cannot tell a refusal from a dropped link, and dialling
+      // back in would put the question on the other screen again and again
+      // until someone tapped Allow to make it stop. That is not a retry; it is
+      // a way to wear a person down into approving something.
+      await _trust(trustStore, phoneIdentity);
+      server.asksBeforeAdmitting = true;
+
+      final accepted = server.accepted.first;
+      await client.connect(_targetFor(server, desktopIdentity));
+      final session = await accepted.timeout(const Duration(seconds: 10));
+      await client.waitUntilConnected();
+
+      final attempts = client.connectionAttemptCount;
+      final failed = client.states.firstWhere(
+        (state) => state == ClientState.failed,
+      );
+
+      await session.session
+          .send(const ConnectionDecision(ConnectionAnswer.declined));
+      await session.session.close(reason: CloseReason.userRequested);
+      await failed.timeout(const Duration(seconds: 10));
+
+      expect(client.refusal, ConnectionAnswer.declined);
+      expect(client.state, ClientState.failed,
+          reason: 'the close that follows must not overwrite the refusal');
+
+      // Long enough for the first backoff interval to have fired.
+      await Future<void>.delayed(const Duration(seconds: 1));
+      expect(client.connectionAttemptCount, attempts);
     });
   });
 

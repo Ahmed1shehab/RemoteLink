@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/providers.dart';
 import '../settings/settings_screen.dart';
 
@@ -16,6 +17,9 @@ class SensitivityTutorialDialog extends ConsumerWidget {
       context: context,
       builder: (_) => const SensitivityTutorialDialog(),
     );
+    // Awaited rather than fired and forgotten: the write is what stops the
+    // tutorial coming back on the next launch, and a Future dropped here is a
+    // failed write nothing would ever report.
     await ref.read(sensitivityTutorialSeenProvider.notifier).markSeen();
   }
 
@@ -42,8 +46,8 @@ class SensitivityTutorialDialog extends ConsumerWidget {
                 color: const Color(0xFF007ACC).withValues(alpha: 0.45),
               ),
             ),
-            child: const Icon(
-              Icons.speed_rounded,
+            child: const AppIcon(
+              AppIcons.settings,
               color: Color(0xFF007ACC),
               size: 26,
             ),
@@ -84,21 +88,21 @@ class SensitivityTutorialDialog extends ConsumerWidget {
             ),
             const SizedBox(height: 16),
             const _TutorialStep(
-              icon: Icons.settings_outlined,
+              icon: AppIcons.settings,
               title: 'Open Settings',
               description:
                   'Tap the Settings gear icon in the top right corner of the app bar.',
             ),
             const SizedBox(height: 12),
             const _TutorialStep(
-              icon: Icons.tune_rounded,
+              icon: AppIcons.settings,
               title: 'Pointer Sensitivity',
               description:
                   'Under Touchpad, drag the sensitivity slider between 0.5x and 3.5x.',
             ),
             const SizedBox(height: 12),
             const _TutorialStep(
-              icon: Icons.swipe_outlined,
+              icon: AppIcons.handTap,
               title: 'Gestures & Scrolling',
               description:
                   'Toggle Natural Scrolling or Tap to Click to match your trackpad habits.',
@@ -113,8 +117,8 @@ class SensitivityTutorialDialog extends ConsumerWidget {
               ),
               child: Row(
                 children: <Widget>[
-                  const Icon(
-                    Icons.info_outline,
+                  const AppIcon(
+                    AppIcons.settings,
                     size: 18,
                     color: Color(0xFF007ACC),
                   ),
@@ -144,7 +148,7 @@ class SensitivityTutorialDialog extends ConsumerWidget {
           child: const Text('Got it'),
         ),
         FilledButton.icon(
-          icon: const Icon(Icons.settings_outlined, size: 18),
+          icon: const AppIcon(AppIcons.settings, size: 18),
           label: const Text('Open Settings'),
           style: FilledButton.styleFrom(
             backgroundColor: const Color(0xFF007ACC),
@@ -171,7 +175,7 @@ class _TutorialStep extends StatelessWidget {
     required this.description,
   });
 
-  final IconData icon;
+  final AppIconData icon;
   final String title;
   final String description;
 
@@ -185,7 +189,7 @@ class _TutorialStep extends StatelessWidget {
       children: <Widget>[
         Padding(
           padding: const EdgeInsets.only(top: 2),
-          child: Icon(
+          child: AppIcon(
             icon,
             size: 20,
             color: const Color(0xFF007ACC),

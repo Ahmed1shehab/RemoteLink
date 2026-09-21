@@ -16,6 +16,7 @@ export 'src/codec.dart';
 export 'src/crc32c.dart';
 export 'src/frame.dart';
 export 'src/message_type.dart';
+export 'src/messages/admission.dart';
 export 'src/messages/clipboard.dart';
 export 'src/messages/control.dart';
 export 'src/messages/file_transfer.dart';

@@ -27,6 +27,7 @@ dependencies:
     sdk: flutter
   flutter_riverpod: ^2.5.1
   flutter_secure_storage: ^9.2.2
+  flutter_svg: ^2.0.17
   # Saving a received photo or video into the camera roll. There is no
   # first-party plugin for this — `image_picker` reads the library and cannot
   # write to it — and the alternative is a Swift and Kotlin shim, which this
@@ -71,5 +72,6 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/icons/
     # Listing the directory picks up the 2.0x and 3.0x variants beside it.
     - assets/brand/

@@ -504,6 +504,13 @@ void main() {
       );
       expect(syncFromDesktopFinder, findsOneWidget);
 
+      final historyFinder = find.widgetWithText(
+        SwitchListTile,
+        'Keep history on this phone',
+      );
+      expect(historyFinder, findsOneWidget);
+      expect(tester.widget<SwitchListTile>(historyFinder).value, isFalse);
+
       final switchFinder = find.descendant(
         of: syncFromDesktopFinder,
         matching: find.byType(Switch),

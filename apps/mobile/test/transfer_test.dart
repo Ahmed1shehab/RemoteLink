@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:remotelink_mobile/src/app/app_icons.dart';
 import 'package:remotelink_mobile/src/app/providers.dart';
 import 'package:remotelink_mobile/src/features/host/host_providers.dart';
 import 'package:remotelink_mobile/src/features/host/nearby_prompts.dart';
@@ -450,7 +451,6 @@ void main() {
       // The card names the device it would send to. It used to say "Send to
       // device / Photos, videos, and files" whatever the state was, which is a
       // caption that cannot be wrong because it says nothing.
-      expect(find.text('Send'), findsOneWidget);
       expect(find.text('to Ahmed MacBook'), findsOneWidget);
 
       // Both sources, always, with no mode to be in first. There is no longer
@@ -464,7 +464,7 @@ void main() {
       // One primary action, which names its destination, and says what it is
       // waiting for rather than going quietly grey.
       expect(
-        find.widgetWithText(FilledButton, 'Send to Ahmed MacBook'),
+        find.widgetWithText(FilledButton, 'Send'),
         findsOneWidget,
       );
       expect(find.text('Choose media or files above.'), findsOneWidget);
@@ -509,8 +509,9 @@ void main() {
       // Both are offered, and the first is the one the button is aimed at.
       expect(find.widgetWithText(ChoiceChip, 'Work Mac'), findsOneWidget);
       expect(find.widgetWithText(ChoiceChip, "Sara's Pixel"), findsOneWidget);
+      expect(find.text('to Work Mac, of 2'), findsOneWidget);
       expect(
-        find.widgetWithText(FilledButton, 'Send to Work Mac'),
+        find.widgetWithText(FilledButton, 'Send'),
         findsOneWidget,
       );
 
@@ -519,8 +520,9 @@ void main() {
       await tester.tap(find.widgetWithText(ChoiceChip, "Sara's Pixel"));
       await tester.pumpAndSettle();
 
+      expect(find.text("to Sara's Pixel, of 2"), findsOneWidget);
       expect(
-        find.widgetWithText(FilledButton, "Send to Sara's Pixel"),
+        find.widgetWithText(FilledButton, 'Send'),
         findsOneWidget,
       );
     });
@@ -928,7 +930,12 @@ void main() {
         reason: 'and one that never landed here is not',
       );
       // Which of the two things a tap does, said before it happens.
-      expect(find.byIcon(Icons.zoom_out_map_rounded), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is AppIcon && w.data == AppIcons.zoomOut,
+        ),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     });
 

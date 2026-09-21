@@ -175,7 +175,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Original Mac'), findsOneWidget);
-    final editButton = find.byIcon(Icons.edit_outlined);
+    final editButton = find.byTooltip('Rename computer');
     expect(editButton, findsOneWidget);
 
     await tester.tap(editButton);

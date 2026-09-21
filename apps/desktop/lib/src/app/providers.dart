@@ -314,6 +314,8 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
   final directory = await ref.watch(appDirectoryProvider.future);
   final history = await ref.watch(clipboardHistoryProvider.future);
 
+  final preferences = await ref.watch(desktopPreferencesProvider.future);
+
   final service = DesktopService(
     identity: identity,
     trustStore: trustStore,
@@ -324,7 +326,15 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
     incomingTransferStore: transferStore,
     peerClipboardSettingsFile: File('${directory.path}/clipboard_peers.json'),
     clipboardHistory: history,
-  );
+  )
+    // Before `start`, not after. The server reads this when it binds, and a
+    // phone that reconnects in the moment between the two would be let in
+    // without anyone being asked — rare, and exactly the case the setting is
+    // switched on for.
+    ..asksBeforeConnecting = preferences.boolean(
+      PreferenceKeys.askBeforeConnecting,
+      orElse: true,
+    );
 
   await service.start();
   ref.onDispose(service.stop);
@@ -378,6 +388,59 @@ final connectedDevicesProvider =
   yield* service.deviceChanges;
 });
 
+/// Whether a paired device is asked about each time it connects.
+///
+/// Stored, and pushed at the live service as well as at the next launch — see
+/// [DesktopService.asksBeforeConnecting]. The notifier holds the user's answer
+/// rather than reading the service, so the switch is still right before the
+/// service has finished starting.
+final askBeforeConnectingProvider =
+    StateNotifierProvider<AskBeforeConnectingNotifier, bool>(
+  AskBeforeConnectingNotifier.new,
+);
+
+final class AskBeforeConnectingNotifier extends StateNotifier<bool> {
+  AskBeforeConnectingNotifier(this._ref) : super(true) {
+    unawaited(_load());
+  }
+
+  final Ref _ref;
+
+  Future<void> _load() async {
+    final preferences = await _ref.read(desktopPreferencesProvider.future);
+    if (!mounted) return;
+    state = preferences.boolean(
+      PreferenceKeys.askBeforeConnecting,
+      orElse: true,
+    );
+  }
+
+  Future<void> set({required bool enabled}) async {
+    state = enabled;
+    final preferences = await _ref.read(desktopPreferencesProvider.future);
+    await preferences.setBoolean(
+      PreferenceKeys.askBeforeConnecting,
+      value: enabled,
+    );
+    final service = _ref.read(desktopServiceProvider).valueOrNull;
+    if (service != null) service.asksBeforeConnecting = enabled;
+  }
+}
+
+/// Trusted devices held at the door, waiting on the user.
+final connectionRequestProvider = StreamProvider<PendingConnection>((ref) {
+  final service = ref.watch(desktopServiceProvider).valueOrNull;
+  if (service == null) return const Stream<PendingConnection>.empty();
+  return service.connectionRequests;
+});
+
+/// Connected devices this computer could be told to stop asking about.
+final rememberRequestProvider = StreamProvider<PendingRemember>((ref) {
+  final service = ref.watch(desktopServiceProvider).valueOrNull;
+  if (service == null) return const Stream<PendingRemember>.empty();
+  return service.rememberRequests;
+});
+
 /// Pairing requests waiting on the user.
 final pairingRequestProvider = StreamProvider<PendingPairing>((ref) {
   final service = ref.watch(desktopServiceProvider).valueOrNull;
@@ -416,6 +479,26 @@ final transfersProvider = StreamProvider<List<TransferRecord>>((ref) async* {
 final trustedPeersProvider = FutureProvider<List<TrustedPeer>>((ref) async {
   final store = await ref.watch(trustStoreProvider.future);
   return store.listPeers();
+});
+
+/// Devices both ends agreed to remember, by device id.
+///
+/// A stream rather than a future because the set changes while the window is
+/// open — an agreement settles the moment the other device answers — and a
+/// switch that shows the state at the time the page was built is a switch that
+/// lies within seconds of an agreement being made.
+final rememberedPeersProvider = StreamProvider<Set<String>>((ref) async* {
+  final store = await ref.watch(trustStoreProvider.future);
+
+  Future<Set<String>> read() async => <String>{
+        for (final peer in await store.listPeers())
+          if (peer.autoAdmit) peer.id.value,
+      };
+
+  yield await read();
+  await for (final _ in store.changes) {
+    yield await read();
+  }
 });
 
 /// Whether input injection is currently possible.

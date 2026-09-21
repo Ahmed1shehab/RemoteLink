@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 
+import '../../app/app_icons.dart';
+
 /// Points the camera at the code the computer is showing.
 ///
 /// Pops a [PairingPayload] when it reads one, or nothing when the user backs
@@ -76,7 +78,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
           title: const Text('Scan code'),
           actions: <Widget>[
             IconButton(
-              icon: const Icon(Icons.flashlight_on_outlined),
+              icon: const AppIcon(AppIcons.settings),
               tooltip: 'Torch',
               onPressed: () => unawaited(_controller.toggleTorch()),
             ),
@@ -147,10 +149,8 @@ class _ScannerUnavailable extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: <Widget>[
           ExcludeSemantics(
-            child: Icon(
-              denied
-                  ? Icons.no_photography_outlined
-                  : Icons.videocam_off_outlined,
+            child: AppIcon(
+              denied ? AppIcons.settings : AppIcons.monitorPlay,
               size: 48,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
@@ -184,7 +184,7 @@ class _ScannerUnavailable extends StatelessWidget {
             const SizedBox(height: 20),
             TextButton.icon(
               onPressed: onRetry,
-              icon: const Icon(Icons.refresh),
+              icon: const AppIcon(AppIcons.settings),
               label: const Text('Try again'),
             ),
           ],

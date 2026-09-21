@@ -346,9 +346,23 @@ final class UdpDiscoveryServer {
   final List<RawDatagramSocket> _sockets = <RawDatagramSocket>[];
   final List<StreamSubscription<RawSocketEvent>> _subscriptions =
       <StreamSubscription<RawSocketEvent>>[];
+  final Set<RawDatagramSocket> _unavailableSockets = <RawDatagramSocket>{};
+
+  /// These are expected when the platform or network does not permit UDP
+  /// multicast. In particular, iOS reports EHOSTUNREACH when the app does not
+  /// have Apple's multicast entitlement. The socket stream delivers that
+  /// failure asynchronously, so it cannot be handled only around send().
+  static const Set<int> _refusedErrnos = <int>{
+    1, // EPERM        — sandbox or entitlement denial
+    49, // EADDRNOTAVAIL
+    50, // ENETDOWN
+    51, // ENETUNREACH
+    65, // EHOSTUNREACH — iOS without the multicast entitlement
+  };
 
   Timer? _timer;
   bool _running = false;
+  bool _refused = false;
 
   Future<void> start() async {
     if (_running) return;
@@ -375,11 +389,8 @@ final class UdpDiscoveryServer {
         _subscriptions.add(
           socket.listen(
             (event) => _onSocketEvent(socket, event),
-            onError: (Object error, StackTrace stack) => _log.warn(
-              'announce socket error',
-              error: error,
-              stackTrace: stack,
-            ),
+            onError: (Object error, StackTrace stack) =>
+                _noteSocketFailure(socket, error, stack),
             cancelOnError: false,
           ),
         );
@@ -413,12 +424,41 @@ final class UdpDiscoveryServer {
   /// Sends one announcement on every bound socket.
   void announce() {
     for (final socket in _sockets) {
+      if (_unavailableSockets.contains(socket)) continue;
       _sendTo(socket, InternetAddress(kMulticastGroupV4), BeaconKind.announce);
     }
   }
 
+  void _noteSocketFailure(
+    RawDatagramSocket socket,
+    Object error,
+    StackTrace stack,
+  ) {
+    final code = error is SocketException ? error.osError?.errorCode : null;
+    if (code != null && _refusedErrnos.contains(code)) {
+      _unavailableSockets.add(socket);
+      if (_refused) return;
+
+      _refused = true;
+      _log.info(
+        'automatic UDP discovery is unavailable on this device or network; '
+        'Bonjour or address-based connections remain available',
+        fields: <String, Object?>{'errno': code},
+      );
+      return;
+    }
+
+    _log.warn(
+      'announce socket error',
+      error: error,
+      stackTrace: stack,
+    );
+  }
+
   void _sendTo(
       RawDatagramSocket socket, InternetAddress target, BeaconKind kind) {
+    if (_unavailableSockets.contains(socket)) return;
+
     try {
       final beacon = _describe();
       final payload = kind == beacon.kind
@@ -437,7 +477,7 @@ final class UdpDiscoveryServer {
             ).encode();
       socket.send(payload, target, port);
     } on SocketException catch (e) {
-      _log.debug(() => 'announce send failed: ${e.message}');
+      _noteSocketFailure(socket, e, StackTrace.current);
     }
   }
 
@@ -463,6 +503,8 @@ final class UdpDiscoveryServer {
       socket.close();
     }
     _sockets.clear();
+    _unavailableSockets.clear();
+    _refused = false;
   }
 }
 

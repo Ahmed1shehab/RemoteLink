@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 
+import '../app/app_icons.dart';
+
 /// Shows the code a phone scans to pair with this computer.
 ///
 /// This is the whole setup story on the desktop side, and it replaced two
@@ -108,7 +110,7 @@ class _PairingQrDialogState extends State<PairingQrDialog> {
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.copy_rounded, size: 18),
+                    icon: const AppIcon(AppIcons.materialClipboard, size: 18),
                     tooltip: 'Copy address',
                     onPressed: () => unawaitedCopy('$_host:${payload.port}'),
                   ),

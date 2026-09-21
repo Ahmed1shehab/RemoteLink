@@ -7,7 +7,9 @@ import 'src/app/providers.dart';
 import 'src/app/splash_screen.dart';
 import 'src/app/theme.dart';
 import 'src/features/devices/auto_connect.dart';
+import 'src/features/devices/connection_hold.dart';
 import 'src/features/devices/link_service.dart';
+import 'src/features/devices/remember_prompt.dart';
 import 'src/features/host/host_providers.dart';
 import 'src/features/host/nearby_prompts.dart';
 import 'src/features/share/share_intake.dart';
@@ -78,6 +80,16 @@ class RemoteLinkApp extends ConsumerWidget {
     // reason: the phone being sent to is very often not the phone being looked
     // at, and neither question can wait for the right tab to be open.
     listenForNearbyPrompts(ref, navigatorKey);
+    // And the mirror image of those: this phone waiting at someone else's
+    // door. Same place, same reason — the hold begins wherever the user
+    // happens to be, including on a launch that reconnected by itself.
+    listenForConnectionHolds(ref, navigatorKey);
+    // And the question that decides whether either of the two above happens
+    // again. Root-level for the same reason as the rest: the answer is about
+    // the next launch, and the connection it is about can come up on any
+    // screen — or on none.
+    ref.watch(rememberNegotiationProvider);
+    listenForRememberPrompts(ref, navigatorKey);
     // And the same again for shares: something has to be listening when the
     // system hands over a link the user shared into this app, whichever screen
     // happens to be open at the time.

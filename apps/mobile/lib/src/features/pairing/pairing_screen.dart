@@ -6,6 +6,7 @@ import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/providers.dart';
 import '../control/control_screen.dart';
 import 'pairing_code.dart';
@@ -150,6 +151,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
       trustStore,
       await ref.read(identityStoreProvider.future),
     );
+    ref.invalidate(trustedPeersProvider);
 
     // Unblocks the session, and it is not a formality.
     //
@@ -199,6 +201,10 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
               const _PairingFailed()
             else if (widget.viaScannedCode)
               const Column(
+                // Sized to its contents, so the enclosing column's centring
+                // actually places it mid-screen: a max-height child fills the
+                // body and leaves the spinner pinned under the app bar.
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   CircularProgressIndicator(),
                   SizedBox(height: 24),
@@ -207,6 +213,10 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
               )
             else if (_code == null)
               const Column(
+                // Sized to its contents, so the enclosing column's centring
+                // actually places it mid-screen: a max-height child fills the
+                // body and leaves the spinner pinned under the app bar.
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   CircularProgressIndicator(),
                   SizedBox(height: 24),
@@ -263,8 +273,8 @@ class _ScannedKeyMismatch extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           ExcludeSemantics(
-            child: Icon(
-              Icons.gpp_bad_outlined,
+            child: AppIcon(
+              AppIcons.settings,
               size: 56,
               color: Theme.of(context).colorScheme.error,
             ),
@@ -302,8 +312,8 @@ class _PairingFailed extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           ExcludeSemantics(
-            child: Icon(
-              Icons.gpp_bad_outlined,
+            child: AppIcon(
+              AppIcons.settings,
               size: 56,
               color: Theme.of(context).colorScheme.error,
             ),

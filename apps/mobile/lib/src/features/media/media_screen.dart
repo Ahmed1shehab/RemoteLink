@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/modern_ui.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
@@ -153,7 +154,7 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
                       icon: Icon(
                         (state?.isMuted ?? false)
                             ? Icons.volume_off
-                            : Icons.volume_mute,
+                            : Icons.volume_up,
                         size: 21,
                       ),
                       color: scheme.primary,
@@ -340,10 +341,8 @@ class _NowPlaying extends StatelessWidget {
                 ),
               ),
               ExcludeSemantics(
-                child: Icon(
-                  hasTrack
-                      ? Icons.graphic_eq_rounded
-                      : Icons.music_note_rounded,
+                child: AppIcon(
+                  hasTrack ? AppIcons.monitorPlay : AppIcons.monitorPlay,
                   size: 78,
                   color: Colors.white.withValues(alpha: 0.92),
                 ),

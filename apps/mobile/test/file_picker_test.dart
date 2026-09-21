@@ -207,7 +207,7 @@ void main() {
       expect(
         tester
             .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Send to Work Mac'),
+              find.widgetWithText(FilledButton, 'Send'),
             )
             .onPressed,
         isNull,
@@ -222,7 +222,7 @@ void main() {
       expect(
         tester
             .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Send 1 item to Work Mac'),
+              find.widgetWithText(FilledButton, 'Send'),
             )
             .onPressed,
         isNotNull,
@@ -258,8 +258,12 @@ void main() {
       expect(find.text('first.txt'), findsOneWidget);
       expect(find.text('second.txt'), findsOneWidget);
       expect(
-        find.widgetWithText(FilledButton, 'Send 2 items to Work Mac'),
-        findsOneWidget,
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Send'),
+            )
+            .onPressed,
+        isNotNull,
       );
     });
 
@@ -284,7 +288,7 @@ void main() {
       expect(
         tester
             .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Send to Work Mac'),
+              find.widgetWithText(FilledButton, 'Send'),
             )
             .onPressed,
         isNull,
@@ -353,7 +357,7 @@ void main() {
         ),
       );
       await chooseFiles(tester);
-      await tester.tap(find.text('Send 2 items to Work Mac'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Send'));
       await tester.pumpAndSettle();
 
       expect(
@@ -385,7 +389,7 @@ void main() {
       await choosePhotos(tester);
 
       expect(find.text('vacation_clip.mp4'), findsOneWidget);
-      await tester.tap(find.text('Send 1 item to Work Mac'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Send'));
       await tester.pumpAndSettle();
 
       expect(recorded.sentNames, <String>['vacation_clip.mp4']);
@@ -411,7 +415,7 @@ void main() {
 
       vanishing.file.deleteSync();
 
-      await tester.tap(find.text('Send 1 item to Work Mac'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Send'));
       await tester.pumpAndSettle();
 
       expect(recorded.sentFiles, isNull);
@@ -429,11 +433,19 @@ void main() {
         ),
       );
       await chooseFiles(tester);
-      await tester.tap(find.text('Send 1 item to Work Mac'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Send'));
       await tester.pumpAndSettle();
 
       expect(find.text('once.txt'), findsNothing);
-      expect(find.text('Send to Work Mac'), findsOneWidget);
+      expect(find.text('Choose media or files above.'), findsOneWidget);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Send'),
+            )
+            .onPressed,
+        isNull,
+      );
     });
   });
 

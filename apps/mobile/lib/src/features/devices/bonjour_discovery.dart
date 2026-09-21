@@ -159,7 +159,10 @@ final class BonjourDiscoveryBackend implements DiscoveryBackend {
       case BonsoirDiscoveryEventType.discoveryServiceFound:
         // A found service carries only a name; the address and TXT records
         // arrive after an explicit resolve.
-        event.service?.resolve(_discovery!.serviceResolver);
+        final resolver = _discovery?.serviceResolver;
+        if (resolver != null) {
+          event.service?.resolve(resolver);
+        }
 
       case BonsoirDiscoveryEventType.discoveryServiceResolved:
         final service = event.service;

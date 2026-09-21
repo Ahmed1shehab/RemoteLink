@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 // `show` rather than a bare import: `dart:ui` also declares Offset, Size and
 // Color, and importing it whole shadows the ones material re-exports.
 import 'dart:ui' show PointMode;
@@ -10,12 +11,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import '../settings/settings_screen.dart';
 import 'pointer_controller.dart';
 import 'sensitivity_tutorial_dialog.dart';
-import '../settings/settings_screen.dart';
 
 /// The main control surface: the whole screen is a trackpad.
 ///
@@ -94,6 +96,28 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
   // Continuous gesture tracking for scale / zoom and rotation.
   double? _lastSpan;
   double? _lastAngle;
+
+  /// The distance and angle between the two fingers when they went down.
+  ///
+  /// Measured against the start of the gesture rather than the previous frame,
+  /// because a frame-to-frame comparison cannot tell a pinch from the ordinary
+  /// wobble of two fingers dragging together: at 120 Hz the span between them
+  /// changes by a percent or two constantly, which is enough to trip any
+  /// per-frame threshold small enough to catch a real pinch early.
+  double? _spanAtStart;
+  double? _angleAtStart;
+
+  /// How far the fingers have travelled since the pair went down.
+  ///
+  /// A pinch is recognised only when the change in span beats this, which is
+  /// what separates "the fingers moved apart" from "the fingers moved across
+  /// the glass and drifted slightly apart on the way".
+  double _twoFingerTravel = 0;
+
+  /// Latched once the pair is scrolling, so span wobble cannot convert a
+  /// scroll that is already underway into a zoom halfway down the page.
+  bool _isTwoFingerScrolling = false;
+
   bool _isZooming = false;
   bool _isRotating = false;
   DateTime _lastZoomTime = DateTime.fromMicrosecondsSinceEpoch(0);
@@ -167,6 +191,10 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
           ) *
           180 /
           math.pi;
+      _spanAtStart = _lastSpan;
+      _angleAtStart = _lastAngle;
+      _twoFingerTravel = 0;
+      _isTwoFingerScrolling = false;
     }
   }
 
@@ -212,73 +240,114 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
           180 /
           math.pi;
 
+      final previousSpan = _lastSpan ?? currentSpan;
+      final previousAngle = _lastAngle ?? currentAngle;
+      // Updated on every frame, including the frames that scroll. Leaving them
+      // behind on the scroll path was the bug this arbitration replaces: the
+      // span kept being compared against the touch-down measurement, so the
+      // slow drift of a long two-finger drag eventually crossed the pinch
+      // threshold and the rest of the gesture became a zoom nobody asked for.
+      _lastSpan = currentSpan;
+      _lastAngle = currentAngle;
+      _twoFingerTravel += event.delta.distance;
+
       final capabilities =
           ref.read(clientProvider).valueOrNull?.session?.capabilities;
       final gesturesAvailable =
           capabilities?.has(Capabilities.gestures) ?? false;
 
-      if (gesturesAvailable && _lastSpan != null && _lastSpan! > 0) {
-        final spanDelta = (currentSpan - _lastSpan!) / _lastSpan!;
-        var angleDelta = currentAngle - (_lastAngle ?? currentAngle);
-        while (angleDelta < -180) {
-          angleDelta += 360;
-        }
-        while (angleDelta > 180) {
-          angleDelta -= 360;
-        }
-
-        // Scale / Zoom gesture detection
-        if (_isZooming || (!_isRotating && spanDelta.abs() > 0.03)) {
-          final now = DateTime.now();
-          if (!_isZooming) {
-            _isZooming = true;
-            _lastZoomTime = now;
-            unawaitedSend(
-              GestureZoom(
-                magnificationDelta: spanDelta,
-                phase: GesturePhase.began,
-              ),
-            );
-          } else if (now.difference(_lastZoomTime).inMicroseconds >= 8333) {
-            // Rate limit to at most 120 Hz (~8.33 ms)
-            _lastZoomTime = now;
-            unawaitedSend(
-              GestureZoom(
-                magnificationDelta: spanDelta,
-                phase: GesturePhase.changed,
-              ),
-            );
-          }
-          _lastSpan = currentSpan;
-          return;
-        }
-
-        // Rotation gesture detection
-        if (_isRotating || (!_isZooming && angleDelta.abs() > 3.0)) {
-          final now = DateTime.now();
-          if (!_isRotating) {
-            _isRotating = true;
-            _lastRotateTime = now;
-            unawaitedSend(
-              GestureRotate(
-                degreesDelta: angleDelta,
-                phase: GesturePhase.began,
-              ),
-            );
-          } else if (now.difference(_lastRotateTime).inMicroseconds >= 8333) {
-            // Rate limit to at most 120 Hz
-            _lastRotateTime = now;
-            unawaitedSend(
-              GestureRotate(
-                degreesDelta: angleDelta,
-                phase: GesturePhase.changed,
-              ),
-            );
-          }
-          _lastAngle = currentAngle;
-          return;
-        }
+      // Measured from the start of the gesture, so the test is "have the
+      // fingers ended up further apart" rather than "did they jitter".
+      final spanChange = currentSpan - (_spanAtStart ?? currentSpan);
+      var angleChange = currentAngle - (_angleAtStart ?? currentAngle);
+      while (angleChange < -180) {
+        angleChange += 360;
       }
+      while (angleChange > 180) {
+        angleChange -= 360;
+      }
+
+      // How far apart the fingers must end up before this counts as a pinch,
+      // and how much of the total movement that has to be. A scroll drags both
+      // fingers the same way, so its span barely changes however far it goes; a
+      // pinch is nearly all span change.
+      const pinchDistance = 24.0;
+      const pinchShare = 0.5;
+      const rotationDegrees = 12.0;
+      // Enough movement to be sure the pair is dragging rather than settling.
+      const scrollStart = 6.0;
+
+      final pinching = gesturesAvailable &&
+          !_isRotating &&
+          !_isTwoFingerScrolling &&
+          spanChange.abs() > pinchDistance &&
+          spanChange.abs() > _twoFingerTravel * pinchShare;
+
+      if (_isZooming || pinching) {
+        final now = DateTime.now();
+        final spanDelta = previousSpan > 0
+            ? (currentSpan - previousSpan) / previousSpan
+            : 0.0;
+        if (!_isZooming) {
+          _isZooming = true;
+          _lastZoomTime = now;
+          unawaitedSend(
+            GestureZoom(
+              magnificationDelta: spanDelta,
+              phase: GesturePhase.began,
+            ),
+          );
+        } else if (now.difference(_lastZoomTime).inMicroseconds >= 8333) {
+          // Rate limit to at most 120 Hz (~8.33 ms)
+          _lastZoomTime = now;
+          unawaitedSend(
+            GestureZoom(
+              magnificationDelta: spanDelta,
+              phase: GesturePhase.changed,
+            ),
+          );
+        }
+        return;
+      }
+
+      final rotating = gesturesAvailable &&
+          !_isZooming &&
+          !_isTwoFingerScrolling &&
+          angleChange.abs() > rotationDegrees &&
+          spanChange.abs() <= pinchDistance;
+
+      if (_isRotating || rotating) {
+        final now = DateTime.now();
+        var degreesDelta = currentAngle - previousAngle;
+        while (degreesDelta < -180) {
+          degreesDelta += 360;
+        }
+        while (degreesDelta > 180) {
+          degreesDelta -= 360;
+        }
+        if (!_isRotating) {
+          _isRotating = true;
+          _lastRotateTime = now;
+          unawaitedSend(
+            GestureRotate(
+              degreesDelta: degreesDelta,
+              phase: GesturePhase.began,
+            ),
+          );
+        } else if (now.difference(_lastRotateTime).inMicroseconds >= 8333) {
+          // Rate limit to at most 120 Hz
+          _lastRotateTime = now;
+          unawaitedSend(
+            GestureRotate(
+              degreesDelta: degreesDelta,
+              phase: GesturePhase.changed,
+            ),
+          );
+        }
+        return;
+      }
+
+      if (_twoFingerTravel > scrollStart) _isTwoFingerScrolling = true;
 
       // Two fingers scroll. The delta of whichever finger moved is used rather
       // than an average, because averaging halves the reported movement when
@@ -321,6 +390,10 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
       }
       _lastSpan = null;
       _lastAngle = null;
+      _spanAtStart = null;
+      _angleAtStart = null;
+      _twoFingerTravel = 0;
+      _isTwoFingerScrolling = false;
     }
 
     if (_pointers.isNotEmpty) return;
@@ -390,6 +463,10 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
       }
       _lastSpan = null;
       _lastAngle = null;
+      _spanAtStart = null;
+      _angleAtStart = null;
+      _twoFingerTravel = 0;
+      _isTwoFingerScrolling = false;
     }
 
     if (_pointers.isNotEmpty) return;
@@ -651,6 +728,11 @@ class _TouchpadSurface extends StatelessWidget {
             // its own layer so it never repaints during touch gestures.
             RepaintBoundary(
               child: CustomPaint(
+                // Expensive to build and never changes, which is exactly the
+                // shape the raster cache exists for: told so explicitly, it is
+                // rasterised once and reused for the life of the screen.
+                isComplex: true,
+                willChange: false,
                 painter: _DotFieldPainter(
                   ink: scheme.onSurfaceVariant
                       .withValues(alpha: dark ? 0.18 : 0.30),
@@ -663,6 +745,10 @@ class _TouchpadSurface extends StatelessWidget {
             // latency impact on pointer dispatch.
             RepaintBoundary(
               child: CustomPaint(
+                // The opposite case, and worth saying out loud: this changes
+                // every frame a finger is down, so the raster cache must not
+                // spend a frame trying to cache it.
+                willChange: true,
                 painter: _DynamicDotGlowPainter(
                   controller: glowController,
                   dotColor: const Color(0xFF007ACC),
@@ -701,8 +787,8 @@ class _TouchpadSurface extends StatelessWidget {
                             // decoration it is outside the contrast requirement,
                             // and it sits behind the pointer.
                             ExcludeSemantics(
-                              child: Icon(
-                                Icons.touch_app_outlined,
+                              child: AppIcon(
+                                AppIcons.handTap,
                                 size: 44,
                                 color: scheme.onSurfaceVariant
                                     .withValues(alpha: 0.35),
@@ -1039,6 +1125,23 @@ final class _TouchGlowController extends ChangeNotifier {
 /// Only repaints when [_TouchGlowController] notifies, and stays completely
 /// inside a [RepaintBoundary] so neither the resting dot field nor any widget
 /// rebuilds during cursor motion.
+///
+/// ## Why the falloff is quantised
+///
+/// The glow is a smooth gradient and the eye reads it as one, but a canvas does
+/// not: a distinct radius and colour per dot is a distinct draw op per dot, and
+/// the box one finger lights up holds around four hundred of them. Four hundred
+/// `drawCircle`s, each preceded by a freshly allocated `Color`, were being built
+/// into the display list on the UI thread of every frame of every drag — the
+/// same thread that has to dispatch the pointer events this surface exists to
+/// turn into cursor movement. When it runs late, the events arrive late, and the
+/// cursor lags the finger for a reason that has nothing to do with the network.
+///
+/// So the falloff is cut into [_levels] steps. Every dot in a step shares one
+/// radius and one colour, which makes it one `drawRawPoints` call over a reused
+/// buffer: twelve ops a frame instead of four hundred, and no allocation in the
+/// loop at all. Twelve steps across six pixels of swell puts each step under
+/// half a pixel, which the dots' own anti-aliasing covers.
 final class _DynamicDotGlowPainter extends CustomPainter {
   _DynamicDotGlowPainter({
     required this.controller,
@@ -1053,9 +1156,37 @@ final class _DynamicDotGlowPainter extends CustomPainter {
   static const double _glowRadius = 220.0;
   static const double _glowRadiusSq = _glowRadius * _glowRadius;
 
-  final Paint _dotPaint = Paint()
-    ..style = PaintingStyle.fill
-    ..isAntiAlias = true;
+  /// How many discrete sizes the falloff is drawn in.
+  static const int _levels = 12;
+
+  /// One paint per step, built once and re-coloured each frame.
+  ///
+  /// `PointMode.points` draws a square per point unless the cap is round, which
+  /// is what makes a dot a dot here, and is why the resting field is drawn the
+  /// same way.
+  final List<Paint> _paints = List<Paint>.generate(
+    _levels,
+    (_) => Paint()
+      ..strokeCap = StrokeCap.round
+      ..isAntiAlias = true,
+    growable: false,
+  );
+
+  /// Dot coordinates per step, reused between frames. Grown, never shrunk: the
+  /// surface does not change size while a finger is on it.
+  final List<Float32List> _coordinates = <Float32List>[];
+  final Int32List _counts = Int32List(_levels);
+
+  void _ensureCapacity(int dots) {
+    if (_coordinates.isNotEmpty && _coordinates.first.length >= dots * 2) {
+      return;
+    }
+    _coordinates
+      ..clear()
+      ..addAll(
+        List<Float32List>.generate(_levels, (_) => Float32List(dots * 2)),
+      );
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1096,39 +1227,59 @@ final class _DynamicDotGlowPainter extends CustomPainter {
 
     if (maxCol < minCol || maxRow < minRow) return;
 
-    // 2. Draw enlarged, illuminated rounded dots.
+    _counts.fillRange(0, _levels, 0);
+    _ensureCapacity((maxCol - minCol + 1) * (maxRow - minRow + 1));
+
+    // 2. Sort every lit dot into the step its brightness falls in.
     for (var r = minRow; r <= maxRow; r++) {
       final dotY = lattice.originY + r * _Lattice.spacing;
       for (var c = minCol; c <= maxCol; c++) {
         final dotX = lattice.originX + c * _Lattice.spacing;
 
-        // Find closest touch distance (max proximity)
-        double maxT = 0.0;
+        // Nearest touch wins, so two fingers brighten a dot between them to
+        // whichever is closer rather than to their sum.
+        double maxT = 0;
         for (final p in touches) {
           final dx = dotX - p.dx;
           final dy = dotY - p.dy;
           final distSq = dx * dx + dy * dy;
-          if (distSq < _glowRadiusSq) {
-            final dist = math.sqrt(distSq);
-            final t = 1.0 - (dist / _glowRadius);
-            if (t > maxT) maxT = t;
-          }
+          if (distSq >= _glowRadiusSq) continue;
+          final t = 1.0 - math.sqrt(distSq) / _glowRadius;
+          if (t > maxT) maxT = t;
         }
-
         if (maxT <= 0.001) continue;
 
-        // Smoothstep curve for natural organic falloff
+        // Smoothstep, for a falloff that reads as light rather than as a cone.
         final curve = maxT * maxT * (3.0 - 2.0 * maxT);
+        var level = (curve * _levels).floor();
+        if (level >= _levels) level = _levels - 1;
 
-        // Swells from resting radius (1.5) up to peak rounded radius (7.5)
-        final radius = _baseRadius + (_maxRadius - _baseRadius) * curve;
-
-        // Alpha scales up to 0.95 at the contact center
-        final alpha = (0.95 * curve * fade).clamp(0.0, 1.0);
-        _dotPaint.color = dotColor.withValues(alpha: alpha);
-
-        canvas.drawCircle(Offset(dotX, dotY), radius, _dotPaint);
+        final count = _counts[level];
+        _coordinates[level][count * 2] = dotX;
+        _coordinates[level][count * 2 + 1] = dotY;
+        _counts[level] = count + 1;
       }
+    }
+
+    // 3. One call per step.
+    for (var level = 0; level < _levels; level++) {
+      final count = _counts[level];
+      if (count == 0) continue;
+
+      // The middle of the step's band rather than its floor, so quantising
+      // does not systematically dim the whole field by half a step.
+      final curve = (level + 0.5) / _levels;
+      final paint = _paints[level]
+        ..strokeWidth = 2 * (_baseRadius + (_maxRadius - _baseRadius) * curve)
+        ..color = dotColor.withValues(
+          alpha: (0.95 * curve * fade).clamp(0.0, 1.0),
+        );
+
+      canvas.drawRawPoints(
+        PointMode.points,
+        Float32List.sublistView(_coordinates[level], 0, count * 2),
+        paint,
+      );
     }
   }
 

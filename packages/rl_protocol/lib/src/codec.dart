@@ -6,6 +6,7 @@ import 'package:rl_core/rl_core.dart';
 import 'bytes.dart';
 import 'frame.dart';
 import 'message_type.dart';
+import 'messages/admission.dart';
 import 'messages/clipboard.dart';
 import 'messages/control.dart';
 import 'messages/file_transfer.dart';
@@ -137,6 +138,9 @@ final class MessageCodec {
         MessageType.pairComplete => PairComplete.readFrom(reader),
         MessageType.pairReject => PairReject.readFrom(reader),
         MessageType.unpair => Unpair.readFrom(reader),
+        MessageType.connectionRequest => ConnectionRequest.readFrom(reader),
+        MessageType.connectionDecision => ConnectionDecision.readFrom(reader),
+        MessageType.rememberConnection => RememberConnection.readFrom(reader),
 
         // Pointer input.
         MessageType.mouseMove => MouseMove.readFrom(reader),

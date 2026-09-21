@@ -7,6 +7,9 @@ import 'package:remotelink_mobile/src/app/providers.dart';
 import 'package:remotelink_mobile/src/features/clipboard/clipboard_controller.dart';
 import 'package:remotelink_mobile/src/features/clipboard/clipboard_watcher.dart';
 import 'package:remotelink_mobile/src/features/devices/link_service.dart';
+import 'package:remotelink_mobile/src/features/host/host_providers.dart';
+import 'package:remotelink_mobile/src/features/host/phone_advertiser.dart';
+import 'package:remotelink_mobile/src/features/host/phone_host_service.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
@@ -351,6 +354,134 @@ void main() {
         greaterThan(9),
         reason: 'a copy made after the computer spoke has to beat its clock',
       );
+    });
+  });
+
+  group('text from a nearby phone', () {
+    late TestWidgetsFlutterBinding binding;
+    late DeviceIdentity hostIdentity;
+    late DeviceIdentity senderIdentity;
+    late InMemoryTrustStore trust;
+    late PhoneHostService host;
+    late RemoteLinkClient sender;
+    late RemoteLinkClient idleClient;
+    late _FakeSystemClipboard clipboard;
+    late _FakeLinkService linkService;
+    late _FakeClipboardWatcher watcher;
+    late ProviderContainer container;
+
+    setUp(() async {
+      binding = TestWidgetsFlutterBinding.ensureInitialized();
+      hostIdentity = await DeviceIdentity.generate();
+      senderIdentity = await DeviceIdentity.generate();
+
+      trust = InMemoryTrustStore();
+      await trust.upsert(
+        TrustedPeer(
+          id: senderIdentity.id,
+          publicKey: senderIdentity.publicKey,
+          name: 'The Other Phone',
+          platform: PlatformKind.android,
+          pairedAt: DateTime.now(),
+          permissionTier: PermissionTier.standard.wireValue,
+        ),
+      );
+
+      host = PhoneHostService(
+        identity: hostIdentity,
+        trustStore: trust,
+        clock: SystemClock(),
+        describeName: () => 'Receiving Phone',
+        onTrustChanged: () async {},
+        advertiser: const InertAdvertiser(),
+        port: 0,
+      )
+        // This test is about what arrives once a device is in, not about being
+        // let in — `phone_host_test.dart` covers that.
+        ..asksBeforeConnecting = false;
+      await host.start();
+
+      clipboard = _FakeSystemClipboard()..install(binding);
+      linkService = _FakeLinkService();
+      watcher = _FakeClipboardWatcher();
+      idleClient = RemoteLinkClient(
+        identity: hostIdentity,
+        capabilities: const Capabilities(Capabilities.clipboardText),
+        clock: SystemClock(),
+      );
+
+      container = ProviderContainer(
+        overrides: <Override>[
+          identityStoreProvider
+              .overrideWith((ref) async => InMemoryIdentityStore()),
+          identityProvider.overrideWith(
+              (ref) => Future<DeviceIdentity>.value(hostIdentity)),
+          trustStoreProvider
+              .overrideWith((ref) => Future<TrustStore>.value(trust)),
+          phoneHostServiceProvider
+              .overrideWith((ref) => Future<PhoneHostService>.value(host)),
+          clientProvider.overrideWith((ref) async => idleClient),
+          linkServiceProvider.overrideWithValue(linkService),
+          clipboardControllerProvider.overrideWith(
+            (ref) => MobileClipboardController(ref, watcher: watcher),
+          ),
+        ],
+      );
+      container.read(clipboardControllerProvider.notifier);
+      await pumpEventQueue();
+
+      sender = RemoteLinkClient(
+        identity: senderIdentity,
+        capabilities: const Capabilities(Capabilities.clipboardText),
+        clock: SystemClock(),
+      );
+      await sender.connect(
+        ConnectionTarget(
+          host: '127.0.0.1',
+          port: host.boundPort,
+          deviceId: hostIdentity.id,
+          serverPublicKey: hostIdentity.publicKey,
+        ),
+      );
+      await sender.waitUntilConnected();
+    });
+
+    tearDown(() async {
+      container.dispose();
+      clipboard.remove(binding);
+      await watcher.close();
+      await linkService.dispose();
+      await sender.dispose();
+      await idleClient.dispose();
+      await host.dispose();
+      await trust.dispose();
+    });
+
+    test('lands on this phone\'s clipboard, named after the phone that sent it',
+        () async {
+      // Half of "send and clipboard" used to stop one step short of the
+      // clipboard: the sending phone put this on the wire, the host let it
+      // through, and the only subscriber to the host's messages handled file
+      // transfers. Nothing wrote it anywhere and nothing said so.
+      await sender.send(
+        ClipboardUpdate(
+          items: <ClipboardItem>[
+            ClipboardItem.text('sent from the other phone')
+          ],
+          contentHash: Uint8List.fromList(List<int>.filled(16, 4)),
+          originDeviceId: senderIdentity.id.value,
+          originSequence: 1,
+        ),
+      );
+      await pumpEventQueue(times: 40);
+
+      expect(clipboard.text, 'sent from the other phone');
+      final state = container.read(clipboardControllerProvider);
+      expect(state.text, 'sent from the other phone');
+      // Named, because "From your computer" is the wrong sentence about a
+      // phone and this screen is the only place the user learns where a piece
+      // of text came from.
+      expect(state.sourceName, 'The Other Phone');
     });
   });
 }

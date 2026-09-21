@@ -8,9 +8,12 @@ import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/brand.dart';
 import '../../app/providers.dart';
 import '../control/control_screen.dart';
+import '../host/host_providers.dart';
+import '../host/phone_host_service.dart';
 import '../pairing/pairing_screen.dart';
 import '../pairing/qr_scanner_screen.dart';
 import '../settings/settings_screen.dart';
@@ -130,6 +133,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     // Navigating from a listener rather than from build: build can run many
     // times, and pushing a route from it would stack duplicate touchpads.
     ref.listen(autoConnectProvider, (previous, next) {
@@ -159,7 +163,14 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
         const <DiscoveredDevice>[];
     final paired =
         ref.watch(trustedPeersProvider).valueOrNull ?? const <TrustedPeer>[];
-    final entries = _merge(discovered, paired);
+    final connectedPeers = ref.watch(peerLinksProvider);
+    final connectedIds = ref.watch(connectedDeviceIdsProvider);
+    final entries = _merge(
+      discovered,
+      paired,
+      connectedPeers: connectedPeers,
+      connectedIds: connectedIds,
+    );
     final clientState = ref.watch(clientStateProvider).valueOrNull;
     final client = ref.watch(clientProvider).valueOrNull;
     final connectedId = ref.watch(connectedDeviceIdProvider);
@@ -184,7 +195,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
         title: const Text('Devices'),
         actions: <Widget>[
           IconButton(
-            icon: const Icon(Icons.refresh_rounded),
+            icon: const AppIcon(AppIcons.filter),
             tooltip: 'Search again',
             onPressed: () async {
               _beginSearchWindow();
@@ -193,7 +204,10 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
             },
           ),
           IconButton(
-            icon: const Icon(Icons.settings_outlined),
+            icon: AppIcon(
+              AppIcons.settings,
+              color: scheme.onSurfaceVariant,
+            ),
             tooltip: 'Settings',
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
@@ -209,7 +223,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
       // screen rather than an item in a menu.
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _scanCode(context),
-        icon: const Icon(Icons.qr_code_scanner_rounded),
+        icon: const AppIcon(AppIcons.qrCode),
         label: const Text('Scan code'),
       ),
       body: entries.isEmpty
@@ -237,7 +251,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
                   final entry = entries[index];
                   final wasRevoked = entry.id == revokedPeerId;
                   final isConnected =
-                      entry.id != null && entry.id == connectedId;
+                      entry.id != null && connectedIds.contains(entry.id);
                   return _DeviceTile(
                     entry: entry,
                     wasRevoked: wasRevoked,
@@ -253,7 +267,9 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
                                 ),
                     onPairAgain:
                         wasRevoked ? () => _pairAgain(context, entry) : null,
-                    onDisconnect: isConnected ? _disconnect : null,
+                    onDisconnect: isConnected
+                        ? () => _disconnect(peerId: entry.id)
+                        : null,
                     onRename: entry.isPaired && entry.id != null
                         ? () => _renameComputer(context, entry)
                         : null,
@@ -267,23 +283,58 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
   /// Combines live beacons with stored pairings, preferring the live address.
   static List<_Entry> _merge(
     List<DiscoveredDevice> discovered,
-    List<TrustedPeer> paired,
-  ) {
+    List<TrustedPeer> paired, {
+    List<PeerLink> connectedPeers = const <PeerLink>[],
+    Set<DeviceId> connectedIds = const <DeviceId>{},
+  }) {
     final byId = <String, TrustedPeer>{
       for (final peer in paired) peer.id.value: peer,
+    };
+    final discById = <String, DiscoveredDevice>{
+      for (final device in discovered) device.id.value: device,
     };
     final entries = <_Entry>[];
     final seen = <String>{};
 
+    // 1. Any device currently connected (inbound or outbound) is always shown and is live.
+    for (final peer in connectedPeers) {
+      if (seen.contains(peer.id.value)) continue;
+      final storedPeer = byId[peer.id.value];
+      final disc = discById[peer.id.value];
+      final effectiveName = peer.name.isNotEmpty && peer.name != peer.id.short
+          ? peer.name
+          : (storedPeer?.name ?? peer.name);
+      final effectivePlatform = peer.platform != PlatformKind.unknown
+          ? peer.platform
+          : (storedPeer?.platform ??
+              disc?.beacon.platform ??
+              PlatformKind.unknown);
+
+      seen.add(peer.id.value);
+      entries.add(
+        _Entry(
+          id: peer.id,
+          name: effectiveName,
+          host: disc?.address ?? storedPeer?.lastAddress ?? 'Connected device',
+          port: disc?.port ??
+              (peer.isHandheld ? kPhoneHostPort : kDefaultServicePort),
+          isPaired: storedPeer != null,
+          isLive: true,
+          platform: effectivePlatform,
+          publicKey: storedPeer?.publicKey,
+        ),
+      );
+    }
+
+    // 2. Discovered devices.
     for (final device in discovered) {
+      if (seen.contains(device.id.value)) continue;
       final peer = byId[device.id.value];
       seen.add(device.id.value);
       entries.add(
         _Entry(
           id: device.id,
           name: peer?.name ?? device.name,
-          // The live address wins over the stored one: a computer that moved to
-          // a new DHCP lease is announcing where it actually is now.
           host: device.address,
           port: device.port,
           isPaired: peer != null,
@@ -294,6 +345,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
       );
     }
 
+    // 3. Paired devices that are neither currently connected nor discovered.
     for (final peer in paired) {
       if (seen.contains(peer.id.value)) continue;
       final address = peer.lastAddress;
@@ -302,7 +354,10 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
           id: peer.id,
           name: peer.name,
           host: address,
-          port: kDefaultServicePort,
+          port: peer.platform == PlatformKind.android ||
+                  peer.platform == PlatformKind.ios
+              ? kPhoneHostPort
+              : kDefaultServicePort,
           isPaired: true,
           isLive: false,
           platform: peer.platform,
@@ -312,6 +367,9 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     }
 
     entries.sort((a, b) {
+      final aConnected = a.id != null && connectedIds.contains(a.id);
+      final bConnected = b.id != null && connectedIds.contains(b.id);
+      if (aConnected != bConnected) return aConnected ? -1 : 1;
       if (a.isLive != b.isLive) return a.isLive ? -1 : 1;
       if (a.isPaired != b.isPaired) return a.isPaired ? -1 : 1;
       return a.name.toLowerCase().compareTo(b.name.toLowerCase());
@@ -393,12 +451,20 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
   /// The app could reach a connected state and offer no way out of it short of
   /// force-quitting: auto-connect reconnects on launch, and leaving the
   /// touchpad only cancels auto-connect for that one attempt.
-  Future<void> _disconnect() async {
+  Future<void> _disconnect({DeviceId? peerId}) async {
     // Cancelled first. Without this the supervisor treats the close as a drop
     // and dials straight back in, so the button appears to do nothing.
     ref.read(autoConnectProvider.notifier).cancel();
     final client = await ref.read(clientProvider.future);
-    await client.disconnect();
+    if (peerId == null || client.session?.peerId == peerId) {
+      await client.disconnect();
+    }
+    if (peerId != null) {
+      final host = ref.read(phoneHostServiceProvider).valueOrNull;
+      if (host != null) {
+        await host.disconnectPeer(peerId);
+      }
+    }
   }
 
   /// Asks before replacing a live connection with a different computer.
@@ -641,16 +707,17 @@ class _DeviceTile extends StatelessWidget {
         leading: Container(
           width: 48,
           height: 48,
+          alignment: Alignment.center,
           decoration: BoxDecoration(
             color: (entry.isLive ? scheme.primary : scheme.onSurfaceVariant)
                 .withValues(alpha: isConnected ? 0.18 : 0.10),
             borderRadius: BorderRadius.circular(15),
           ),
-          child: Icon(
+          child: AppIcon(
             switch (entry.platform) {
-              PlatformKind.macos => Icons.laptop_mac_rounded,
-              PlatformKind.windows => Icons.laptop_windows_rounded,
-              _ => Icons.computer_rounded,
+              PlatformKind.macos => AppIcons.monitorSmartphone,
+              PlatformKind.windows => AppIcons.monitorSmartphone,
+              _ => AppIcons.monitorSmartphone,
             },
             // The platform is carried by the glyph alone. `ListTile` merges its
             // children into one node, so this is announced ahead of the name:
@@ -661,13 +728,8 @@ class _DeviceTile extends StatelessWidget {
               PlatformKind.linux => 'Linux computer',
               _ => 'Computer',
             },
-            size: 25,
-            // Dimmed when the computer is paired but not currently announcing: the
-            // address may be stale, and the tap may fail. Better to show it looking
-            // uncertain than to hide it or pretend it is online.
-            color: entry.isLive
-                ? null
-                : scheme.onSurfaceVariant.withValues(alpha: 0.5),
+            size: 28,
+            color: scheme.onSurfaceVariant,
           ),
         ),
         // The badge sits on the second line rather than beside the name.
@@ -707,7 +769,10 @@ class _DeviceTile extends StatelessWidget {
                         children: <Widget>[
                           if (onRename != null)
                             IconButton(
-                              icon: const Icon(Icons.edit_outlined),
+                              icon: AppIcon(
+                                AppIcons.edit,
+                                color: scheme.onSurfaceVariant,
+                              ),
                               tooltip: 'Rename computer',
                               onPressed: onRename,
                             ),
@@ -716,13 +781,16 @@ class _DeviceTile extends StatelessWidget {
                           // Excluded rather than labelled: the fix for an unlabelled
                           // icon is not always a label.
                           ExcludeSemantics(
-                            child: Icon(Icons.verified_rounded,
-                                color: scheme.primary),
+                            child: AppIcon(
+                              AppIcons.qrCode,
+                              size: 18,
+                              color: scheme.primary,
+                            ),
                           ),
                         ],
                       )
                     : const ExcludeSemantics(
-                        child: Icon(Icons.chevron_right_rounded),
+                        child: AppIcon(AppIcons.qrCode, size: 18),
                       ),
         onTap: onTap,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
@@ -881,8 +949,8 @@ class _Searching extends StatelessWidget {
           const Center(child: CircularProgressIndicator())
         else
           ExcludeSemantics(
-            child: Icon(
-              Icons.wifi_find_outlined,
+            child: AppIcon(
+              AppIcons.qrCode,
               size: 48,
               color: scheme.onSurfaceVariant,
             ),
@@ -926,7 +994,7 @@ class _Searching extends StatelessWidget {
           Center(
             child: FilledButton.icon(
               onPressed: onScanCode,
-              icon: const Icon(Icons.qr_code_scanner_rounded),
+              icon: const AppIcon(AppIcons.qrCode),
               label: const Text('Scan code'),
             ),
           ),
@@ -934,7 +1002,7 @@ class _Searching extends StatelessWidget {
           Center(
             child: TextButton.icon(
               onPressed: onSearchAgain,
-              icon: const Icon(Icons.refresh),
+              icon: const AppIcon(AppIcons.settings),
               label: const Text('Search again'),
             ),
           ),

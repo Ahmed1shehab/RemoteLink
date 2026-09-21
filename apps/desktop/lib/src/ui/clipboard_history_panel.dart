@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 
+import '../app/app_icons.dart';
 import '../app/desktop_ui.dart';
 import '../app/providers.dart';
 
@@ -33,7 +34,7 @@ class ClipboardHistoryPanel extends ConsumerWidget {
               ? null
               : TextButton.icon(
                   onPressed: () => _clearAll(context, ref),
-                  icon: const Icon(Icons.delete_sweep_rounded, size: 18),
+                  icon: const AppIcon(AppIcons.materialDeleteSweep, size: 18),
                   label: const Text('Clear all'),
                 ),
         ),
@@ -97,8 +98,8 @@ class _PersistenceRow extends ConsumerWidget {
               color: theme.colorScheme.primary.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(
-              isPersistent ? Icons.lock_outline_rounded : Icons.memory_rounded,
+            child: AppIcon(
+              isPersistent ? AppIcons.materialLock : AppIcons.materialMemory,
               size: 20,
               color: theme.colorScheme.primary,
             ),
@@ -155,7 +156,7 @@ class _EmptyHistory extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const DesktopEmptyState(
-      icon: Icons.content_paste_search_rounded,
+      icon: AppIcons.materialClipboard,
       title: 'Nothing copied yet',
       message: 'The last $kClipboardHistoryCapacity items you copy will '
           'appear here.',
@@ -182,12 +183,12 @@ class _HistoryRow extends ConsumerWidget {
           color: theme.colorScheme.primary.withValues(alpha: 0.09),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Icon(
+        child: AppIcon(
           switch (entry.kind) {
-            ClipboardHistoryKind.image => Icons.image_rounded,
-            ClipboardHistoryKind.url => Icons.link_rounded,
-            ClipboardHistoryKind.html => Icons.code_rounded,
-            ClipboardHistoryKind.text => Icons.notes_rounded,
+            ClipboardHistoryKind.image => AppIcons.materialGallery,
+            ClipboardHistoryKind.url => AppIcons.materialLink,
+            ClipboardHistoryKind.html => AppIcons.materialCode,
+            ClipboardHistoryKind.text => AppIcons.paragraph,
           },
           size: 19,
           color: theme.colorScheme.primary,
@@ -210,12 +211,16 @@ class _HistoryRow extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           IconButton(
-            icon: Icon(entry.pinned ? Icons.push_pin : Icons.push_pin_outlined),
+            icon: AppIcon(
+              entry.pinned ? AppIcons.materialPinFilled : AppIcons.pin,
+              size: 18,
+              color: entry.pinned ? theme.colorScheme.primary : null,
+            ),
             tooltip: entry.pinned ? 'Unpin' : 'Pin',
             onPressed: () => _togglePin(context, ref),
           ),
           IconButton(
-            icon: const Icon(Icons.delete_outline_rounded),
+            icon: const AppIcon(AppIcons.delete, size: 18),
             tooltip: 'Remove from history',
             onPressed: () => _remove(ref),
             color: theme.colorScheme.error,

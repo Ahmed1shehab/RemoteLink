@@ -8,10 +8,13 @@ import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/brand.dart';
 import '../../app/providers.dart';
+import '../clipboard/clipboard_history_controller.dart';
 import '../devices/bonjour_discovery.dart';
 import '../devices/link_service.dart';
+import '../devices/remember_prompt.dart';
 import '../host/host_providers.dart';
 import '../host/phone_host_service.dart';
 import '../watch/watch_bridge.dart';
@@ -29,28 +32,28 @@ class SettingsScreen extends ConsumerWidget {
         title: const Text('Settings'),
       ),
       body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         children: const <Widget>[
           _ThisPhoneSection(),
-          SizedBox(height: 16),
+          SizedBox(height: 12),
           _AppearanceSection(),
-          SizedBox(height: 16),
-          _ReceivingSection(),
-          SizedBox(height: 16),
-          _PairedComputersSection(),
-          SizedBox(height: 16),
+          SizedBox(height: 12),
           _TouchpadSection(),
-          SizedBox(height: 16),
+          SizedBox(height: 12),
+          _ReceivingSection(),
+          SizedBox(height: 12),
+          _PairedComputersSection(),
+          SizedBox(height: 12),
           _ClipboardSection(),
-          SizedBox(height: 16),
+          SizedBox(height: 12),
           _BackgroundSection(),
-          SizedBox(height: 16),
+          SizedBox(height: 12),
           _AppleWatchSection(),
-          SizedBox(height: 16),
+          SizedBox(height: 12),
           _DiagnosticsSection(),
-          SizedBox(height: 16),
+          SizedBox(height: 12),
           _AboutSection(),
-          SizedBox(height: 24),
+          SizedBox(height: 16),
         ],
       ),
     );
@@ -81,16 +84,16 @@ class _ThisPhoneSection extends ConsumerWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.smartphone,
+              icon: AppIcons.monitorSmartphone,
               title: 'This Phone',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Device name'),
@@ -101,12 +104,15 @@ class _ThisPhoneSection extends ConsumerWidget {
                 ),
               ),
               trailing: IconButton(
-                icon: const Icon(Icons.edit_outlined),
+                icon: AppIcon(
+                  AppIcons.edit,
+                  color: colorScheme.onSurfaceVariant,
+                ),
                 tooltip: 'Rename this phone',
                 onPressed: () => _promptRenamePhone(context, ref, phoneName),
               ),
             ),
-            const Divider(height: 16),
+            const Divider(height: 12),
             identityAsync.when(
               loading: () => const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
@@ -127,7 +133,7 @@ class _ThisPhoneSection extends ConsumerWidget {
                         color: colorScheme.onSurfaceVariant,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     SelectableText(
                       identity.id.value,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -135,14 +141,14 @@ class _ThisPhoneSection extends ConsumerWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     Text(
                       'Public-key fingerprint',
                       style: theme.textTheme.labelMedium?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     SelectableText(
                       fingerprint,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -258,22 +264,16 @@ class _AppearanceSection extends ConsumerWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.dark_mode_outlined,
+              icon: AppIcons.settings,
               title: 'Appearance',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
-            Text(
-              'Remote Link opens dark. The gesture surface fills the screen, '
-              'and a bright one at arm\u2019s length in a dark room is a torch.',
-              style: theme.textTheme.bodySmall,
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             // Full width so the three labels have room at a large text size;
             // a segmented button sized to its content wraps 'System' onto two
             // lines before the phone runs out of width.
@@ -284,19 +284,19 @@ class _AppearanceSection extends ConsumerWidget {
                 segments: const <ButtonSegment<ThemeMode>>[
                   ButtonSegment<ThemeMode>(
                     value: ThemeMode.system,
-                    icon: Icon(Icons.brightness_auto_outlined, size: 18),
+                    icon: AppIcon(AppIcons.settings, size: 18),
                     label: Text('System'),
                     tooltip: 'Follow the phone\u2019s setting',
                   ),
                   ButtonSegment<ThemeMode>(
                     value: ThemeMode.light,
-                    icon: Icon(Icons.light_mode_outlined, size: 18),
+                    icon: AppIcon(AppIcons.settings, size: 18),
                     label: Text('Light'),
                     tooltip: 'Always light',
                   ),
                   ButtonSegment<ThemeMode>(
                     value: ThemeMode.dark,
-                    icon: Icon(Icons.dark_mode_outlined, size: 18),
+                    icon: AppIcon(AppIcons.settings, size: 18),
                     label: Text('Dark'),
                     tooltip: 'Always dark',
                   ),
@@ -342,16 +342,16 @@ class _ReceivingSection extends ConsumerWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.wifi_tethering_rounded,
+              icon: AppIcons.receive,
               title: 'Receiving',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: wanted,
@@ -370,8 +370,21 @@ class _ReceivingSection extends ConsumerWidget {
                     : 'This phone will not appear on other devices',
               ),
             ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: ref.watch(askBeforeConnectingProvider),
+              onChanged: (enabled) => ref
+                  .read(askBeforeConnectingProvider.notifier)
+                  .set(enabled: enabled),
+              title: const Text('Ask before a paired device connects'),
+              subtitle: Text(
+                ref.watch(askBeforeConnectingProvider)
+                    ? 'Wait for approval before connecting'
+                    : 'Connect automatically without asking',
+              ),
+            ),
             if (connected.isNotEmpty) ...<Widget>[
-              const Divider(height: 24),
+              const Divider(height: 16),
               Text(
                 connected.length == 1
                     ? 'Connected now'
@@ -384,8 +397,8 @@ class _ReceivingSection extends ConsumerWidget {
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Row(
                     children: <Widget>[
-                      Icon(
-                        Icons.smartphone_outlined,
+                      AppIcon(
+                        AppIcons.monitorSmartphone,
                         size: 18,
                         color: colorScheme.onSurfaceVariant,
                       ),
@@ -420,18 +433,18 @@ class _PairedComputersSection extends ConsumerWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.devices,
+              icon: AppIcons.monitorSmartphone,
               // Not "Computers" any more: a paired phone lands in the same
               // trust store and is revoked from the same list.
               title: 'Paired Devices',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             peersAsync.when(
               loading: () => const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
@@ -444,7 +457,7 @@ class _PairedComputersSection extends ConsumerWidget {
               data: (peers) {
                 if (peers.isEmpty) {
                   return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Text(
                       'No paired computers yet. Pair with a computer on your '
                       'Wi-Fi network to start.',
@@ -459,7 +472,7 @@ class _PairedComputersSection extends ConsumerWidget {
                 return Column(
                   children: <Widget>[
                     for (var i = 0; i < peers.length; i++) ...<Widget>[
-                      if (i > 0) const Divider(height: 16),
+                      if (i > 0) const Divider(height: 12),
                       _PairedComputerTile(peer: peers[i]),
                     ],
                   ],
@@ -484,52 +497,68 @@ class _PairedComputerTile extends ConsumerWidget {
     final colorScheme = theme.colorScheme;
 
     final platformIcon = switch (peer.platform) {
-      PlatformKind.macos => Icons.laptop_mac,
-      PlatformKind.windows => Icons.laptop_windows,
-      PlatformKind.linux => Icons.computer,
-      _ => Icons.computer,
+      PlatformKind.macos => AppIcons.monitorSmartphone,
+      PlatformKind.windows => AppIcons.monitorSmartphone,
+      PlatformKind.linux => AppIcons.monitorSmartphone,
+      _ => AppIcons.monitorSmartphone,
     };
 
-    final tier = PermissionTier.fromWire(peer.permissionTier);
-    final tierLabel = switch (tier) {
-      PermissionTier.readOnly => 'View Only',
-      PermissionTier.standard => 'Standard',
-      PermissionTier.extended => 'Extended',
-      PermissionTier.admin => 'Admin',
-    };
-
+    // Where this computer was last reached. Kept in the row because it is the
+    // only thing that tells two identically named machines apart, and the only
+    // hint available when a paired computer has moved to a different network.
     final addressText = peer.lastAddress != null
-        ? 'Last seen: ${peer.lastAddress} · Tier: $tierLabel'
-        : 'No address recorded · Tier: $tierLabel';
+        ? 'Last seen: ${peer.lastAddress}'
+        : 'No address recorded';
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: Icon(platformIcon, color: colorScheme.primary, size: 28),
+      leading: AppIcon(platformIcon, color: colorScheme.primary, size: 28),
       title: Text(
         peer.name,
         style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
       ),
       subtitle: Text(
         addressText,
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: colorScheme.onSurfaceVariant,
-        ),
+        style: theme.textTheme.bodySmall
+            ?.copyWith(color: colorScheme.onSurfaceVariant),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           IconButton(
-            icon: const Icon(Icons.shield_outlined),
+            icon: const AppIcon(AppIcons.protection),
             tooltip: 'Permissions for ${peer.name}',
             onPressed: () => _requestPermission(context, ref, peer),
           ),
           IconButton(
-            icon: const Icon(Icons.edit_outlined),
+            icon: AppIcon(
+              AppIcons.edit,
+              color: colorScheme.onSurfaceVariant,
+            ),
             tooltip: 'Rename ${peer.name}',
             onPressed: () => _renameComputer(context, ref, peer),
           ),
+          // The way out of a remembered connection, and the only one short of
+          // forgetting the device entirely. Turning it off does not un-pair
+          // anything: the device goes back to being asked about, which is
+          // where it was before either end agreed to anything.
           IconButton(
-            icon: Icon(Icons.delete_outline, color: colorScheme.error),
+            icon: AppIcon(
+              AppIcons.protection,
+              color: peer.autoAdmit
+                  ? colorScheme.primary
+                  : colorScheme.onSurfaceVariant,
+            ),
+            tooltip: peer.autoAdmit
+                ? '${peer.name} connects without being asked. '
+                    'Tap to start asking again.'
+                : 'Tap to let ${peer.name} connect without being asked.',
+            onPressed: () => ref
+                .read(rememberPromptProvider.notifier)
+                .setRemembered(peer.id, remember: !peer.autoAdmit),
+          ),
+          IconButton(
+            icon: AppIcon(AppIcons.delete, color: colorScheme.error),
             tooltip: 'Forget ${peer.name}',
             onPressed: () => _confirmForgetComputer(context, ref, peer),
           ),
@@ -958,16 +987,16 @@ class _TouchpadSection extends ConsumerWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.touch_app,
+              icon: AppIcons.handTap,
               title: 'Touchpad',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
@@ -997,7 +1026,7 @@ class _TouchpadSection extends ConsumerWidget {
               label: '${pointerSettings.sensitivity.toStringAsFixed(1)}x',
               onChanged: (value) => notifier.setSensitivity(value),
             ),
-            const Divider(height: 16),
+            const Divider(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Natural scrolling'),
@@ -1005,7 +1034,7 @@ class _TouchpadSection extends ConsumerWidget {
               value: pointerSettings.naturalScrolling,
               onChanged: (val) => notifier.setNaturalScrolling(val),
             ),
-            const Divider(height: 16),
+            const Divider(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Tap to click'),
@@ -1035,19 +1064,22 @@ class _ClipboardSection extends ConsumerWidget {
     final colorScheme = theme.colorScheme;
     final clipboardSettings = ref.watch(clipboardSettingsProvider);
     final notifier = ref.read(clipboardSettingsProvider.notifier);
+    final history = ref.watch(clipboardHistoryControllerProvider);
+    final historyController =
+        ref.read(clipboardHistoryControllerProvider.notifier);
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.content_paste,
+              icon: AppIcons.clipboard,
               title: 'Clipboard',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Sync from computer'),
@@ -1057,7 +1089,7 @@ class _ClipboardSection extends ConsumerWidget {
               value: clipboardSettings.syncFromDesktop,
               onChanged: (val) => notifier.setSyncFromDesktop(val),
             ),
-            const Divider(height: 16),
+            const Divider(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Sync to computer'),
@@ -1067,30 +1099,52 @@ class _ClipboardSection extends ConsumerWidget {
               value: clipboardSettings.syncToDesktop,
               onChanged: (val) => notifier.setSyncToDesktop(val),
             ),
-            const SizedBox(height: 12),
+            const Divider(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Keep history on this phone'),
+              subtitle: Text(
+                history.isPersistent
+                    ? 'Encrypted and saved securely on this device.'
+                    : 'Off — the list is kept in memory and disappears when you '
+                        'close Remote Link.',
+              ),
+              value: history.isPersistent,
+              onChanged: (enabled) async {
+                final applied = await historyController.setPersistenceEnabled(
+                  enabled: enabled,
+                );
+                if (!context.mounted || applied) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'This phone’s secure storage is unavailable, so history '
+                      'stays in memory only.',
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 10),
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Icon(
-                    Icons.info_outline,
-                    size: 18,
+                  AppIcon(
+                    AppIcons.settings,
+                    size: 16,
                     color: colorScheme.onSurfaceVariant,
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Why does my phone need to be open?\n'
-                      'Android and iOS both refuse to let an app read your '
-                      'clipboard unless it is the app on screen, so a copy made '
-                      'while Remote Link is in the background reaches your '
-                      'computer when you next open it. Copies made on your '
-                      'computer arrive on this phone either way.',
+                      'OS security requires Remote Link to be open to read clipboard.',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
@@ -1127,16 +1181,16 @@ class _BackgroundSection extends ConsumerWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.sync_rounded,
+              icon: AppIcons.settings,
               title: 'Background',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Stay connected in the background'),
@@ -1148,20 +1202,20 @@ class _BackgroundSection extends ConsumerWidget {
               onChanged: (value) =>
                   ref.read(backgroundLinkEnabledProvider.notifier).set(value),
             ),
-            const Divider(height: 16),
+            const Divider(height: 12),
             const _BackgroundClipboardTile(),
-            const Divider(height: 16),
+            const Divider(height: 12),
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                Icons.battery_alert_outlined,
+              leading: AppIcon(
+                AppIcons.settings,
                 color: colorScheme.onSurfaceVariant,
               ),
               title: const Text('Remote Link keeps stopping?'),
               subtitle: const Text(
                 'Some phones close it anyway. Here is how to stop that.',
               ),
-              trailing: const Icon(Icons.chevron_right),
+              trailing: const AppIcon(AppIcons.settings),
               onTap: () => showDialog<void>(
                 context: context,
                 builder: (context) => const _BatteryGuidanceDialog(),
@@ -1227,8 +1281,8 @@ class _BackgroundClipboardTileState
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: Icon(
-        _enabled ? Icons.check_circle_outline : Icons.content_paste_off,
+      leading: AppIcon(
+        _enabled ? AppIcons.settings : AppIcons.clipboard,
         color: _enabled ? colorScheme.primary : colorScheme.onSurfaceVariant,
       ),
       title: const Text('Copy in any app, paste on your computer'),
@@ -1237,7 +1291,7 @@ class _BackgroundClipboardTileState
             ? 'On. What you copy anywhere goes to your computer.'
             : 'Off. Android only allows this through Accessibility settings.',
       ),
-      trailing: const Icon(Icons.chevron_right),
+      trailing: const AppIcon(AppIcons.settings),
       onTap: () => showDialog<void>(
         context: context,
         builder: (context) => _BackgroundClipboardDialog(enabled: _enabled),
@@ -1417,22 +1471,22 @@ class _AppleWatchSection extends ConsumerWidget {
 
     final (icon, headline, detail) = switch (availability) {
       WatchAvailability(paired: false) => (
-          Icons.watch_off_outlined,
+          AppIcons.settings,
           'No Apple Watch paired',
           'Pair a watch with this iPhone and Remote Link appears on it.',
         ),
       WatchAvailability(installed: false) => (
-          Icons.watch_outlined,
+          AppIcons.settings,
           'Not installed on your watch',
           'Install Remote Link from the Watch app on this iPhone.',
         ),
       WatchAvailability(reachable: false) => (
-          Icons.watch_outlined,
+          AppIcons.settings,
           'Watch out of range',
           'The watch controls the pointer whenever it can reach this iPhone.',
         ),
       _ => (
-          Icons.watch_rounded,
+          AppIcons.settings,
           'Ready on your wrist',
           'Drag on the watch to move the pointer, tap to click, and turn the '
               'Digital Crown to scroll.',
@@ -1441,33 +1495,26 @@ class _AppleWatchSection extends ConsumerWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.watch_outlined,
+              icon: AppIcons.settings,
               title: 'Apple Watch',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: Icon(icon, color: colorScheme.primary),
+              leading: AppIcon(icon, color: colorScheme.primary),
               title: Text(headline),
               subtitle: Text(detail),
               trailing: IconButton(
                 tooltip: 'Check again',
-                icon: const Icon(Icons.refresh_rounded),
+                icon: const AppIcon(AppIcons.settings),
                 onPressed: () => ref.invalidate(watchAvailabilityProvider),
               ),
-            ),
-            const Divider(height: 16),
-            Text(
-              'The watch sends what you do to this iPhone, and the iPhone sends '
-              'it on to your computer. Keep Remote Link on the phone connected '
-              'for the watch to have anything to drive.',
-              style: theme.textTheme.bodySmall,
             ),
           ],
         ),
@@ -1590,6 +1637,7 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
       ClientState.connecting => 'Connecting…',
       ClientState.reconnecting => 'Reconnecting…',
       ClientState.pairing => 'Pairing…',
+      ClientState.awaitingApproval => 'Waiting to be let in…',
       ClientState.failed => 'Connection failed',
       ClientState.idle => 'Idle (Not connected)',
     };
@@ -1597,7 +1645,8 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
     final stateColor = switch (clientState) {
       ClientState.connected => colorScheme.primary,
       ClientState.connecting ||
-      ClientState.reconnecting =>
+      ClientState.reconnecting ||
+      ClientState.awaitingApproval =>
         colorScheme.tertiary,
       ClientState.failed => colorScheme.error,
       _ => colorScheme.onSurfaceVariant,
@@ -1605,32 +1654,32 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.analytics_outlined,
+              icon: AppIcons.analytics,
               title: 'Diagnostics',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             _DiagnosticRow(
               label: 'Connection state',
               value: stateLabel,
               valueColor: stateColor,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             _DiagnosticRow(
               label: 'Round-trip time',
               value: rttText,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             _DiagnosticRow(
               label: 'Discovery route',
               value: discoveryRoute,
             ),
-            const Divider(height: 24),
+            const Divider(height: 14),
             // Wrapped rather than a Row with a Spacer: the filter label, the
             // level names and "Export Logs" together need more width than a
             // phone has once the card's padding is taken out, and a Row answers
@@ -1676,12 +1725,12 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
                 ),
                 FilledButton.tonalIcon(
                   onPressed: () => _exportLogs(context, memorySink.records),
-                  icon: const Icon(Icons.copy_all, size: 16),
+                  icon: const AppIcon(AppIcons.clipboard, size: 16),
                   label: const Text('Export Logs'),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               '${memorySink.records.length} log records stored in memory',
               style: theme.textTheme.bodySmall?.copyWith(
@@ -1754,16 +1803,16 @@ class _AboutSection extends StatelessWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.info_outline,
+              icon: AppIcons.settings,
               title: 'About',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const BrandMark(size: 40),
@@ -1796,7 +1845,7 @@ class _SectionHeader extends StatelessWidget {
     required this.color,
   });
 
-  final IconData icon;
+  final AppIconData icon;
   final String title;
   final Color color;
 
@@ -1805,7 +1854,7 @@ class _SectionHeader extends StatelessWidget {
     final theme = Theme.of(context);
     return Row(
       children: <Widget>[
-        Icon(icon, size: 20, color: color),
+        AppIcon(icon, size: 20, color: color),
         const SizedBox(width: 8),
         Text(
           title,

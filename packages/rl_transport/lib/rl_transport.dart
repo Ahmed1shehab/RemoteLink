@@ -24,5 +24,6 @@ export 'src/transport/client.dart';
 export 'src/transport/framed_connection.dart';
 export 'src/transport/handshake_driver.dart';
 export 'src/transport/reconnect.dart';
+export 'src/transport/remember.dart';
 export 'src/transport/server.dart';
 export 'src/transport/session.dart';

@@ -574,9 +574,11 @@ final class Session {
     if (_state == SessionState.pairing &&
         message.type.subsystem != 0x01 &&
         message.type.subsystem != 0x00) {
-      // Until pairing completes the peer is authenticated but not authorised.
-      // Silently dropping is deliberate: replying would confirm to an
-      // unapproved device that it reached a real server.
+      // Until the session is admitted the peer is authenticated but not
+      // authorised — it has either never paired, or it has paired and is
+      // waiting for someone to allow this particular connection. Silently
+      // dropping is deliberate: replying would confirm to an unapproved device
+      // that it reached a real server.
       _log.debug(() => 'dropping ${message.type.name} during pairing');
       return;
     }
@@ -640,7 +642,17 @@ final class Session {
   }
 
   /// Marks pairing complete, unblocking application traffic.
-  void completePairing() {
+  void completePairing() => admit();
+
+  /// Lets a held session through, unblocking application traffic.
+  ///
+  /// The same transition as [completePairing] under the name that fits the
+  /// other reason a session is held. [SessionState.pairing] answers two
+  /// questions now — "may this device ever connect" and "may it connect now" —
+  /// and only the first one is pairing. Both end here, because the gate is one
+  /// gate: what it blocks, and why blocking it is what makes a held connection
+  /// safe rather than merely slow, is documented at the dispatch check.
+  void admit() {
     if (_state != SessionState.pairing) return;
     _setState(SessionState.established);
   }

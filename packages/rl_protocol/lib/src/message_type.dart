@@ -72,6 +72,25 @@ enum MessageType {
   /// Either direction. Revokes an existing trust relationship.
   unpair(0x0106),
 
+  /// Server → client. The session is held while a person decides.
+  ///
+  /// In this range rather than with device management because it is a trust
+  /// decision, even though no key changes hands: pairing asks whether a device
+  /// may ever connect, this asks whether it may connect now.
+  connectionRequest(0x0107),
+
+  /// Server → client. The answer to a held connection.
+  connectionDecision(0x0108),
+
+  /// Either direction. One end's answer to "should we remember each other?".
+  ///
+  /// Symmetric, unlike the two above it, because the question is symmetric:
+  /// each end is deciding whether *it* will stop asking about the other, and
+  /// neither answer is worth anything on its own. A device is only remembered
+  /// when both have said yes, so the message carries one side's answer and the
+  /// agreement is the conjunction of the pair.
+  rememberConnection(0x0109),
+
   // ── 0x02xx pointer input ──────────────────────────────────────────────────
   /// Relative cursor movement. The highest-frequency message in the protocol.
   mouseMove(0x0201),

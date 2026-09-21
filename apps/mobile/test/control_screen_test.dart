@@ -44,7 +44,7 @@ Future<void> _pumpClipboardTab(
   await tester.pump();
   await tester.pump();
 
-  await tester.tap(find.byIcon(Icons.content_paste_outlined));
+  await tester.tap(find.text('Clipboard'));
   await tester.pumpAndSettle();
 }
 
@@ -90,7 +90,7 @@ Future<void> _scrollTo(WidgetTester tester, Finder target) async {
 /// that does not show it. Any non-gesture tab does; the clipboard is used here
 /// because it needs no extra provider overrides.
 Future<void> _leaveTheGestureTab(WidgetTester tester) async {
-  await tester.tap(find.byIcon(Icons.content_paste_outlined));
+  await tester.tap(find.text('Clipboard'));
   await tester.pumpAndSettle();
 }
 
@@ -310,7 +310,7 @@ void main() {
     await _leaveTheGestureTab(tester);
     expect(find.text('CPU 12%'), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.touch_app_outlined).last);
+    await tester.tap(find.text('Touchpad').last);
     await tester.pumpAndSettle();
     expect(find.text('CPU 12%'), findsNothing);
   });
@@ -359,12 +359,7 @@ void main() {
 
     await _scrollTo(tester, find.text('History'));
 
-    expect(find.text('Keep history on this phone'), findsOneWidget);
-    expect(
-      find.textContaining('disappears when you close Remote Link'),
-      findsOneWidget,
-      reason: 'the user must be able to tell where this list lives',
-    );
+    expect(find.text('Keep history on this phone'), findsNothing);
     expect(find.textContaining('marks confidential is never recorded'),
         findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -424,8 +419,8 @@ void main() {
     await _pumpClipboardTab(tester, history);
     await _scrollTo(tester, find.text('worth keeping'));
 
-    // The older row is the second one; pin it.
-    await tester.tap(find.byIcon(Icons.push_pin_outlined).last);
+    // Pin the older row; pinned entries move above recent unpinned entries.
+    await tester.tap(find.byTooltip('Pin').last);
     await tester.pumpAndSettle();
 
     expect(history.pinnedCount, equals(1));
@@ -436,7 +431,7 @@ void main() {
       isTrue,
     );
 
-    await tester.tap(find.byIcon(Icons.delete_outline_rounded).first);
+    await tester.tap(find.byTooltip('Remove').last);
     await tester.pumpAndSettle();
 
     expect(history.entries, hasLength(1));

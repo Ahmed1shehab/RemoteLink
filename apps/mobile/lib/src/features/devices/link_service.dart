@@ -299,6 +299,17 @@ final backgroundLinkProvider = Provider<void>((ref) {
             disconnectLabel: 'Disconnect',
           ),
         );
+      case ClientState.awaitingApproval:
+        // Named rather than folded into "Reconnecting". The link is up and the
+        // hold-up is a person on the other device, so a notification that says
+        // the network is retrying would send the user to the wrong place.
+        unawaited(
+          service.start(
+            title: 'Waiting for $name',
+            body: 'Allow the connection on $name to carry on.',
+            disconnectLabel: 'Cancel',
+          ),
+        );
       case ClientState.connecting:
       case ClientState.reconnecting:
         // Kept running through a reconnect, which is the entire point: the

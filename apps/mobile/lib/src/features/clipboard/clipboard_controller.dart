@@ -14,6 +14,8 @@ import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
 import '../devices/link_service.dart';
+import '../host/host_providers.dart';
+import '../host/phone_host_service.dart';
 import 'clipboard_history_controller.dart';
 import 'clipboard_watcher.dart';
 
@@ -22,14 +24,26 @@ final class ClipboardState {
   const ClipboardState({
     this.text,
     this.fromDesktop = false,
+    this.sourceName,
     this.updatedAt,
     this.sending = false,
   });
 
   final String? text;
 
-  /// True when this arrived from the computer rather than being copied here.
+  /// True when this arrived from the other end rather than being copied here.
+  ///
+  /// Named for the computer because for most of this app's life the other end
+  /// could only be one. It can now also be a phone that sent text over, which
+  /// is what [sourceName] is for.
   final bool fromDesktop;
+
+  /// What to call where this came from, when it was not the computer.
+  ///
+  /// Null for text from the connected computer, whose name the clipboard
+  /// screen does not need to say — there is only ever one of those, and the
+  /// app bar is already showing it.
+  final String? sourceName;
 
   final DateTime? updatedAt;
   final bool sending;
@@ -37,12 +51,14 @@ final class ClipboardState {
   ClipboardState copyWith({
     String? text,
     bool? fromDesktop,
+    String? sourceName,
     DateTime? updatedAt,
     bool? sending,
   }) =>
       ClipboardState(
         text: text ?? this.text,
         fromDesktop: fromDesktop ?? this.fromDesktop,
+        sourceName: sourceName ?? this.sourceName,
         updatedAt: updatedAt ?? this.updatedAt,
         sending: sending ?? this.sending,
       );
@@ -96,6 +112,7 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
   final Log _log = Log.scoped('mobile.clipboard');
 
   StreamSubscription<Message>? _messages;
+  StreamSubscription<InboundMessage>? _inbound;
   StreamSubscription<ClientState>? _states;
   StreamSubscription<void>? _clipboardChanges;
   StreamSubscription<String>? _backgroundCopies;
@@ -167,6 +184,34 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
         .backgroundCopies
         .listen(_onBackgroundCopy, cancelOnError: false);
 
+    // Text from a nearby phone arrives on the listening half rather than on
+    // the client, and until this line nothing read it. The sending phone put a
+    // `ClipboardUpdate` on the wire, the host let it through — `isAllowedFromPeer`
+    // has always allowed it — and it was published to a stream whose only
+    // subscriber handled file transfers, so it was dropped one step from the
+    // clipboard it was addressed to. Half of "send and clipboard" therefore
+    // worked on one end only.
+    try {
+      final host = await _ref.read(phoneHostServiceProvider.future);
+      _inbound = host.messages.listen(
+        (inbound) {
+          final message = inbound.message;
+          if (message is! ClipboardUpdate) return;
+          final name = host.links
+              .where((link) => link.peerId == inbound.session.peerId)
+              .map((link) => link.name)
+              .firstOrNull;
+          unawaited(_applyRemote(message, from: name));
+        },
+        cancelOnError: false,
+      );
+    } on Object catch (error) {
+      // A phone that cannot host is a phone that still syncs with its
+      // computer, so this is logged and stepped over rather than thrown at a
+      // screen that has nothing useful to say about it.
+      _log.warn('not listening for text from nearby devices', error: error);
+    }
+
     // No flush without this. The states stream is the only thing that says the
     // link came back, and the copy the drop interrupted is waiting on it.
     _states = client.states.listen(
@@ -219,8 +264,13 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     }
   }
 
-  /// Writes an update from the computer into the phone's clipboard.
-  Future<void> _applyRemote(ClipboardUpdate update) async {
+  /// Writes an update from the other end into the phone's clipboard.
+  ///
+  /// [from] names the sender when it was a nearby phone. The same path serves
+  /// both ends deliberately: the Lamport clock, the echo guard, the sensitive
+  /// flag and the history entry all have to happen exactly once per piece of
+  /// content, and a second copy of this for phones is how those drift apart.
+  Future<void> _applyRemote(ClipboardUpdate update, {String? from}) async {
     // Adopted before anything can return early, and deliberately so. This is
     // a Lamport clock: seeing a message advances it whether or not the message
     // is used, and the desktop breaks an equal-clock tie by device id.
@@ -259,6 +309,7 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     state = ClipboardState(
       text: text,
       fromDesktop: true,
+      sourceName: from,
       updatedAt: DateTime.now(),
     );
 
@@ -503,6 +554,7 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     WidgetsBinding.instance.removeObserver(this);
     _stopWatching();
     unawaited(_messages?.cancel());
+    unawaited(_inbound?.cancel());
     unawaited(_states?.cancel());
     unawaited(_backgroundCopies?.cancel());
     super.dispose();

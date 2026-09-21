@@ -95,6 +95,8 @@ final class TrustedPeer {
     this.lastSeenAt,
     this.lastAddress,
     this.revoked = false,
+    this.autoAdmit = false,
+    this.rememberAsked = false,
   });
 
   final DeviceId id;
@@ -127,12 +129,35 @@ final class TrustedPeer {
   /// device", which would send the user into a pairing flow that then fails.
   final bool revoked;
 
+  /// Whether this peer may connect without anyone being asked about it.
+  ///
+  /// Set only when *both* devices said yes — see `RememberConnection`. It is
+  /// the difference between trusting a device and trusting every future moment
+  /// of it, and the two are genuinely different promises: pairing says this
+  /// key is who it claims to be, and this says nobody needs telling when it
+  /// comes back.
+  ///
+  /// Never inferred. A peer with this false is asked about exactly as it was
+  /// before the flag existed, so the only way to reach `true` is two people
+  /// agreeing to it, and revoking it is a switch in the device list.
+  final bool autoAdmit;
+
+  /// Whether the "remember this device?" question has already been put.
+  ///
+  /// Kept so a no stays a no. Without it the prompt reappears on every
+  /// connection, which is how a question becomes something people dismiss
+  /// without reading — and the one thing worse than not remembering a device
+  /// is training its owner to tap past the dialog that decides it.
+  final bool rememberAsked;
+
   TrustedPeer copyWith({
     String? name,
     DateTime? lastSeenAt,
     String? lastAddress,
     int? permissionTier,
     bool? revoked,
+    bool? autoAdmit,
+    bool? rememberAsked,
   }) =>
       TrustedPeer(
         id: id,
@@ -144,6 +169,8 @@ final class TrustedPeer {
         lastSeenAt: lastSeenAt ?? this.lastSeenAt,
         lastAddress: lastAddress ?? this.lastAddress,
         revoked: revoked ?? this.revoked,
+        autoAdmit: autoAdmit ?? this.autoAdmit,
+        rememberAsked: rememberAsked ?? this.rememberAsked,
       );
 
   @override

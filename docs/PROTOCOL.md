@@ -230,6 +230,80 @@ than the 10⁻⁴ a 32-bit source would give.
 
 ---
 
+## 6a. Admission
+
+The handshake answers *who is calling*. It does not answer *whether they may
+come in now*, and those are different questions: pairing is a promise about a
+device, not a standing invitation to whoever happens to be holding it. A
+listener may therefore hold an authenticated, already-trusted session while a
+person decides.
+
+```text
+                     ── handshake complete, session HELD ──
+6  server → client   ConnectionRequest(name, timeoutSeconds)   0x0107
+                     ── someone answers, or the window expires ──
+7  server → client   ConnectionDecision(answer)                0x0108
+                     ── on `allowed`, the session is unblocked ──
+```
+
+A held session is `SessionState.pairing`: everything outside subsystems `0x00`
+and `0x01` is dropped without reply, exactly as for a device that has never
+paired. Replying would confirm to an unapproved device that it reached a real
+server.
+
+Three properties are load-bearing:
+
+* **`ConnectionRequest` is sent before anyone is asked.** Otherwise the far end
+  cannot tell a held session from a dead one, and shows a working-looking app
+  whose every action silently goes nowhere.
+* **A decision is always sent, including a refusal.** A session that merely
+  vanishes is indistinguishable from a Wi-Fi drop, and the reconnect supervisor
+  would dial straight back in — putting the question on the other screen again
+  and again until somebody approved it to make it stop.
+* **An unknown `answer` value decodes as `declined`.** A future build that adds
+  a reason must not have it read as consent by an older one.
+
+Both listeners in this repository — the desktop and a phone that is hosting —
+ask once per device per run of the app rather than once per connection. Links
+drop constantly (Wi-Fi roaming, a locked screen, a closed lid) and a prompt on
+each of those is one that gets tapped away unread.
+
+### Remembering a device
+
+Asking every run is the right default and the wrong ending. Once a session is
+established, each end may ask its own user whether to stop asking about the
+other, and tells the peer what was said:
+
+```text
+either → either     RememberConnection(agreed)                 0x0109
+```
+
+The message is symmetric because the decision is. Remembering is a promise each
+device makes about its own front door, and a device may not make that promise
+on the other's behalf — a single yes would let the *asking* side decide it is no
+longer worth asking about, which is the one answer it must not give itself. Each
+end therefore stores `autoAdmit` only when it holds two yeses: its user's and
+the peer's.
+
+An unsettled agreement grants nothing. A peer running an older build never sends
+this message and a session can drop while the question is on screen; in both
+cases no device is remembered, which is the failure that costs a prompt rather
+than the one that leaves a door open.
+
+The *question*, though, is recorded as soon as this end's user answers it —
+`rememberAsked`, stored whether or not the peer ever replies. Waiting for the
+peer would put the prompt back on every connection to a device that cannot
+answer, which is a worse nag than the one this removes. The consequence is that
+two answers split across different sessions never meet: each end asked once,
+neither is remembered, and the way to fix it is the switch in each device list.
+
+A remembered device skips the hold entirely: `ConnectionRequest` is never sent
+and the session is admitted as soon as the handshake completes. Either end can
+withdraw the promise from its own device list, which puts that device back to
+being asked about without un-pairing it.
+
+---
+
 ## 7. Record encryption
 
 * **Cipher:** ChaCha20-Poly1305, RFC 8439.

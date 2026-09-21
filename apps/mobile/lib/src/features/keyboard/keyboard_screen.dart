@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_protocol/rl_protocol.dart' as proto;
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
 import 'hardware_keyboard_view.dart';
@@ -243,12 +244,12 @@ class _KeyboardScreenState extends ConsumerState<KeyboardScreen> {
             segments: const <ButtonSegment<KeyboardMode>>[
               ButtonSegment<KeyboardMode>(
                 value: KeyboardMode.text,
-                icon: Icon(Icons.abc),
+                icon: AppIcon(AppIcons.textSquare, size: 18),
                 label: Text('Text'),
               ),
               ButtonSegment<KeyboardMode>(
                 value: KeyboardMode.keys,
-                icon: Icon(Icons.keyboard_alt_outlined),
+                icon: AppIcon(AppIcons.option, size: 18),
                 label: Text('Keys'),
               ),
             ],
@@ -368,7 +369,7 @@ class _TypedEcho extends StatelessWidget {
             Row(
               children: <Widget>[
                 ExcludeSemantics(
-                  child: Icon(Icons.keyboard_alt_outlined,
+                  child: AppIcon(AppIcons.keyboard,
                       size: 16, color: scheme.onSurfaceVariant),
                 ),
                 const SizedBox(width: 6),
@@ -460,24 +461,20 @@ class _ShortcutGrid extends StatelessWidget {
   /// The desktop resolves each to the right chord for its platform — Cmd+C on
   /// macOS, Ctrl+C on Windows — so this list ships once instead of branching
   /// per platform, and adding a shortcut needs no mobile release.
-  static const List<(proto.NamedShortcut, String, IconData)> _entries =
-      <(proto.NamedShortcut, String, IconData)>[
-    (proto.NamedShortcut.copy, 'Copy', Icons.copy),
-    (proto.NamedShortcut.paste, 'Paste', Icons.paste),
-    (proto.NamedShortcut.cut, 'Cut', Icons.cut),
-    (proto.NamedShortcut.undo, 'Undo', Icons.undo),
-    (proto.NamedShortcut.redo, 'Redo', Icons.redo),
-    (proto.NamedShortcut.selectAll, 'Select all', Icons.select_all),
-    (proto.NamedShortcut.save, 'Save', Icons.save_outlined),
-    (proto.NamedShortcut.find, 'Find', Icons.search),
-    (proto.NamedShortcut.switchApplication, 'Switch app', Icons.apps),
-    (proto.NamedShortcut.closeTab, 'Close tab', Icons.tab_unselected),
-    (proto.NamedShortcut.refresh, 'Refresh', Icons.refresh),
-    (
-      proto.NamedShortcut.taskManager,
-      'Task manager',
-      Icons.monitor_heart_outlined
-    ),
+  static const List<(proto.NamedShortcut, String, AppIconData)> _entries =
+      <(proto.NamedShortcut, String, AppIconData)>[
+    (proto.NamedShortcut.copy, 'Copy', AppIcons.clipboard),
+    (proto.NamedShortcut.paste, 'Paste', AppIcons.settings),
+    (proto.NamedShortcut.cut, 'Cut', AppIcons.settings),
+    (proto.NamedShortcut.undo, 'Undo', AppIcons.settings),
+    (proto.NamedShortcut.redo, 'Redo', AppIcons.settings),
+    (proto.NamedShortcut.selectAll, 'Select all', AppIcons.settings),
+    (proto.NamedShortcut.save, 'Save', AppIcons.settings),
+    (proto.NamedShortcut.find, 'Find', AppIcons.settings),
+    (proto.NamedShortcut.switchApplication, 'Switch app', AppIcons.settings),
+    (proto.NamedShortcut.closeTab, 'Close tab', AppIcons.settings),
+    (proto.NamedShortcut.refresh, 'Refresh', AppIcons.settings),
+    (proto.NamedShortcut.taskManager, 'Task manager', AppIcons.monitorPlay),
   ];
 
   @override
@@ -487,7 +484,7 @@ class _ShortcutGrid extends StatelessWidget {
         children: <Widget>[
           for (final (shortcut, label, icon) in _entries)
             ActionChip(
-              avatar: Icon(icon, size: 18),
+              avatar: AppIcon(icon, size: 18),
               label: Text(label),
               onPressed: enabled ? () => onShortcut(shortcut) : null,
             ),
@@ -539,8 +536,9 @@ class _ModifierRow extends StatelessWidget {
               // A locked modifier is visually distinct from a one-shot one,
               // because "Shift is stuck on" is otherwise invisible and produces
               // baffling results three keystrokes later.
-              avatar:
-                  locked & bit != 0 ? const Icon(Icons.lock, size: 16) : null,
+              avatar: locked & bit != 0
+                  ? const AppIcon(AppIcons.settings, size: 16)
+                  : null,
               onSelected: enabled ? (_) => onToggle(bit) : null,
             ),
         ],

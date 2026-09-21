@@ -340,6 +340,52 @@ void main() {
       expect(decoded.targetBitrateKbps, 3500);
       expect(decoded.targetFps, isNull);
     });
+
+    test('ConnectionRequest round trips through codec', () {
+      final decoded = _roundTrip(
+        codec,
+        const ConnectionRequest(
+          deviceName: "Ahmed's MacBook",
+          timeoutSeconds: 60,
+        ),
+      );
+      expect(decoded.deviceName, "Ahmed's MacBook");
+      expect(decoded.timeoutSeconds, 60);
+    });
+
+    test('ConnectionDecision round trips each answer', () {
+      for (final answer in ConnectionAnswer.values) {
+        final decoded = _roundTrip(codec, ConnectionDecision(answer));
+        expect(decoded.answer, answer);
+        expect(decoded.isAllowed, answer == ConnectionAnswer.allowed);
+      }
+    });
+
+    test('RememberConnection round trips both answers', () {
+      for (final agreed in <bool>[true, false]) {
+        expect(
+          _roundTrip(codec, RememberConnection(agreed: agreed)).agreed,
+          agreed,
+        );
+      }
+    });
+  });
+
+  group('ConnectionAnswer', () {
+    test('an answer this build does not know reads as a refusal', () {
+      // Fail-closed, and the direction is the point: a future build that adds
+      // a reason must never have it read as consent by an older one, because
+      // the message it arrives in is the one that unblocks a session.
+      final frame = Frame(
+        type: MessageType.connectionDecision,
+        sequence: 0,
+        timestampMicros: 0,
+        payload: Uint8List.fromList(<int>[0x7F]),
+      );
+      final decoded = codec.decode(frame) as ConnectionDecision;
+      expect(decoded.isAllowed, isFalse);
+      expect(decoded.answer, ConnectionAnswer.declined);
+    });
   });
 
   group('forward compatibility', () {

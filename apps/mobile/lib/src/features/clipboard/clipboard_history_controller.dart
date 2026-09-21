@@ -96,7 +96,11 @@ final class MobileClipboardHistoryController
   bool setPinned(String id, {required bool pinned}) =>
       _history.setPinned(id, pinned: pinned);
 
-  void remove(String id) => _history.remove(id);
+  ClipboardHistoryEntry? remove(String id) => _history.removeEntry(id);
+
+  void restore(ClipboardHistoryEntry entry) {
+    _history.restoreEntry(entry);
+  }
 
   void clear() => _history.clear();
 

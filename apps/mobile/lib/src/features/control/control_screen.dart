@@ -6,11 +6,13 @@ import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/modern_ui.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
 import '../clipboard/clipboard_controller.dart';
 import '../clipboard/clipboard_history_controller.dart';
+import '../host/host_providers.dart';
 import '../input/touchpad_screen.dart';
 import '../keyboard/keyboard_screen.dart';
 import '../media/media_screen.dart';
@@ -76,7 +78,7 @@ List<ControlTab> visibleTabs(Capabilities? capabilities) => <ControlTab>[
     ];
 
 class _ControlScreenState extends ConsumerState<ControlScreen> {
-  ControlTab _selected = ControlTab.touchpad;
+  ControlTab? _selected;
 
   /// Whether the gesture surface has been given the whole screen.
   ///
@@ -100,9 +102,14 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(clientStateProvider).valueOrNull;
-    final capabilities =
-        ref.watch(clientProvider).valueOrNull?.session?.capabilities;
+    final scheme = Theme.of(context).colorScheme;
+    final rawState = ref.watch(clientStateProvider).valueOrNull;
+    final hasActivePeer = ref.watch(peerLinksProvider).isNotEmpty;
+    final state =
+        hasActivePeer && (rawState == null || rawState == ClientState.idle)
+            ? ClientState.connected
+            : rawState;
+    final capabilities = ref.watch(activeCapabilitiesProvider);
 
     // Two conditions, not one. The capability bit says the desk *can* share its
     // screen; it is advertised per server, not per device, so it says nothing
@@ -124,7 +131,9 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
     // The chosen tab, unless the peer cannot offer it. Connecting to a phone
     // while the touchpad was the last thing open must not leave the selection
     // pointing at a tab that is not there.
-    final current = visible.contains(_selected) ? _selected : visible.first;
+    final current = _selected != null && visible.contains(_selected)
+        ? _selected!
+        : visible.first;
     final onGestureTab = current.isGesture;
 
     final expanded = _immersive && onGestureTab;
@@ -138,10 +147,9 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
         // it means something on — see [_gestureTabs].
         leading: onGestureTab
             ? IconButton(
-                icon: Icon(
-                  expanded
-                      ? Icons.close_fullscreen_rounded
-                      : Icons.open_in_full_rounded,
+                icon: const AppIcon(
+                  AppIcons.zoomOut,
+                  size: 18,
                 ),
                 tooltip: expanded
                     ? 'Show the tabs again'
@@ -173,7 +181,10 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
               ),
             ),
           IconButton(
-            icon: const Icon(Icons.settings_outlined),
+            icon: AppIcon(
+              AppIcons.settings,
+              color: scheme.onSurfaceVariant,
+            ),
             tooltip: 'Settings',
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
@@ -248,28 +259,28 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
 
   static LiquidNavDestination _destinationFor(ControlTab tab) => switch (tab) {
         ControlTab.touchpad => const LiquidNavDestination(
-            icon: Icons.touch_app_outlined,
-            selectedIcon: Icons.touch_app_rounded,
+            icon: AppIcons.handTap,
+            selectedIcon: AppIcons.handTap,
             label: 'Touchpad',
           ),
         ControlTab.keyboard => const LiquidNavDestination(
-            icon: Icons.keyboard_outlined,
-            selectedIcon: Icons.keyboard_rounded,
+            icon: AppIcons.keyboard,
+            selectedIcon: AppIcons.keyboard,
             label: 'Keyboard',
           ),
         ControlTab.media => const LiquidNavDestination(
-            icon: Icons.play_circle_outline_rounded,
-            selectedIcon: Icons.play_circle_rounded,
+            icon: AppIcons.monitorPlay,
+            selectedIcon: AppIcons.monitorPlay,
             label: 'Media',
           ),
         ControlTab.clipboard => const LiquidNavDestination(
-            icon: Icons.content_paste_outlined,
-            selectedIcon: Icons.content_paste_rounded,
+            icon: AppIcons.clipboard,
+            selectedIcon: AppIcons.clipboard,
             label: 'Clipboard',
           ),
         ControlTab.send => const LiquidNavDestination(
-            icon: Icons.send_outlined,
-            selectedIcon: Icons.send_rounded,
+            icon: AppIcons.send,
+            selectedIcon: AppIcons.send,
             label: 'Send',
           ),
       };
@@ -291,7 +302,8 @@ class ClipboardView extends ConsumerWidget {
     final controller = ref.read(clipboardControllerProvider.notifier);
     final clipboardSettings = ref.watch(clipboardSettingsProvider);
     final connected =
-        ref.watch(clientStateProvider).valueOrNull == ClientState.connected;
+        ref.watch(clientStateProvider).valueOrNull == ClientState.connected ||
+            ref.watch(peerLinksProvider).isNotEmpty;
     final syncEnabled =
         clipboardSettings.syncFromDesktop || clipboardSettings.syncToDesktop;
     final scheme = Theme.of(context).colorScheme;
@@ -309,7 +321,7 @@ class ClipboardView extends ConsumerWidget {
                   color: scheme.primary.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: Icon(Icons.sync_rounded, color: scheme.primary),
+                child: AppIcon(AppIcons.files, color: scheme.primary),
               ),
               const SizedBox(width: 13),
               Expanded(
@@ -342,11 +354,11 @@ class ClipboardView extends ConsumerWidget {
             children: <Widget>[
               Row(
                 children: <Widget>[
-                  Icon(
+                  AppIcon(
                     clipboard.fromDesktop
-                        ? Icons.computer_rounded
-                        : Icons.smartphone_rounded,
-                    size: 20,
+                        ? AppIcons.materialMonitorSmartphone
+                        : AppIcons.materialMonitorSmartphone,
+                    size: 18,
                     color: scheme.primary,
                   ),
                   const SizedBox(width: 9),
@@ -355,7 +367,7 @@ class ClipboardView extends ConsumerWidget {
                       clipboard.text == null
                           ? 'Ready to sync'
                           : clipboard.fromDesktop
-                              ? 'From your computer'
+                              ? 'From ${clipboard.sourceName ?? 'your computer'}'
                               : 'From this phone',
                       style: Theme.of(context).textTheme.labelLarge,
                     ),
@@ -410,28 +422,6 @@ class ClipboardView extends ConsumerWidget {
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Icon(
-                Icons.info_outline_rounded,
-                size: 18,
-                color: scheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Computer copies arrive automatically. Sending this phone’s '
-                  'clipboard needs a tap because iOS protects clipboard reads.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ),
-            ],
-          ),
-        ),
         const SizedBox(height: 28),
         const ClipboardHistoryList(),
       ],
@@ -467,25 +457,9 @@ class ClipboardHistoryList extends ConsumerWidget {
               : null,
         ),
         const SizedBox(height: 12),
-        AppSectionCard(
-          padding: EdgeInsets.zero,
-          child: SwitchListTile(
-            value: snapshot.isPersistent,
-            onChanged: (value) => _setPersistence(context, controller, value),
-            title: const Text('Keep history on this phone'),
-            subtitle: Text(
-              snapshot.isPersistent
-                  ? 'Encrypted and saved securely on this device.'
-                  : 'Off — the list is kept in memory and disappears when you '
-                      'close Remote Link.',
-            ),
-            secondary: const Icon(Icons.lock_outline_rounded),
-          ),
-        ),
-        const SizedBox(height: 12),
         if (snapshot.entries.isEmpty)
           const AppEmptyState(
-            icon: Icons.content_paste_search_rounded,
+            icon: AppIcons.materialSettings,
             title: 'Nothing copied yet',
             message: 'Recent items appear here. Anything your password manager '
                 'marks confidential is never recorded.',
@@ -494,35 +468,6 @@ class ClipboardHistoryList extends ConsumerWidget {
           for (final entry in snapshot.entries)
             _HistoryTile(entry: entry, controller: controller),
       ],
-    );
-  }
-
-  Future<void> _setPersistence(
-    BuildContext context,
-    MobileClipboardHistoryController controller,
-    bool enabled,
-  ) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final applied = await controller.setPersistenceEnabled(enabled: enabled);
-    if (!applied) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text(
-            'This phone’s secure storage is unavailable, so history stays in '
-            'memory only.',
-          ),
-        ),
-      );
-      return;
-    }
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          enabled
-              ? 'History will be kept on this phone, encrypted.'
-              : 'Saved history deleted. Keeping it in memory only.',
-        ),
-      ),
     );
   }
 }
@@ -548,15 +493,18 @@ class _HistoryTile extends StatelessWidget {
             color: scheme.primary.withValues(alpha: 0.09),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(
-            switch (entry.kind) {
-              ClipboardHistoryKind.image => Icons.image_outlined,
-              ClipboardHistoryKind.url => Icons.link_rounded,
-              ClipboardHistoryKind.html => Icons.code_rounded,
-              ClipboardHistoryKind.text => Icons.notes_rounded,
-            },
-            size: 20,
-            color: scheme.primary,
+          child: Transform.scale(
+            scale: entry.kind == ClipboardHistoryKind.text ? 0.6 : 1,
+            child: AppIcon(
+              switch (entry.kind) {
+                ClipboardHistoryKind.image => AppIcons.gallery,
+                ClipboardHistoryKind.url => AppIcons.materialSettings,
+                ClipboardHistoryKind.html => AppIcons.materialSettings,
+                ClipboardHistoryKind.text => AppIcons.paragraph,
+              },
+              size: 20,
+              color: scheme.primary,
+            ),
           ),
         ),
         title: Text(
@@ -569,15 +517,32 @@ class _HistoryTile extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             IconButton(
-              icon:
-                  Icon(entry.pinned ? Icons.push_pin : Icons.push_pin_outlined),
+              icon: AppIcon(
+                entry.pinned
+                    ? AppIcons.materialPinFilled
+                    : AppIcons.materialPin,
+                size: 18,
+                color: entry.pinned ? scheme.primary : scheme.onSurfaceVariant,
+              ),
               tooltip: entry.pinned ? 'Unpin' : 'Pin',
               onPressed: () => _togglePin(context),
             ),
             IconButton(
-              icon: const Icon(Icons.delete_outline_rounded),
+              icon: AppIcon(
+                AppIcons.delete,
+                size: 18,
+                color: scheme.error,
+              ),
               tooltip: 'Remove',
-              onPressed: () => controller.remove(entry.id),
+              onPressed: () {
+                final removed = controller.remove(entry.id);
+                if (removed == null) return;
+                showBottomUndoSnackBar(
+                  context,
+                  message: 'Deleted from history',
+                  onUndo: () => controller.restore(removed),
+                );
+              },
             ),
           ],
         ),
@@ -629,6 +594,7 @@ class _ConnectionTitle extends StatelessWidget {
       ClientState.reconnecting => (scheme.tertiary, 'Reconnecting'),
       ClientState.connecting => (scheme.tertiary, 'Connecting'),
       ClientState.pairing => (scheme.tertiary, 'Pairing'),
+      ClientState.awaitingApproval => (scheme.tertiary, 'Waiting to be let in'),
       ClientState.failed => (scheme.error, 'Connection failed'),
       _ => (scheme.outline, 'Not connected'),
     };
@@ -680,6 +646,11 @@ class _ConnectionBar extends StatelessWidget {
       ClientState.reconnecting => (scheme.tertiary, true, 'Reconnecting'),
       ClientState.connecting => (scheme.tertiary, true, 'Connecting'),
       ClientState.pairing => (scheme.tertiary, true, 'Pairing'),
+      ClientState.awaitingApproval => (
+          scheme.tertiary,
+          true,
+          'Waiting to be let in'
+        ),
       ClientState.failed => (scheme.error, false, 'Connection failed'),
       _ => (scheme.surfaceContainerHighest, false, 'Not connected'),
     };
@@ -759,9 +730,9 @@ class SystemStatusStrip extends ConsumerWidget {
           children: <Widget>[
             if (hasBattery)
               _StatusChip(
-                icon: isCharging
-                    ? Icons.battery_charging_full
-                    : Icons.battery_full,
+                icon: Icon(
+                  isCharging ? Icons.battery_charging_full : Icons.battery_full,
+                ),
                 iconColor: isCharging
                     ? colorScheme.primary
                     : colorScheme.onSurfaceVariant,
@@ -774,7 +745,7 @@ class SystemStatusStrip extends ConsumerWidget {
               ),
             if (hasCpu)
               _StatusChip(
-                icon: Icons.memory,
+                icon: const Icon(Icons.memory),
                 iconColor: colorScheme.onSurfaceVariant,
                 label: 'CPU ${status.cpuPercent!.toStringAsFixed(0)}%',
                 semanticLabel: 'Processor '
@@ -782,7 +753,7 @@ class SystemStatusStrip extends ConsumerWidget {
               ),
             if (hasMemory)
               _StatusChip(
-                icon: Icons.pie_chart_outline,
+                icon: const Icon(Icons.pie_chart_outline),
                 iconColor: colorScheme.onSurfaceVariant,
                 label: 'RAM ${status.memoryPercent!.toStringAsFixed(0)}%',
                 semanticLabel: 'Memory '
@@ -790,7 +761,7 @@ class SystemStatusStrip extends ConsumerWidget {
               ),
             if (hasUptime)
               _StatusChip(
-                icon: Icons.schedule,
+                icon: const Icon(Icons.schedule),
                 iconColor: colorScheme.onSurfaceVariant,
                 label: _formatUptime(status.uptimeSeconds),
                 semanticLabel: 'Up ${_formatUptime(status.uptimeSeconds)}',
@@ -829,7 +800,7 @@ class _StatusChip extends StatelessWidget {
     required this.semanticLabel,
   });
 
-  final IconData icon;
+  final Widget icon;
   final Color iconColor;
   final String label;
 
@@ -850,7 +821,10 @@ class _StatusChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(icon, size: 14, color: iconColor),
+          IconTheme.merge(
+            data: IconThemeData(size: 14, color: iconColor),
+            child: icon,
+          ),
           const SizedBox(width: 4),
           // Shrinks rather than overflowing. The strip is a single row of four
           // chips: at a large text size the row was wider than the phone, and

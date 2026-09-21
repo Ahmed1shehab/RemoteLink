@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'app_icons.dart';
 
 import 'motion.dart';
 import 'theme.dart';
@@ -15,8 +16,8 @@ class LiquidNavDestination {
     required this.label,
   });
 
-  final IconData icon;
-  final IconData selectedIcon;
+  final AppIconData icon;
+  final AppIconData selectedIcon;
   final String label;
 }
 
@@ -118,6 +119,34 @@ class LiquidNavigationBar extends StatelessWidget {
   }
 }
 
+/// Shows a reversible destructive-action confirmation above the floating tab
+/// bar rather than covering it or appearing at the top of the screen.
+void showBottomUndoSnackBar(
+  BuildContext context, {
+  required String message,
+  required VoidCallback onUndo,
+}) {
+  final messenger = ScaffoldMessenger.of(context);
+  final scheme = Theme.of(context).colorScheme;
+  messenger.hideCurrentSnackBar();
+  messenger.showSnackBar(
+    SnackBar(
+      behavior: SnackBarBehavior.floating,
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+      backgroundColor: scheme.inverseSurface,
+      content: Text(
+        message,
+        style: TextStyle(color: scheme.onInverseSurface),
+      ),
+      action: SnackBarAction(
+        label: 'Undo',
+        textColor: scheme.inversePrimary,
+        onPressed: onUndo,
+      ),
+    ),
+  );
+}
+
 class _LiquidDestination extends StatelessWidget {
   const _LiquidDestination({
     required this.destination,
@@ -165,7 +194,7 @@ class _LiquidDestination extends StatelessWidget {
                 ),
                 child: AnimatedSwitcher(
                   duration: duration,
-                  child: Icon(
+                  child: AppIcon(
                     selected ? destination.selectedIcon : destination.icon,
                     key: ValueKey<bool>(selected),
                     size: 22,
@@ -287,7 +316,7 @@ class AppEmptyState extends StatelessWidget {
     super.key,
   });
 
-  final IconData icon;
+  final AppIconData icon;
   final String title;
   final String message;
 
@@ -306,7 +335,7 @@ class AppEmptyState extends StatelessWidget {
                 color: scheme.primary.withValues(alpha: 0.10),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, color: scheme.primary),
+              child: AppIcon(icon, color: scheme.primary),
             ),
             const SizedBox(height: 14),
             Text(title, style: Theme.of(context).textTheme.titleSmall),

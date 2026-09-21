@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/motion.dart';
 import '../pairing/pairing_code.dart';
 import '../transfer/transfer_controller.dart';
@@ -10,29 +11,45 @@ import '../transfer/transfer_model.dart';
 import 'host_providers.dart';
 import 'phone_host_service.dart';
 
-/// The two questions another device can ask this phone, wherever the user is.
+/// The questions another device can ask this phone, wherever the user is.
 ///
-/// Both used to be asked by the Send tab, which meant they were asked only when
-/// the user happened to be looking at it. A file offer that arrived while the
-/// touchpad was open produced nothing at all — no sheet, no badge, no sound —
-/// and the sender watched a transfer sit at "offered" until it timed out. A
-/// device knocking to pair had nowhere to appear at all, because until this
-/// release nothing could knock.
+/// Pairing and file offers used to be asked by the Send tab, which meant they
+/// were asked only when the user happened to be looking at it. A file offer
+/// that arrived while the touchpad was open produced nothing at all — no sheet,
+/// no badge, no sound — and the sender watched a transfer sit at "offered"
+/// until it timed out. A device knocking to pair had nowhere to appear at all,
+/// because until this release nothing could knock.
 ///
 /// So the prompts moved to the root, next to the share listener, for the same
 /// reason that one lives there: an event that arrives from outside the app does
 /// not wait for the right screen to be open.
 ///
-/// One at a time, and in that order. Pairing first because it is the question
-/// underneath — a device that has not been let in cannot offer anything — and
-/// two sheets stacked on one another is how a user ends up approving the one
-/// they did not read.
+/// One at a time, and in that order: pair, allow, accept. Each is the question
+/// underneath the next — a device that has not been let in cannot offer
+/// anything — and two sheets stacked on one another is how a user ends up
+/// approving the one they did not read.
 void listenForNearbyPrompts(
   WidgetRef ref,
   GlobalKey<NavigatorState> navigator,
 ) {
   ref.listen<AsyncValue<List<PendingInboundPairing>>>(
     inboundPairingsProvider,
+    (previous, next) {
+      if (next.valueOrNull?.isEmpty ?? true) return;
+      unawaited(_drain(ref, navigator));
+    },
+  );
+
+  ref.listen<AsyncValue<List<PendingInboundConnection>>>(
+    inboundConnectionsProvider,
+    (previous, next) {
+      if (next.valueOrNull?.isEmpty ?? true) return;
+      unawaited(_drain(ref, navigator));
+    },
+  );
+
+  ref.listen<AsyncValue<List<PendingInboundRemember>>>(
+    inboundRememberProvider,
     (previous, next) {
       if (next.valueOrNull?.isEmpty ?? true) return;
       unawaited(_drain(ref, navigator));
@@ -92,9 +109,30 @@ Future<void> _drain(WidgetRef ref, GlobalKey<NavigatorState> navigator) async {
         continue;
       }
 
+      // Then a paired device asking to come in. Above transfers for the same
+      // reason pairing is above both: a device that has not been let in cannot
+      // have offered anything, so answering this first is the only order in
+      // which the questions make sense.
+      final waiting =
+          ref.read(inboundConnectionsProvider).valueOrNull?.firstOrNull;
+      if (waiting != null) {
+        await _askToAllow(ref, navigator, waiting);
+        continue;
+      }
+
       final offered = ref.read(transferControllerProvider).pendingIncoming;
       if (offered != null) {
         await _askToAccept(ref, navigator, offered);
+        continue;
+      }
+
+      // Last, and deliberately so. It is the only question here that nothing
+      // is waiting on: the device is already connected, and the answer changes
+      // what happens next time rather than what happens now.
+      final connected =
+          ref.read(inboundRememberProvider).valueOrNull?.firstOrNull;
+      if (connected != null) {
+        await _askToRemember(ref, navigator, connected);
         continue;
       }
 
@@ -142,6 +180,44 @@ Future<void> _askToPair(
   }
 }
 
+/// Asks whether to let a device this phone already trusts connect now.
+Future<void> _askToAllow(
+  WidgetRef ref,
+  GlobalKey<NavigatorState> navigator,
+  PendingInboundConnection request,
+) async {
+  final allowed = await _showPrompt<bool>(
+    navigator,
+    (context) => _ConnectionPrompt(request: request),
+  );
+
+  final service = await ref.read(phoneHostServiceProvider.future);
+  if (allowed ?? false) {
+    await service.approveConnection(request);
+  } else {
+    await service.declineConnection(request);
+  }
+}
+
+/// Asks whether this phone should stop being asked about a connected device.
+///
+/// Both ends see their own copy of this and both have to agree — the reasoning
+/// is on `RememberConnection`. A dismissed sheet is a no, like the others here,
+/// and a no simply means being asked again next time.
+Future<void> _askToRemember(
+  WidgetRef ref,
+  GlobalKey<NavigatorState> navigator,
+  PendingInboundRemember request,
+) async {
+  final agreed = await _showPrompt<bool>(
+    navigator,
+    (context) => _RememberPrompt(request: request),
+  );
+
+  final service = await ref.read(phoneHostServiceProvider.future);
+  await service.answerRemember(request, agreed: agreed ?? false);
+}
+
 /// Asks whether to take what a paired device is offering.
 Future<void> _askToAccept(
   WidgetRef ref,
@@ -173,7 +249,7 @@ class _PairingPrompt extends StatelessWidget {
     final text = Theme.of(context).textTheme;
 
     return _PromptFrame(
-      icon: Icons.link_rounded,
+      icon: AppIcons.settings,
       title: 'A device wants to connect',
       // The device id, not a name it sent. A name is the one thing an unpaired
       // stranger controls completely, and rendering "Ahmed's iPhone" above a
@@ -203,6 +279,84 @@ class _PairingPrompt extends StatelessWidget {
   }
 }
 
+/// The sheet a paired device asking to reconnect puts up.
+///
+/// No six digits, unlike [_PairingPrompt], and their absence is deliberate:
+/// the handshake has already verified this device against the key stored when
+/// it paired, so there is nothing here the user could usefully compare. A code
+/// they cannot check is a code they learn to approve.
+class _ConnectionPrompt extends StatelessWidget {
+  const _ConnectionPrompt({required this.request});
+
+  final PendingInboundConnection request;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+
+    return _PromptFrame(
+      icon: AppIcons.settings,
+      title: 'Allow this device to connect?',
+      // The stored name, which is the one the user chose when they paired.
+      subtitle: request.peerName,
+      body: <Widget>[
+        Text(
+          'You have paired with it before, so its identity is already '
+          'checked. This is only about now — allow it if the device is in '
+          'your hands, and turn it away if it is not.',
+          textAlign: TextAlign.center,
+          style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'You will not be asked about it again until Remote Link restarts.',
+          textAlign: TextAlign.center,
+          style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+      ],
+      declineLabel: 'Not now',
+      acceptLabel: 'Allow',
+    );
+  }
+}
+
+/// The sheet that asks whether to remember a connected device.
+class _RememberPrompt extends StatelessWidget {
+  const _RememberPrompt({required this.request});
+
+  final PendingInboundRemember request;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+
+    return _PromptFrame(
+      icon: AppIcons.settings,
+      title: 'Remember this connection?',
+      subtitle: request.peerName,
+      body: <Widget>[
+        Text(
+          'Remote Link can let ${request.peerName} straight in next time — '
+          'no code to scan, and nobody asked to allow it.',
+          textAlign: TextAlign.center,
+          style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          '${request.peerName} is being asked the same thing. Both devices '
+          'have to agree, and either one can change its mind later.',
+          textAlign: TextAlign.center,
+          style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+      ],
+      declineLabel: 'Not now',
+      acceptLabel: 'Remember',
+    );
+  }
+}
+
 /// The sheet an incoming transfer puts up.
 class _IncomingPrompt extends StatelessWidget {
   const _IncomingPrompt({required this.request});
@@ -217,7 +371,7 @@ class _IncomingPrompt extends StatelessWidget {
     final count = files.length;
 
     return _PromptFrame(
-      icon: Icons.download_rounded,
+      icon: AppIcons.receive,
       title: count == 1 ? 'Incoming file' : 'Incoming files',
       subtitle: '${request.peerName} · ${formatBytes(request.totalBytes)}',
       body: <Widget>[
@@ -228,8 +382,8 @@ class _IncomingPrompt extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 6),
             child: Row(
               children: <Widget>[
-                Icon(
-                  Icons.insert_drive_file_outlined,
+                AppIcon(
+                  AppIcons.files,
                   size: 18,
                   color: scheme.onSurfaceVariant,
                 ),
@@ -288,7 +442,7 @@ class _PromptFrame extends StatelessWidget {
     required this.acceptLabel,
   });
 
-  final IconData icon;
+  final AppIconData icon;
   final String title;
   final String subtitle;
   final List<Widget> body;
@@ -317,7 +471,7 @@ class _PromptFrame extends StatelessWidget {
                 color: scheme.primary.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, color: scheme.primary, size: 28),
+              child: AppIcon(icon, color: scheme.primary, size: 28),
             ),
             const SizedBox(height: 16),
             Text(title, style: text.titleLarge, textAlign: TextAlign.center),

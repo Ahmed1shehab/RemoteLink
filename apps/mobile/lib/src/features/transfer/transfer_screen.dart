@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/modern_ui.dart';
 import '../../app/theme.dart';
 import '../host/host_providers.dart';
@@ -90,7 +91,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
                   const SizedBox(height: 14),
                   _PickedList(
                     picked: _picked,
-                    onRemove: (file) => setState(() => _picked.remove(file)),
+                    onRemove: _removePicked,
                     onClear: () => setState(_picked.clear),
                   ),
                 ],
@@ -113,16 +114,13 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
           ),
         ),
         const SizedBox(height: 28),
-        AppSectionTitle(
+        const AppSectionTitle(
           title: 'Transfers',
-          subtitle: transferState.transfers.isEmpty
-              ? 'Your recent activity appears here'
-              : '${transferState.transfers.length} recent',
         ),
         const SizedBox(height: 12),
         if (transferState.transfers.isEmpty)
           const AppEmptyState(
-            icon: Icons.swap_vert_rounded,
+            icon: AppIcons.materialSwapVert,
             title: 'No transfers yet',
             message: 'Anything you send or receive will stay visible here.',
           )
@@ -132,7 +130,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
               transfer: transfer,
               onCancel: () => controller.cancelTransfer(transfer.transferId),
               onRetry: () => _retryTransfer(controller, transfer.transferId),
-              onDelete: () => controller.removeTransfer(transfer.transferId),
+              onDelete: () => _deleteTransfer(controller, transfer),
             ),
       ],
     );
@@ -184,6 +182,21 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     } finally {
       if (mounted) setState(() => _isPicking = false);
     }
+  }
+
+  void _removePicked(PickedFile file) {
+    final index = _picked.indexOf(file);
+    if (index == -1) return;
+    setState(() => _picked.removeAt(index));
+    showBottomUndoSnackBar(
+      context,
+      message: 'Deleted from selection',
+      onUndo: () {
+        if (!mounted) return;
+        final restoreAt = index > _picked.length ? _picked.length : index;
+        setState(() => _picked.insert(restoreAt, file));
+      },
+    );
   }
 
   Future<void> _send(
@@ -257,6 +270,19 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
       );
     }
   }
+
+  void _deleteTransfer(
+    MobileTransferController controller,
+    TransferRecord transfer,
+  ) {
+    final removed = controller.removeTransfer(transfer.transferId);
+    if (removed == null || !mounted) return;
+    showBottomUndoSnackBar(
+      context,
+      message: 'Transfer deleted',
+      onUndo: () => controller.restoreTransfer(removed),
+    );
+  }
 }
 
 /// The card's heading, which says what the card will do to what.
@@ -291,7 +317,7 @@ class _SendHeader extends StatelessWidget {
             color: scheme.primary.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(14),
           ),
-          child: Icon(Icons.near_me_rounded, color: scheme.primary),
+          child: AppIcon(AppIcons.materialNearMe, color: scheme.primary),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -379,10 +405,10 @@ class _DestinationPicker extends StatelessWidget {
             ChoiceChip(
               selected: link.id == selectedId,
               onSelected: (_) => onSelected(link.id),
-              avatar: Icon(
+              avatar: AppIcon(
                 link.isHandheld
-                    ? Icons.smartphone_rounded
-                    : Icons.laptop_mac_rounded,
+                    ? AppIcons.monitorSmartphone
+                    : AppIcons.monitorSmartphone,
                 size: 18,
               ),
               label: Text(link.name),
@@ -439,7 +465,7 @@ class _SourceButtons extends StatelessWidget {
                 // "Photos" it undersold itself — someone wanting to send a
                 // clip read the two buttons, saw neither offered video, and
                 // went to Files, where the camera roll is not.
-                : const Icon(Icons.perm_media_outlined),
+                : const AppIcon(AppIcons.gallery),
             label: Text(hasPicked ? 'Add media' : 'Media'),
           ),
         ),
@@ -448,7 +474,7 @@ class _SourceButtons extends StatelessWidget {
           child: OutlinedButton.icon(
             style: style,
             onPressed: isPicking ? null : () => unawaited(onPickFiles()),
-            icon: const Icon(Icons.folder_copy_outlined),
+            icon: const AppIcon(AppIcons.clipboard),
             label: Text(hasPicked ? 'Add files' : 'Files'),
           ),
         ),
@@ -523,7 +549,7 @@ class _PickedList extends StatelessWidget {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.delete_outline_rounded, size: 21),
+                  icon: const AppIcon(AppIcons.delete, size: 21),
                   tooltip: 'Remove ${file.displayName}',
                   onPressed: () => onRemove(file),
                   color: scheme.error,
@@ -568,7 +594,7 @@ class _SendProblem extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(Icons.error_outline_rounded, color: scheme.error, size: 18),
+          AppIcon(AppIcons.settings, color: scheme.error, size: 18),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -584,7 +610,7 @@ class _SendProblem extends StatelessWidget {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.close_rounded, size: 18),
+            icon: const AppIcon(AppIcons.settings, size: 18),
             tooltip: 'Dismiss',
             onPressed: onDismiss,
             color: scheme.onErrorContainer,
@@ -621,23 +647,15 @@ class _SendButton extends StatelessWidget {
       _ => null,
     };
 
-    final label = switch ((target, count)) {
-      (final PeerLink link?, 0) => 'Send to ${link.name}',
-      (final PeerLink link?, 1) => 'Send 1 item to ${link.name}',
-      (final PeerLink link?, final n) => 'Send $n items to ${link.name}',
-      _ => 'Send',
-    };
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        FilledButton.icon(
+        FilledButton(
           style: FilledButton.styleFrom(
             minimumSize: const Size.fromHeight(52),
           ),
           onPressed: blocked == null ? onSend : null,
-          icon: const Icon(Icons.arrow_upward_rounded),
-          label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+          child: const Text('Send'),
         ),
         if (blocked != null) ...<Widget>[
           const SizedBox(height: 8),
@@ -677,8 +695,8 @@ class _PickedThumbnail extends StatelessWidget {
         // Chosen per file rather than from whichever picker opened it. The
         // two pickers can now contribute to one send, so "this came from the
         // media button" no longer says anything about what it is.
-        fallback: Icon(
-          previewable ? Icons.image_outlined : Icons.description_outlined,
+        fallback: AppIcon(
+          previewable ? AppIcons.gallery : AppIcons.files,
           size: 20,
           color: scheme.primary,
         ),
@@ -737,10 +755,10 @@ class _TransferCard extends StatelessWidget {
                   color: scheme.primary.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(13),
                 ),
-                child: Icon(
+                child: AppIcon(
                   isIncoming
-                      ? Icons.arrow_downward_rounded
-                      : Icons.arrow_upward_rounded,
+                      ? AppIcons.materialArrowDown
+                      : AppIcons.materialArrowUp,
                   size: 21,
                   color: scheme.primary,
                 ),
@@ -769,9 +787,9 @@ class _TransferCard extends StatelessWidget {
                 const SizedBox(width: 2),
                 IconButton(
                   onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outline_rounded, size: 21),
+                  icon: const AppIcon(AppIcons.delete, size: 21),
                   tooltip: 'Delete transfer',
-                  color: scheme.onSurfaceVariant,
+                  color: scheme.error,
                 ),
               ],
             ],
@@ -809,14 +827,14 @@ class _TransferCard extends StatelessWidget {
               if (transfer.canCancel)
                 IconButton(
                   onPressed: onCancel,
-                  icon: const Icon(Icons.close_rounded, size: 20),
+                  icon: const AppIcon(AppIcons.settings, size: 20),
                   tooltip: 'Cancel',
                   color: scheme.error,
                 ),
               if (transfer.canRetry)
                 FilledButton.icon(
                   onPressed: onRetry,
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  icon: const AppIcon(AppIcons.settings, size: 18),
                   label: const Text('Retry'),
                 ),
             ],
@@ -930,8 +948,8 @@ class _TransferFileRow extends StatelessWidget {
               Expanded(child: name),
               const SizedBox(width: 6),
               // Says which of the two things a tap will do before it happens.
-              Icon(
-                _isImage ? Icons.zoom_out_map_rounded : Icons.ios_share_rounded,
+              AppIcon(
+                _isImage ? AppIcons.zoomOut : AppIcons.materialArrowUp,
                 size: 16,
                 color: scheme.primary,
               ),

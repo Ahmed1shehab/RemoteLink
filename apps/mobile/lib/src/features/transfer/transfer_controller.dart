@@ -974,10 +974,10 @@ class MobileTransferController extends StateNotifier<TransferState> {
   ///
   /// Active transfers must be cancelled first so deleting a row can never
   /// leave network work running without any visible status or escape route.
-  void removeTransfer(String transferId) {
+  TransferRecord? removeTransfer(String transferId) {
     final record =
         state.transfers.where((t) => t.transferId == transferId).firstOrNull;
-    if (record == null || record.isActive) return;
+    if (record == null || record.isActive) return null;
 
     _outgoingOffers.remove(transferId);
     _outgoingSources.remove(transferId);
@@ -987,6 +987,18 @@ class MobileTransferController extends StateNotifier<TransferState> {
       transfers: state.transfers
           .where((transfer) => transfer.transferId != transferId)
           .toList(growable: false),
+    );
+    return record;
+  }
+
+  void restoreTransfer(TransferRecord record) {
+    if (record.isActive ||
+        state.transfers
+            .any((transfer) => transfer.transferId == record.transferId)) {
+      return;
+    }
+    state = state.copyWith(
+      transfers: <TransferRecord>[record, ...state.transfers],
     );
   }
 
