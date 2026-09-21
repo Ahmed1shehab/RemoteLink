@@ -77,7 +77,7 @@ void main() {
     final resolved = await destination.resolveSymbolicLinks();
     expect(
       store.committedPath(transferId: offer.transferId, fileId: 'file-1'),
-      '$resolved/report (2).bin',
+      '$resolved${Platform.pathSeparator}report (2).bin',
     );
     expect(
       store.committedPath(transferId: offer.transferId, fileId: 'file-2'),
