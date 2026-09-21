@@ -328,5 +328,19 @@ void main() {
       await sub.cancel();
       await history.dispose();
     });
+
+    test('snapshots hoist pinned entries for the history UI', () async {
+      final history = ClipboardHistory(clock: FakeClock());
+      final older = _record(history, 'keep this')!;
+      _record(history, 'show this below');
+
+      expect(history.setPinned(older.id, pinned: true), isTrue);
+      expect(
+        history.snapshot.entries.map((entry) => entry.text),
+        equals(<String>['keep this', 'show this below']),
+      );
+
+      await history.dispose();
+    });
   });
 }

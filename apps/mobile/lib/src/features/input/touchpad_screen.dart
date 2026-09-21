@@ -1,5 +1,9 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
+// `show` rather than a bare import: `dart:ui` also declares Offset, Size and
+// Color, and importing it whole shadows the ones material re-exports.
+import 'dart:ui' show PointMode;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,10 +11,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import '../settings/settings_screen.dart';
 import 'pointer_controller.dart';
+import 'sensitivity_tutorial_dialog.dart';
 
 /// The main control surface: the whole screen is a trackpad.
 ///
@@ -22,16 +29,28 @@ import 'pointer_controller.dart';
 /// has no competitors. `Listener` delivers raw pointer events immediately, and
 /// the multi-touch logic below does the disambiguation itself.
 class TouchpadSurfaceView extends ConsumerStatefulWidget {
-  const TouchpadSurfaceView({super.key});
+  const TouchpadSurfaceView({this.immersive = false, super.key});
+
+  /// Whether the surface has the screen to itself.
+  ///
+  /// Set by [ControlScreen] when the user expands the gesture area: the tab
+  /// bar and the host status strip are gone, so the box can run closer to the
+  /// edges and the click row can shed the padding it needed to clear the
+  /// floating navigation.
+  final bool immersive;
 
   @override
   ConsumerState<TouchpadSurfaceView> createState() =>
       _TouchpadSurfaceViewState();
 }
 
-class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
+class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
+    with SingleTickerProviderStateMixin {
   final PointerController _pointer = PointerController();
   final TapRecogniser _taps = TapRecogniser();
+
+  late final _TouchGlowController _glowController;
+  late final AnimationController _fadeController;
 
   /// Active pointers, keyed by device id, so finger count is always exact.
   final Map<int, Offset> _pointers = <int, Offset>{};
@@ -50,6 +69,19 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
 
   bool _dragging = false;
 
+  /// Whether the surface is showing what its gestures do.
+  ///
+  /// Visible until the first touch, then gone: the instructions are for the
+  /// first session, and after that they are three lines of text under the
+  /// user's thumb. They come back after [_hintDelay] of stillness, which is
+  /// long enough not to flicker between gestures and short enough that picking
+  /// the phone up later finds them again. The same words are in this surface's
+  /// semantics hint the whole time, so nothing is lost while they are hidden.
+  bool _hintVisible = true;
+  Timer? _hintTimer;
+
+  static const Duration _hintDelay = Duration(seconds: 6);
+
   /// Whether the explicit cursor controls are showing.
   ///
   /// `null` means "follow the platform": open when a screen reader is running,
@@ -64,6 +96,28 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
   // Continuous gesture tracking for scale / zoom and rotation.
   double? _lastSpan;
   double? _lastAngle;
+
+  /// The distance and angle between the two fingers when they went down.
+  ///
+  /// Measured against the start of the gesture rather than the previous frame,
+  /// because a frame-to-frame comparison cannot tell a pinch from the ordinary
+  /// wobble of two fingers dragging together: at 120 Hz the span between them
+  /// changes by a percent or two constantly, which is enough to trip any
+  /// per-frame threshold small enough to catch a real pinch early.
+  double? _spanAtStart;
+  double? _angleAtStart;
+
+  /// How far the fingers have travelled since the pair went down.
+  ///
+  /// A pinch is recognised only when the change in span beats this, which is
+  /// what separates "the fingers moved apart" from "the fingers moved across
+  /// the glass and drifted slightly apart on the way".
+  double _twoFingerTravel = 0;
+
+  /// Latched once the pair is scrolling, so span wobble cannot convert a
+  /// scroll that is already underway into a zoom halfway down the page.
+  bool _isTwoFingerScrolling = false;
+
   bool _isZooming = false;
   bool _isRotating = false;
   DateTime _lastZoomTime = DateTime.fromMicrosecondsSinceEpoch(0);
@@ -75,9 +129,37 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
   bool _swipeDispatched = false;
 
   @override
+  void initState() {
+    super.initState();
+    _glowController = _TouchGlowController();
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 180),
+    );
+    _glowController.attachAnimationController(_fadeController);
+  }
+
+  @override
   void dispose() {
+    _hintTimer?.cancel();
     _taps.reset();
+    _fadeController.dispose();
+    _glowController.dispose();
     super.dispose();
+  }
+
+  /// Hides the hint for the duration of a gesture.
+  void _hideHint() {
+    _hintTimer?.cancel();
+    if (_hintVisible) setState(() => _hintVisible = false);
+  }
+
+  /// Starts the countdown that brings the hint back once the glass is quiet.
+  void _restoreHintLater() {
+    _hintTimer?.cancel();
+    _hintTimer = Timer(_hintDelay, () {
+      if (mounted) setState(() => _hintVisible = true);
+    });
   }
 
   Future<void> _send(Message message) async {
@@ -92,6 +174,8 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
 
   void _onPointerDown(PointerDownEvent event) {
     _pointers[event.pointer] = event.localPosition;
+    _glowController.onPointerDown(event.pointer, event.localPosition);
+    _hideHint();
     _peakFingers =
         _pointers.length > _peakFingers ? _pointers.length : _peakFingers;
 
@@ -107,12 +191,17 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
           ) *
           180 /
           math.pi;
+      _spanAtStart = _lastSpan;
+      _angleAtStart = _lastAngle;
+      _twoFingerTravel = 0;
+      _isTwoFingerScrolling = false;
     }
   }
 
   void _onPointerMove(PointerMoveEvent event) {
     _pointers[event.pointer] = event.localPosition;
     _travelled += event.delta.distance;
+    _glowController.onPointerMove(event.pointer, event.localPosition);
 
     final settings = ref.read(pointerSettingsProvider);
     _pointer.settings = settings;
@@ -151,73 +240,114 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
           180 /
           math.pi;
 
+      final previousSpan = _lastSpan ?? currentSpan;
+      final previousAngle = _lastAngle ?? currentAngle;
+      // Updated on every frame, including the frames that scroll. Leaving them
+      // behind on the scroll path was the bug this arbitration replaces: the
+      // span kept being compared against the touch-down measurement, so the
+      // slow drift of a long two-finger drag eventually crossed the pinch
+      // threshold and the rest of the gesture became a zoom nobody asked for.
+      _lastSpan = currentSpan;
+      _lastAngle = currentAngle;
+      _twoFingerTravel += event.delta.distance;
+
       final capabilities =
           ref.read(clientProvider).valueOrNull?.session?.capabilities;
       final gesturesAvailable =
           capabilities?.has(Capabilities.gestures) ?? false;
 
-      if (gesturesAvailable && _lastSpan != null && _lastSpan! > 0) {
-        final spanDelta = (currentSpan - _lastSpan!) / _lastSpan!;
-        var angleDelta = currentAngle - (_lastAngle ?? currentAngle);
-        while (angleDelta < -180) {
-          angleDelta += 360;
-        }
-        while (angleDelta > 180) {
-          angleDelta -= 360;
-        }
-
-        // Scale / Zoom gesture detection
-        if (_isZooming || (!_isRotating && spanDelta.abs() > 0.03)) {
-          final now = DateTime.now();
-          if (!_isZooming) {
-            _isZooming = true;
-            _lastZoomTime = now;
-            unawaitedSend(
-              GestureZoom(
-                magnificationDelta: spanDelta,
-                phase: GesturePhase.began,
-              ),
-            );
-          } else if (now.difference(_lastZoomTime).inMicroseconds >= 8333) {
-            // Rate limit to at most 120 Hz (~8.33 ms)
-            _lastZoomTime = now;
-            unawaitedSend(
-              GestureZoom(
-                magnificationDelta: spanDelta,
-                phase: GesturePhase.changed,
-              ),
-            );
-          }
-          _lastSpan = currentSpan;
-          return;
-        }
-
-        // Rotation gesture detection
-        if (_isRotating || (!_isZooming && angleDelta.abs() > 3.0)) {
-          final now = DateTime.now();
-          if (!_isRotating) {
-            _isRotating = true;
-            _lastRotateTime = now;
-            unawaitedSend(
-              GestureRotate(
-                degreesDelta: angleDelta,
-                phase: GesturePhase.began,
-              ),
-            );
-          } else if (now.difference(_lastRotateTime).inMicroseconds >= 8333) {
-            // Rate limit to at most 120 Hz
-            _lastRotateTime = now;
-            unawaitedSend(
-              GestureRotate(
-                degreesDelta: angleDelta,
-                phase: GesturePhase.changed,
-              ),
-            );
-          }
-          _lastAngle = currentAngle;
-          return;
-        }
+      // Measured from the start of the gesture, so the test is "have the
+      // fingers ended up further apart" rather than "did they jitter".
+      final spanChange = currentSpan - (_spanAtStart ?? currentSpan);
+      var angleChange = currentAngle - (_angleAtStart ?? currentAngle);
+      while (angleChange < -180) {
+        angleChange += 360;
       }
+      while (angleChange > 180) {
+        angleChange -= 360;
+      }
+
+      // How far apart the fingers must end up before this counts as a pinch,
+      // and how much of the total movement that has to be. A scroll drags both
+      // fingers the same way, so its span barely changes however far it goes; a
+      // pinch is nearly all span change.
+      const pinchDistance = 24.0;
+      const pinchShare = 0.5;
+      const rotationDegrees = 12.0;
+      // Enough movement to be sure the pair is dragging rather than settling.
+      const scrollStart = 6.0;
+
+      final pinching = gesturesAvailable &&
+          !_isRotating &&
+          !_isTwoFingerScrolling &&
+          spanChange.abs() > pinchDistance &&
+          spanChange.abs() > _twoFingerTravel * pinchShare;
+
+      if (_isZooming || pinching) {
+        final now = DateTime.now();
+        final spanDelta = previousSpan > 0
+            ? (currentSpan - previousSpan) / previousSpan
+            : 0.0;
+        if (!_isZooming) {
+          _isZooming = true;
+          _lastZoomTime = now;
+          unawaitedSend(
+            GestureZoom(
+              magnificationDelta: spanDelta,
+              phase: GesturePhase.began,
+            ),
+          );
+        } else if (now.difference(_lastZoomTime).inMicroseconds >= 8333) {
+          // Rate limit to at most 120 Hz (~8.33 ms)
+          _lastZoomTime = now;
+          unawaitedSend(
+            GestureZoom(
+              magnificationDelta: spanDelta,
+              phase: GesturePhase.changed,
+            ),
+          );
+        }
+        return;
+      }
+
+      final rotating = gesturesAvailable &&
+          !_isZooming &&
+          !_isTwoFingerScrolling &&
+          angleChange.abs() > rotationDegrees &&
+          spanChange.abs() <= pinchDistance;
+
+      if (_isRotating || rotating) {
+        final now = DateTime.now();
+        var degreesDelta = currentAngle - previousAngle;
+        while (degreesDelta < -180) {
+          degreesDelta += 360;
+        }
+        while (degreesDelta > 180) {
+          degreesDelta -= 360;
+        }
+        if (!_isRotating) {
+          _isRotating = true;
+          _lastRotateTime = now;
+          unawaitedSend(
+            GestureRotate(
+              degreesDelta: degreesDelta,
+              phase: GesturePhase.began,
+            ),
+          );
+        } else if (now.difference(_lastRotateTime).inMicroseconds >= 8333) {
+          // Rate limit to at most 120 Hz
+          _lastRotateTime = now;
+          unawaitedSend(
+            GestureRotate(
+              degreesDelta: degreesDelta,
+              phase: GesturePhase.changed,
+            ),
+          );
+        }
+        return;
+      }
+
+      if (_twoFingerTravel > scrollStart) _isTwoFingerScrolling = true;
 
       // Two fingers scroll. The delta of whichever finger moved is used rather
       // than an average, because averaging halves the reported movement when
@@ -242,6 +372,8 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
 
   void _onPointerUp(PointerUpEvent event) {
     _pointers.remove(event.pointer);
+    _glowController.onPointerUp(event.pointer);
+    if (_pointers.isEmpty) _restoreHintLater();
 
     if (_pointers.length < 2) {
       if (_isZooming) {
@@ -258,6 +390,10 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
       }
       _lastSpan = null;
       _lastAngle = null;
+      _spanAtStart = null;
+      _angleAtStart = null;
+      _twoFingerTravel = 0;
+      _isTwoFingerScrolling = false;
     }
 
     if (_pointers.isNotEmpty) return;
@@ -303,6 +439,8 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
 
   void _onPointerCancel(PointerCancelEvent event) {
     _pointers.remove(event.pointer);
+    _glowController.onPointerCancel(event.pointer);
+    if (_pointers.isEmpty) _restoreHintLater();
 
     if (_pointers.length < 2) {
       if (_isZooming) {
@@ -325,6 +463,10 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
       }
       _lastSpan = null;
       _lastAngle = null;
+      _spanAtStart = null;
+      _angleAtStart = null;
+      _twoFingerTravel = 0;
+      _isTwoFingerScrolling = false;
     }
 
     if (_pointers.isNotEmpty) return;
@@ -358,6 +500,8 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
 
   @override
   Widget build(BuildContext context) {
+    _glowController.fadeDuration =
+        context.motion(const Duration(milliseconds: 180));
     final connected =
         ref.watch(clientStateProvider).valueOrNull == ClientState.connected;
 
@@ -399,19 +543,49 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
               onScrollDown: connected ? () => _scroll(0, _cursorStep) : null,
               onScrollLeft: connected ? () => _scroll(-_cursorStep, 0) : null,
               onScrollRight: connected ? () => _scroll(_cursorStep, 0) : null,
-              child: Listener(
-                // Opaque so the whole area receives events even where nothing is
-                // painted.
-                behavior: HitTestBehavior.opaque,
-                onPointerDown: _onPointerDown,
-                onPointerMove: _onPointerMove,
-                onPointerUp: _onPointerUp,
-                onPointerCancel: _onPointerCancel,
-                child: GestureDetector(
-                  // Long press is the one gesture worth the arena's latency: it
-                  // is defined by *not* moving, so a frame of delay is invisible.
-                  onLongPress: _onLongPress,
-                  child: _TouchpadSurface(enabled: connected),
+              // The inset lives out here rather than inside the surface, so
+              // the box the finger touches is exactly the box that is drawn.
+              // With the margin inside, a pointer landing in the gap reported
+              // a position the painter had no dot at, and the glow sat a
+              // centimetre from the thumb.
+              child: Padding(
+                padding: EdgeInsets.all(widget.immersive ? 6 : 10),
+                child: Listener(
+                  // Opaque so the whole area receives events even where nothing
+                  // is painted.
+                  behavior: HitTestBehavior.opaque,
+                  onPointerDown: _onPointerDown,
+                  onPointerMove: _onPointerMove,
+                  onPointerUp: _onPointerUp,
+                  onPointerCancel: _onPointerCancel,
+                  child: GestureDetector(
+                    // Long press is the one gesture worth the arena's latency:
+                    // it is defined by *not* moving, so a frame of delay is
+                    // invisible.
+                    onLongPress: _onLongPress,
+                    child: _TouchpadSurface(
+                      enabled: connected,
+                      showHint: _hintVisible,
+                      glowController: _glowController,
+                      showTutorialBanner:
+                          !ref.watch(sensitivityTutorialSeenProvider),
+                      onOpenSettings: () {
+                        ref
+                            .read(sensitivityTutorialSeenProvider.notifier)
+                            .markSeen();
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const SettingsScreen(),
+                          ),
+                        );
+                      },
+                      onOpenTutorial: () =>
+                          SensitivityTutorialDialog.show(context, ref),
+                      onDismissTutorial: () => ref
+                          .read(sensitivityTutorialSeenProvider.notifier)
+                          .markSeen(),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -435,11 +609,14 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
               ),
             ),
           _ButtonRow(
+            immersive: widget.immersive,
             onLeft: () => _click(MouseButton.left),
             onMiddle: () => _click(MouseButton.middle),
             onRight: () => _click(MouseButton.right),
             onToggleCursorPad: () =>
                 setState(() => _showCursorPad = !showCursorPad),
+            onShowSensitivityTutorial: () =>
+                SensitivityTutorialDialog.show(context, ref),
             cursorPadShowing: showCursorPad,
             enabled: connected,
           ),
@@ -480,78 +657,635 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView> {
   }
 }
 
+/// The glass itself: a dot field that lights up under the finger.
+///
+/// The dots are not decoration for its own sake. A blank rectangle gives a
+/// finger nothing to judge movement against, and the one question this surface
+/// has to answer instantly — "did it register that?" — was previously answered
+/// only by the cursor moving on a screen across the room. The lattice gives the
+/// eye a fixed frame, and the glow that follows the touch answers the question
+/// on the phone, where the thumb already is.
 class _TouchpadSurface extends StatelessWidget {
-  const _TouchpadSurface({required this.enabled});
+  const _TouchpadSurface({
+    required this.enabled,
+    required this.showHint,
+    required this.glowController,
+    this.showTutorialBanner = false,
+    this.onOpenSettings,
+    this.onOpenTutorial,
+    this.onDismissTutorial,
+  });
 
   final bool enabled;
+
+  final bool showHint;
+
+  final _TouchGlowController glowController;
+
+  final bool showTutorialBanner;
+  final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenTutorial;
+  final VoidCallback? onDismissTutorial;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final dark = scheme.brightness == Brightness.dark;
+    final duration = context.motion(const Duration(milliseconds: 200));
+
     return AnimatedContainer(
-      duration: context.motion(const Duration(milliseconds: 200)),
-      margin: const EdgeInsets.all(12),
+      duration: duration,
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: enabled
-            ? scheme.surfaceContainerHighest
-            : scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(20),
+        // A gradient rather than a flat fill, top lighter than bottom. It is
+        // the cheapest way to make a surface this large read as a physical
+        // panel rather than a hole in the page, and at these amplitudes it is
+        // well under the threshold where a gradient starts banding.
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: enabled
+              ? <Color>[
+                  dark
+                      ? scheme.surfaceContainerHigh
+                      : scheme.surfaceContainerHighest,
+                  dark
+                      ? scheme.surfaceContainerLowest
+                      : scheme.surfaceContainer,
+                ]
+              : <Color>[
+                  scheme.surfaceContainerLow,
+                  scheme.surfaceContainerLowest,
+                ],
+        ),
+        borderRadius: BorderRadius.circular(28),
       ),
-      child: Center(
-        // Absorbs overflow rather than scrolling. With the pointer controls
-        // open at a large text size the surface is squeezed to a couple of
-        // hundred pixels and the watermark plus three lines of hint no longer
-        // fit; this lets the content be laid out unbounded and clipped instead
-        // of throwing.
-        //
-        // `NeverScrollableScrollPhysics` matters and is not belt-and-braces: a
-        // scrollable here would enter the gesture arena for vertical drags on
-        // the one surface in the app whose entire job is vertical drags. The
-        // hint is duplicated in this surface's semantics hint, so nothing is
-        // lost by clipping it.
-        child: SingleChildScrollView(
-          physics: const NeverScrollableScrollPhysics(),
-          child: enabled
-              ? Column(
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          if (enabled) ...<Widget>[
+            // The resting lattice: drawn once into a display list and cached in
+            // its own layer so it never repaints during touch gestures.
+            RepaintBoundary(
+              child: CustomPaint(
+                // Expensive to build and never changes, which is exactly the
+                // shape the raster cache exists for: told so explicitly, it is
+                // rasterised once and reused for the life of the screen.
+                isComplex: true,
+                willChange: false,
+                painter: _DotFieldPainter(
+                  ink: scheme.onSurfaceVariant
+                      .withValues(alpha: dark ? 0.18 : 0.30),
+                ),
+              ),
+            ),
+            // The dynamic touch-reactive field: only repaints its own isolated
+            // layer within the bounding box of active pointers, swelling and
+            // brightening dots in real time with zero widget rebuilds and zero
+            // latency impact on pointer dispatch.
+            RepaintBoundary(
+              child: CustomPaint(
+                // The opposite case, and worth saying out loud: this changes
+                // every frame a finger is down, so the raster cache must not
+                // spend a frame trying to cache it.
+                willChange: true,
+                painter: _DynamicDotGlowPainter(
+                  controller: glowController,
+                  dotColor: const Color(0xFF007ACC),
+                ),
+              ),
+            ),
+          ],
+          Center(
+            // Absorbs overflow rather than scrolling. With the pointer controls
+            // open at a large text size the surface is squeezed to a couple of
+            // hundred pixels and the watermark plus three lines of hint no
+            // longer fit; this lets the content be laid out unbounded and
+            // clipped instead of throwing.
+            //
+            // `NeverScrollableScrollPhysics` matters and is not
+            // belt-and-braces: a scrollable here would enter the gesture arena
+            // for vertical drags on the one surface in the app whose entire job
+            // is vertical drags. The hint is duplicated in this surface's
+            // semantics hint, so nothing is lost by clipping it.
+            child: SingleChildScrollView(
+              physics: const NeverScrollableScrollPhysics(),
+              child: enabled
+                  ? IgnorePointer(
+                      child: AnimatedOpacity(
+                        opacity: showHint ? 1 : 0,
+                        duration: duration,
+                        curve: Curves.easeOut,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            // A watermark, not information: everything it
+                            // suggests is spelled out in the text below and in
+                            // the surface's semantics. Excluded so a reader does
+                            // not announce "touch app" between the label and the
+                            // instructions, and left dim on purpose — as pure
+                            // decoration it is outside the contrast requirement,
+                            // and it sits behind the pointer.
+                            ExcludeSemantics(
+                              child: AppIcon(
+                                AppIcons.handTap,
+                                size: 44,
+                                color: scheme.onSurfaceVariant
+                                    .withValues(alpha: 0.35),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Drag to move · Tap to click\n'
+                              'Two fingers to scroll or right-click\n'
+                              'Hold to drag\n\n'
+                              'Adjust sensitivity anytime in Settings',
+                              textAlign: TextAlign.center,
+                              // Full-strength `onSurfaceVariant`. This was drawn
+                              // at 60% alpha — roughly 2.6:1 on the surface
+                              // behind it — and it is the only instruction on
+                              // the screen.
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: scheme.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : Text(
+                      'Not connected',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+            ),
+          ),
+          if (enabled && showTutorialBanner)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _SensitivityHintBanner(
+                onOpenSettings: onOpenSettings ?? () {},
+                onOpenTutorial: onOpenTutorial ?? () {},
+                onDismiss: onDismissTutorial ?? () {},
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Floating hint banner informing users about pointer sensitivity settings.
+class _SensitivityHintBanner extends StatelessWidget {
+  const _SensitivityHintBanner({
+    required this.onOpenSettings,
+    required this.onOpenTutorial,
+    required this.onDismiss,
+  });
+
+  final VoidCallback onOpenSettings;
+  final VoidCallback onOpenTutorial;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final dark = colorScheme.brightness == Brightness.dark;
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+        padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
+        decoration: BoxDecoration(
+          color: (dark ? colorScheme.surfaceContainerHigh : Colors.white)
+              .withValues(alpha: dark ? 0.92 : 0.96),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: const Color(0xFF007ACC).withValues(alpha: 0.5),
+            width: 1.2,
+          ),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: Colors.black.withValues(alpha: dark ? 0.35 : 0.08),
+              blurRadius: 14,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          children: <Widget>[
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF007ACC).withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.speed_rounded,
+                color: Color(0xFF007ACC),
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onOpenTutorial,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    // A watermark, not information: everything it suggests is
-                    // spelled out in the text below and in the surface's
-                    // semantics. Excluded so a reader does not announce "touch
-                    // app" between the label and the instructions, and left dim
-                    // on purpose — as pure decoration it is outside the contrast
-                    // requirement, and it sits behind the pointer.
-                    ExcludeSemantics(
-                      child: Icon(
-                        Icons.touch_app_outlined,
-                        size: 44,
-                        color: scheme.onSurfaceVariant.withValues(alpha: 0.35),
+                    Text(
+                      'Pointer Sensitivity',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.onSurface,
                       ),
                     ),
-                    const SizedBox(height: 12),
                     Text(
-                      'Drag to move · Tap to click\n'
-                      'Two fingers to scroll or right-click\n'
-                      'Hold to drag',
-                      textAlign: TextAlign.center,
-                      // Full-strength `onSurfaceVariant`. This was drawn at 60%
-                      // alpha — roughly 2.6:1 on the surface behind it — and it
-                      // is the only instruction on the screen.
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant),
+                      'Tap for tutorial or adjust in Settings',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 11,
+                      ),
                     ),
                   ],
-                )
-              : Text(
-                  'Not connected',
-                  style: Theme.of(context).textTheme.bodyMedium,
                 ),
+              ),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                foregroundColor: const Color(0xFF007ACC),
+              ),
+              onPressed: onOpenSettings,
+              child: const Text('Adjust'),
+            ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              iconSize: 18,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              icon: const Icon(Icons.close),
+              tooltip: 'Dismiss hint',
+              onPressed: onDismiss,
+            ),
+          ],
         ),
       ),
     );
   }
+}
+
+/// The dot lattice's geometry, worked out once per size.
+///
+/// Cached, and that is the whole point of the class. The first version built a
+/// fresh five-hundred-element list of offsets inside `paint`, which is called on
+/// every pointer move — up to 120 times a second, on the one code path in this
+/// app whose latency a user can feel directly. The allocation alone was enough
+/// to make the cursor lag behind the finger, and because [PointerController]
+/// derives its acceleration from event timestamps, dropped frames also made the
+/// pointer read as *slow*: fewer, later events look like slower movement to the
+/// curve. Geometry that depends only on the box size has no business being
+/// recomputed per frame.
+@immutable
+final class _Lattice {
+  const _Lattice._({
+    required this.originX,
+    required this.originY,
+    required this.columns,
+    required this.rows,
+  });
+
+  final double originX;
+  final double originY;
+  final int columns;
+  final int rows;
+
+  /// Distance between dot centres, in logical pixels rather than a fraction of
+  /// the box — so the dots stay the same distance apart whether the surface is
+  /// a third of the screen or all of it, which is the point of a reference grid.
+  static const double spacing = 22;
+
+  static Size? _cachedSize;
+  static _Lattice? _cached;
+
+  /// The lattice for a surface of [size], or null if it is too small to hold a
+  /// single dot. Centred, so the margins match on both sides at any width.
+  static _Lattice? of(Size size) {
+    if (_cachedSize == size) return _cached;
+    final columns = (size.width / spacing).floor();
+    final rows = (size.height / spacing).floor();
+    _cachedSize = size;
+    _cached = columns < 1 || rows < 1
+        ? null
+        : _Lattice._(
+            originX: (size.width - (columns - 1) * spacing) / 2,
+            originY: (size.height - (rows - 1) * spacing) / 2,
+            columns: columns,
+            rows: rows,
+          );
+    return _cached;
+  }
+
+  Offset dotAt(int column, int row) =>
+      Offset(originX + column * spacing, originY + row * spacing);
+
+  /// Every dot, for the layer that draws all of them.
+  List<Offset> get all => <Offset>[
+        for (var row = 0; row < rows; row++)
+          for (var column = 0; column < columns; column++) dotAt(column, row),
+      ];
+}
+
+/// The resting lattice.
+class _DotFieldPainter extends CustomPainter {
+  _DotFieldPainter({required this.ink})
+      : _paint = Paint()
+          ..color = ink
+          ..strokeWidth = _dotRadius * 2
+          ..strokeCap = StrokeCap.round
+          ..isAntiAlias = true;
+
+  static const double _dotRadius = 1.5;
+
+  /// The dots, already faded.
+  ///
+  /// Passed in rather than hard-coded, and that is not fastidiousness: the
+  /// first version painted white at a low alpha, which is invisible on the
+  /// light theme's paper — the whole field simply vanished. The colour has to
+  /// come from the scheme, because the ink that reads on one page is the ink
+  /// that disappears on the other.
+  final Color ink;
+
+  final Paint _paint;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final lattice = _Lattice.of(size);
+    if (lattice == null) return;
+
+    // `drawPoints` with a round cap draws the whole field in one call, which
+    // matters at five hundred dots: five hundred `drawCircle`s is five hundred
+    // draw ops in the display list, and this layer is rasterised on the frame
+    // the tab first appears — the frame the user is watching for.
+    canvas.drawPoints(PointMode.points, lattice.all, _paint);
+  }
+
+  @override
+  bool shouldRepaint(_DotFieldPainter oldDelegate) => oldDelegate.ink != ink;
+}
+
+/// Tracks active touch points on the touchpad to render the dynamic proximity
+/// glow and dot swelling without triggering any widget tree rebuilds.
+final class _TouchGlowController extends ChangeNotifier {
+  final Map<int, Offset> _activeTouches = <int, Offset>{};
+  List<Offset> _cachedFadingTouches = const <Offset>[];
+  double _fade = 0.0;
+  AnimationController? _fadeController;
+  Duration fadeDuration = const Duration(milliseconds: 180);
+
+  void attachAnimationController(AnimationController controller) {
+    _fadeController = controller;
+    _fadeController!.addListener(_onFadeTick);
+  }
+
+  void _onFadeTick() {
+    if (_fadeController == null) return;
+    _fade = _fadeController!.value;
+    if (_fade <= 0.001) {
+      _cachedFadingTouches = const <Offset>[];
+    }
+    notifyListeners();
+  }
+
+  void onPointerDown(int pointer, Offset position) {
+    _activeTouches[pointer] = position;
+    if (_fadeController?.isAnimating ?? false) {
+      _fadeController!.stop();
+    }
+    _fade = 1.0;
+    _cachedFadingTouches = const <Offset>[];
+    notifyListeners();
+  }
+
+  void onPointerMove(int pointer, Offset position) {
+    _activeTouches[pointer] = position;
+    _fade = 1.0;
+    notifyListeners();
+  }
+
+  void onPointerUp(int pointer) {
+    if (_activeTouches.length == 1 && _activeTouches.containsKey(pointer)) {
+      _cachedFadingTouches = _activeTouches.values.toList(growable: false);
+    }
+    _activeTouches.remove(pointer);
+    if (_activeTouches.isEmpty) {
+      if (fadeDuration == Duration.zero) {
+        _fade = 0.0;
+        _cachedFadingTouches = const <Offset>[];
+        notifyListeners();
+      } else if (_fadeController != null) {
+        _fadeController!.duration = fadeDuration;
+        _fadeController!.reverse(from: _fade);
+      } else {
+        _fade = 0.0;
+        notifyListeners();
+      }
+    } else {
+      notifyListeners();
+    }
+  }
+
+  void onPointerCancel(int pointer) {
+    onPointerUp(pointer);
+  }
+
+  Iterable<Offset> get activePoints =>
+      _activeTouches.isNotEmpty ? _activeTouches.values : _cachedFadingTouches;
+
+  double get fade => _fade;
+
+  bool get hasActiveTouches => _activeTouches.isNotEmpty;
+
+  @override
+  void dispose() {
+    _fadeController?.removeListener(_onFadeTick);
+    super.dispose();
+  }
+}
+
+/// Renders the touch-reactive glow and swelling dots around active pointers.
+///
+/// Only repaints when [_TouchGlowController] notifies, and stays completely
+/// inside a [RepaintBoundary] so neither the resting dot field nor any widget
+/// rebuilds during cursor motion.
+///
+/// ## Why the falloff is quantised
+///
+/// The glow is a smooth gradient and the eye reads it as one, but a canvas does
+/// not: a distinct radius and colour per dot is a distinct draw op per dot, and
+/// the box one finger lights up holds around four hundred of them. Four hundred
+/// `drawCircle`s, each preceded by a freshly allocated `Color`, were being built
+/// into the display list on the UI thread of every frame of every drag — the
+/// same thread that has to dispatch the pointer events this surface exists to
+/// turn into cursor movement. When it runs late, the events arrive late, and the
+/// cursor lags the finger for a reason that has nothing to do with the network.
+///
+/// So the falloff is cut into [_levels] steps. Every dot in a step shares one
+/// radius and one colour, which makes it one `drawRawPoints` call over a reused
+/// buffer: twelve ops a frame instead of four hundred, and no allocation in the
+/// loop at all. Twelve steps across six pixels of swell puts each step under
+/// half a pixel, which the dots' own anti-aliasing covers.
+final class _DynamicDotGlowPainter extends CustomPainter {
+  _DynamicDotGlowPainter({
+    required this.controller,
+    required this.dotColor,
+  }) : super(repaint: controller);
+
+  final _TouchGlowController controller;
+  final Color dotColor;
+
+  static const double _baseRadius = 1.5;
+  static const double _maxRadius = 7.5;
+  static const double _glowRadius = 220.0;
+  static const double _glowRadiusSq = _glowRadius * _glowRadius;
+
+  /// How many discrete sizes the falloff is drawn in.
+  static const int _levels = 12;
+
+  /// One paint per step, built once and re-coloured each frame.
+  ///
+  /// `PointMode.points` draws a square per point unless the cap is round, which
+  /// is what makes a dot a dot here, and is why the resting field is drawn the
+  /// same way.
+  final List<Paint> _paints = List<Paint>.generate(
+    _levels,
+    (_) => Paint()
+      ..strokeCap = StrokeCap.round
+      ..isAntiAlias = true,
+    growable: false,
+  );
+
+  /// Dot coordinates per step, reused between frames. Grown, never shrunk: the
+  /// surface does not change size while a finger is on it.
+  final List<Float32List> _coordinates = <Float32List>[];
+  final Int32List _counts = Int32List(_levels);
+
+  void _ensureCapacity(int dots) {
+    if (_coordinates.isNotEmpty && _coordinates.first.length >= dots * 2) {
+      return;
+    }
+    _coordinates
+      ..clear()
+      ..addAll(
+        List<Float32List>.generate(_levels, (_) => Float32List(dots * 2)),
+      );
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final fade = controller.fade;
+    if (fade <= 0.001) return;
+
+    final touches = controller.activePoints;
+    if (touches.isEmpty) return;
+
+    final lattice = _Lattice.of(size);
+    if (lattice == null) return;
+
+    // 1. Determine the bounding box of columns and rows affected by any touch.
+    int minCol = lattice.columns;
+    int maxCol = -1;
+    int minRow = lattice.rows;
+    int maxRow = -1;
+
+    for (final p in touches) {
+      final c0 = (((p.dx - _glowRadius) - lattice.originX) / _Lattice.spacing)
+          .floor()
+          .clamp(0, lattice.columns - 1);
+      final c1 = (((p.dx + _glowRadius) - lattice.originX) / _Lattice.spacing)
+          .ceil()
+          .clamp(0, lattice.columns - 1);
+      final r0 = (((p.dy - _glowRadius) - lattice.originY) / _Lattice.spacing)
+          .floor()
+          .clamp(0, lattice.rows - 1);
+      final r1 = (((p.dy + _glowRadius) - lattice.originY) / _Lattice.spacing)
+          .ceil()
+          .clamp(0, lattice.rows - 1);
+
+      if (c0 < minCol) minCol = c0;
+      if (c1 > maxCol) maxCol = c1;
+      if (r0 < minRow) minRow = r0;
+      if (r1 > maxRow) maxRow = r1;
+    }
+
+    if (maxCol < minCol || maxRow < minRow) return;
+
+    _counts.fillRange(0, _levels, 0);
+    _ensureCapacity((maxCol - minCol + 1) * (maxRow - minRow + 1));
+
+    // 2. Sort every lit dot into the step its brightness falls in.
+    for (var r = minRow; r <= maxRow; r++) {
+      final dotY = lattice.originY + r * _Lattice.spacing;
+      for (var c = minCol; c <= maxCol; c++) {
+        final dotX = lattice.originX + c * _Lattice.spacing;
+
+        // Nearest touch wins, so two fingers brighten a dot between them to
+        // whichever is closer rather than to their sum.
+        double maxT = 0;
+        for (final p in touches) {
+          final dx = dotX - p.dx;
+          final dy = dotY - p.dy;
+          final distSq = dx * dx + dy * dy;
+          if (distSq >= _glowRadiusSq) continue;
+          final t = 1.0 - math.sqrt(distSq) / _glowRadius;
+          if (t > maxT) maxT = t;
+        }
+        if (maxT <= 0.001) continue;
+
+        // Smoothstep, for a falloff that reads as light rather than as a cone.
+        final curve = maxT * maxT * (3.0 - 2.0 * maxT);
+        var level = (curve * _levels).floor();
+        if (level >= _levels) level = _levels - 1;
+
+        final count = _counts[level];
+        _coordinates[level][count * 2] = dotX;
+        _coordinates[level][count * 2 + 1] = dotY;
+        _counts[level] = count + 1;
+      }
+    }
+
+    // 3. One call per step.
+    for (var level = 0; level < _levels; level++) {
+      final count = _counts[level];
+      if (count == 0) continue;
+
+      // The middle of the step's band rather than its floor, so quantising
+      // does not systematically dim the whole field by half a step.
+      final curve = (level + 0.5) / _levels;
+      final paint = _paints[level]
+        ..strokeWidth = 2 * (_baseRadius + (_maxRadius - _baseRadius) * curve)
+        ..color = dotColor.withValues(
+          alpha: (0.95 * curve * fade).clamp(0.0, 1.0),
+        );
+
+      canvas.drawRawPoints(
+        PointMode.points,
+        Float32List.sublistView(_coordinates[level], 0, count * 2),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DynamicDotGlowPainter oldDelegate) =>
+      oldDelegate.dotColor != dotColor || oldDelegate.controller != controller;
 }
 
 /// Explicit controls that drive the cursor without a gesture.
@@ -747,24 +1481,35 @@ class _CursorButton extends StatelessWidget {
 
 class _ButtonRow extends StatelessWidget {
   const _ButtonRow({
+    required this.immersive,
     required this.onLeft,
     required this.onMiddle,
     required this.onRight,
     required this.onToggleCursorPad,
+    required this.onShowSensitivityTutorial,
     required this.cursorPadShowing,
     required this.enabled,
   });
+
+  /// Whether the tab bar is out of the way.
+  ///
+  /// The bottom padding exists to clear the floating navigation. With the
+  /// navigation gone it is dead space between the buttons and the home
+  /// indicator, and this row sits directly under the surface it belongs to —
+  /// so it is given back to the gesture box above.
+  final bool immersive;
 
   final VoidCallback onLeft;
   final VoidCallback onMiddle;
   final VoidCallback onRight;
   final VoidCallback onToggleCursorPad;
+  final VoidCallback onShowSensitivityTutorial;
   final bool cursorPadShowing;
   final bool enabled;
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+        padding: EdgeInsets.fromLTRB(12, 0, 12, immersive ? 6 : 16),
         child: ConstrainedBox(
           // Large targets on purpose: this is used one-handed, often without
           // looking at the phone because the user is watching the computer.
@@ -814,6 +1559,11 @@ class _ButtonRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Pointer sensitivity tutorial',
+                icon: const Icon(Icons.tune_outlined),
+                onPressed: onShowSensitivityTutorial,
+              ),
               IconButton(
                 tooltip: cursorPadShowing
                     ? 'Hide pointer controls'

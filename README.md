@@ -5,10 +5,16 @@ directory — those are names the OS and existing installations already hold, an
 renaming them would orphan every paired device's trust store.</sub>
 
 Control a Windows or macOS computer from an Android or iOS phone over local
-Wi-Fi. No cloud, no account, no internet, no typing in IP addresses.
+Wi-Fi, and send files between two phones the same way. No cloud, no account, no
+internet, no typing in IP addresses.
 
-Install the desktop app once. After that the phone finds the computer,
-connects, and reconnects on its own.
+Install the desktop app once. After that the phone finds the computer, asks to
+come in, and reconnects on its own once you have let it — and where the network
+blocks discovery, the desktop shows a code the phone scans. Phone to phone
+needs no computer at all — each phone advertises itself, and the first send
+asks for the same six-digit confirmation the desktop does. See
+[docs/PHONE_TO_PHONE.md](docs/PHONE_TO_PHONE.md) for what that half does and
+deliberately does not do.
 
 ---
 
@@ -28,17 +34,37 @@ such rather than stubbed.
 | Discovery | Complete: UDP multicast with per-interface binding and broadcast fallback |
 | Transport | Complete: framed TCP, heartbeat, RTT, coalescing, reconnect with jittered backoff |
 | Native input | Complete: Win32 `SendInput` and macOS `CGEvent` via `dart:ffi`, full HID keymaps |
-| Native clipboard | Text complete on both platforms; images deferred |
+| Native clipboard | Text complete on both platforms; images deferred. Syncs both ways on its own — the phone half needs the app in the foreground, which is as far as iOS and Android allow |
 | Desktop app | Service, dispatcher with permission enforcement, clipboard sync, tray, pairing UI |
 | Mobile app | Discovery, pairing, touchpad, full keyboard, clipboard, media |
+| Pairing | Two ways in and no third: tap the computer the phone found, or scan the code the desktop shows. The code carries the computer's real public key, so a scanned pairing verifies the handshake against a key that never crossed the network — and a mismatch fails closed with no fallback |
+| Phone to phone | Complete for files and text: the phone runs the same server the desktop does, advertises over Bonjour, and pairs with the same six digits. A listening phone accepts file transfer and clipboard text and refuses everything else, per message — [ADR 0005](docs/adr/0005-a-phone-can-listen.md) says why, and what it deliberately does not do |
+| Connection approval | A device you paired with is held at the door until someone on the other end allows it — once per device per run of the app, so a Wi-Fi drop does not ask again. On by default; the switch is in Settings › Connections |
 | Auto-connect | Reconnects to the last computer on launch and skips the list |
+| Background clipboard | Android: copy in any app and it reaches the computer, via an accessibility service the user enables by hand — the only route Android allows. Off by default |
+| Share sheet | Android: share text or files into Remote Link from any app — text lands on the computer's clipboard, files become a transfer offer. The one route past Android's clipboard focus rule |
+| Background link | Android: a foreground service keeps the connection alive while the app is off screen, so a transfer survives switching apps. No iOS equivalent exists |
 | Media control | macOS: transport via hardware media keys, volume, now playing |
+| Apple Watch | A trackpad on the wrist: drag to move, tap to click, Digital Crown to scroll. The watch relays through the iPhone rather than speaking the protocol itself — [ADR 0004](docs/adr/0004-apple-watch-relays-through-the-phone.md) says why, and what that costs |
+| Appearance | Dark by default, with light and system in Settings › Appearance |
+
+### Built, but not in this release
+
+**Screen sharing.** Capture works on macOS and the phone has a viewer, but the
+rest of [Milestone 3](docs/ROADMAP.md) — hardware encode, adaptive bitrate,
+multi-monitor, touch mapping — is not built, and a preview that streams is
+exactly the sort of half-feature that ships by accident. It is switched off at
+`kScreenSharingShipped` in `apps/desktop/lib/src/domain/desktop_service.dart`:
+the desktop does not advertise the capability, so the phone's screen button
+never appears, and a request to start a stream is refused rather than merely
+unadvertised. Remaining work is RL-300 to RL-303 in
+[BACKLOG.md](docs/BACKLOG.md).
 
 ### Declared in the protocol, not yet implemented
 
-Screen streaming · file transfer · presentation mode · gamepad · custom command
-registry · session resumption · Windows media control (the WinRT session API is
-not a flat C export, so it needs more than `DynamicLibrary.lookupFunction`).
+Presentation mode · gamepad · custom command registry · session resumption ·
+Windows media control (the WinRT session API is not a flat C export, so it
+needs more than `DynamicLibrary.lookupFunction`).
 
 These have wire codes reserved and decode as opaque, so a future build can
 speak to this one without a version bump.
@@ -88,6 +114,7 @@ hardware behind an entitlement they grant by application).
 apps/
   desktop/        Flutter desktop companion — the service
   mobile/         Flutter phone app — the remote
+    ios/RemoteLinkWatch/   watchOS app (SwiftUI) — a trackpad on the wrist
 packages/
   rl_core/        Clock, Result, errors, logging, device identity types
   rl_protocol/    Wire format: bytes, frames, messages, codec       (pure Dart)

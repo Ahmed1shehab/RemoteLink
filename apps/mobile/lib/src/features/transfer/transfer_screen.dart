@@ -3,28 +3,27 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:rl_transport/rl_transport.dart';
+import 'package:rl_core/rl_core.dart';
+import 'package:share_plus/share_plus.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/modern_ui.dart';
-import '../../app/motion.dart';
-import '../../app/providers.dart';
 import '../../app/theme.dart';
+import '../host/host_providers.dart';
+import 'file_name_text.dart';
 import 'file_picker.dart';
+import 'image_preview.dart';
 import 'transfer_controller.dart';
 import 'transfer_model.dart';
 
-/// What happens to a file once it arrives, in one sentence.
+/// Sending and receiving, on the phone.
 ///
-/// Said before the user accepts rather than after, because the app has nowhere
-/// of its own to put anything: a photo goes to the camera roll and anything
-/// else goes wherever the share sheet is pointed. Someone who expects a folder
-/// inside the app to browse later would otherwise go looking for one that does
-/// not exist.
-const String kIncomingDestinationExplanation =
-    'Photos and videos are saved to your Photos library. Anything else opens '
-    'the share sheet so you can choose where it goes.';
-
-/// Send and receive media and file transfers on mobile.
+/// The screen is two things stacked: one card that starts a send, and the list
+/// of everything that has been sent or received. It used to be three, because
+/// starting a send was itself a small form — pick a mode, open a picker, press
+/// a button that was grey until all of it lined up — and the mode was a
+/// distinction the phone cared about rather than one the user did. Nobody
+/// thinks "I am in media mode"; they think "this photo".
 class TransferScreen extends ConsumerStatefulWidget {
   const TransferScreen({super.key});
 
@@ -33,13 +32,19 @@ class TransferScreen extends ConsumerStatefulWidget {
 }
 
 class _TransferScreenState extends ConsumerState<TransferScreen> {
-  int _selectedType = 0; // 0 = Media, 1 = File
-
   /// What the user chose in the picker, in the order they chose it.
   final List<PickedFile> _picked = <PickedFile>[];
 
   /// True while a picker is open, so a second tap cannot stack two of them.
   bool _isPicking = false;
+
+  /// Which device the user picked, when there is more than one to pick from.
+  ///
+  /// Held as an id rather than a [PeerLink], because a link is rebuilt whenever
+  /// the connection behind it changes and holding the object would pin a stale
+  /// session. Null means "whichever is first", which is the right answer while
+  /// there is only one and a sane one the moment a second appears.
+  DeviceId? _targetId;
 
   String? _statusError;
 
@@ -48,152 +53,74 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     final transferState = ref.watch(transferControllerProvider);
     final controller = ref.read(transferControllerProvider.notifier);
 
-    final clientState = ref.watch(clientStateProvider).valueOrNull;
-    final isConnected = clientState == ClientState.connected;
-
-    // The one computer this phone can send to: the one it is talking to.
-    //
-    // This used to be a dropdown over every discovered and paired computer,
-    // which was a promise the transport cannot keep. `sendFiles` puts the offer
-    // on `client.session`, and there is exactly one of those — so choosing any
-    // other row sent the file to the connected computer under another
-    // computer's name, or, with nothing connected, threw. Offering one target
-    // that is real beats offering five where four are decoration.
-    final target = ref.watch(transferTargetProvider);
-
-    // Show incoming dialog if pending
-    if (transferState.pendingIncoming != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _showIncomingDialog(
-            context, transferState.pendingIncoming!, controller);
-      });
-    }
-
-    final scheme = Theme.of(context).colorScheme;
+    // Everything reachable, not just the computer being controlled. This is the
+    // change that made the rest of the screen worth rewriting: there can now be
+    // several real destinations at once — a computer this phone dialled, and
+    // any phone that dialled it — where before there was one and the UI was
+    // built around saying so.
+    final links = ref.watch(peerLinksProvider);
+    final target = _resolveTarget(links);
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
       children: <Widget>[
-        if (transferState.pendingIncoming != null)
-          _IncomingTransferBanner(
-            request: transferState.pendingIncoming!,
-            onAccept: () => controller
-                .acceptIncomingTransfer(transferState.pendingIncoming!),
-            onDecline: () => controller
-                .declineIncomingTransfer(transferState.pendingIncoming!),
-          ),
         AppSectionCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: scheme.primary.withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Icon(Icons.near_me_rounded, color: scheme.primary),
+              _SendHeader(target: target, choices: links.length),
+              const SizedBox(height: 18),
+              if (links.isEmpty)
+                const _NothingToSendTo()
+              else ...<Widget>[
+                if (links.length > 1) ...<Widget>[
+                  _DestinationPicker(
+                    links: links,
+                    selectedId: target?.id,
+                    onSelected: (id) => setState(() => _targetId = id),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          'Send to device',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        Text(
-                          'Photos, videos, and files',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
+                  const SizedBox(height: 16),
+                ],
+                _SourceButtons(
+                  isPicking: _isPicking,
+                  hasPicked: _picked.isNotEmpty,
+                  onPickMedia: () => _pick(media: true),
+                  onPickFiles: () => _pick(media: false),
+                ),
+                if (_picked.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 14),
+                  _PickedList(
+                    picked: _picked,
+                    onRemove: _removePicked,
+                    onClear: () => setState(_picked.clear),
                   ),
                 ],
-              ),
-              const SizedBox(height: 18),
-              _TargetRow(target: target, isConnected: isConnected),
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: SegmentedButton<int>(
-                  segments: const <ButtonSegment<int>>[
-                    ButtonSegment<int>(
-                      value: 0,
-                      label: Text('Media'),
-                      icon: Icon(Icons.photo_library_outlined),
-                    ),
-                    ButtonSegment<int>(
-                      value: 1,
-                      label: Text('File'),
-                      icon: Icon(Icons.folder_copy_outlined),
-                    ),
-                  ],
-                  selected: <int>{_selectedType},
-                  onSelectionChanged: (set) => setState(() {
-                    _selectedType = set.first;
-                    _statusError = null;
-                  }),
-                ),
-              ),
-              const SizedBox(height: 16),
-              AnimatedSwitcher(
-                duration: context.motion(const Duration(milliseconds: 220)),
-                child: _PickedFilesField(
-                  key: ValueKey<int>(_selectedType),
-                  picked: _picked,
-                  isMediaMode: _selectedType == 0,
-                  isPicking: _isPicking,
-                  onPick: _pick,
-                  onRemove: (file) => setState(() => _picked.remove(file)),
-                ),
-              ),
-              if (_statusError != null) ...<Widget>[
-                const SizedBox(height: 10),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Icon(Icons.error_outline_rounded,
-                        color: scheme.error, size: 18),
-                    const SizedBox(width: 7),
-                    Expanded(
-                      child: Text(
-                        _statusError!,
-                        style: TextStyle(color: scheme.error, fontSize: 13),
-                      ),
-                    ),
-                  ],
+                if (_statusError != null) ...<Widget>[
+                  const SizedBox(height: 12),
+                  _SendProblem(
+                    message: _statusError!,
+                    onDismiss: () => setState(() => _statusError = null),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                _SendButton(
+                  target: target,
+                  count: _picked.length,
+                  onSend:
+                      target == null ? null : () => _send(controller, target),
                 ),
               ],
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: isConnected && target != null && _picked.isNotEmpty
-                      ? () => _send(controller, target)
-                      : null,
-                  icon: const Icon(Icons.arrow_upward_rounded),
-                  label: Text(_sendLabel),
-                ),
-              ),
             ],
           ),
         ),
         const SizedBox(height: 28),
-        AppSectionTitle(
+        const AppSectionTitle(
           title: 'Transfers',
-          subtitle: transferState.transfers.isEmpty
-              ? 'Your recent activity appears here'
-              : '${transferState.transfers.length} recent',
         ),
         const SizedBox(height: 12),
         if (transferState.transfers.isEmpty)
           const AppEmptyState(
-            icon: Icons.swap_vert_rounded,
+            icon: AppIcons.materialSwapVert,
             title: 'No transfers yet',
             message: 'Anything you send or receive will stay visible here.',
           )
@@ -203,20 +130,26 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
               transfer: transfer,
               onCancel: () => controller.cancelTransfer(transfer.transferId),
               onRetry: () => _retryTransfer(controller, transfer.transferId),
-              onDelete: () => controller.removeTransfer(transfer.transferId),
+              onDelete: () => _deleteTransfer(controller, transfer),
             ),
       ],
     );
   }
 
-  String get _sendLabel {
-    final noun = _selectedType == 0 ? 'Item' : 'File';
-    if (_picked.isEmpty) return _selectedType == 0 ? 'Send Media' : 'Send File';
-    if (_picked.length == 1) return 'Send 1 $noun';
-    return 'Send ${_picked.length} ${noun}s';
+  /// The device a send would go to.
+  ///
+  /// The chosen one while it is still there, and the first otherwise. A device
+  /// that goes away mid-choice does not leave the button pointing at nothing:
+  /// it falls back, and the picker shows the fallback selected, so what the
+  /// button says and what it would do cannot disagree.
+  PeerLink? _resolveTarget(List<PeerLink> links) {
+    if (links.isEmpty) return null;
+    final chosen = _targetId;
+    if (chosen == null) return links.first;
+    return links.where((link) => link.id == chosen).firstOrNull ?? links.first;
   }
 
-  Future<void> _pick() async {
+  Future<void> _pick({required bool media}) async {
     if (_isPicking) return;
     setState(() {
       _isPicking = true;
@@ -225,14 +158,15 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
 
     final picker = ref.read(transferFilePickerProvider);
     try {
-      final chosen = _selectedType == 0
-          ? await picker.pickMedia()
-          : await picker.pickFiles();
+      final chosen =
+          media ? await picker.pickMedia() : await picker.pickFiles();
       if (!mounted) return;
       setState(() {
         // Appended, not replaced. Picking twice is how the user assembles a
         // set from more than one place — a photo from the camera roll and a
         // PDF from Files — and replacing would silently discard the first.
+        // That this now works across *both* buttons rather than only within
+        // one mode is the point of having two buttons instead of a switch.
         for (final file in chosen) {
           if (!_picked.any((p) => p.file.path == file.file.path)) {
             _picked.add(file);
@@ -250,19 +184,30 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     }
   }
 
+  void _removePicked(PickedFile file) {
+    final index = _picked.indexOf(file);
+    if (index == -1) return;
+    setState(() => _picked.removeAt(index));
+    showBottomUndoSnackBar(
+      context,
+      message: 'Deleted from selection',
+      onUndo: () {
+        if (!mounted) return;
+        final restoreAt = index > _picked.length ? _picked.length : index;
+        setState(() => _picked.insert(restoreAt, file));
+      },
+    );
+  }
+
   Future<void> _send(
     MobileTransferController controller,
-    TransferTarget target,
+    PeerLink target,
   ) async {
     setState(() => _statusError = null);
 
     try {
       if (_picked.isEmpty) {
-        setState(
-          () => _statusError = _selectedType == 0
-              ? 'Choose at least one photo or video to send'
-              : 'Choose at least one file to send',
-        );
+        setState(() => _statusError = 'Choose something to send first.');
         return;
       }
 
@@ -283,6 +228,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
         return;
       }
 
+      final count = _picked.length;
       await controller.sendFiles(
         targetPeerId: target.id,
         targetPeerName: target.name,
@@ -290,6 +236,22 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
         fileNames: <String>[for (final p in _picked) p.displayName],
       );
       setState(_picked.clear);
+
+      // Said out loud, because the evidence otherwise is a row appearing in a
+      // list further down the screen that the user may not have scrolled to.
+      // An offer is also not an arrival — the other device still has to accept
+      // — and a message that claimed it had landed would be a lie a third of
+      // the time.
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            count == 1
+                ? 'Offered 1 item to ${target.name}.'
+                : 'Offered $count items to ${target.name}.',
+          ),
+        ),
+      );
     } catch (e) {
       setState(() => _statusError = 'Send failed: $e');
     }
@@ -309,254 +271,292 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     }
   }
 
-  bool _isDialogShowing = false;
-
-  void _showIncomingDialog(
-    BuildContext context,
-    PendingIncomingTransfer request,
+  void _deleteTransfer(
     MobileTransferController controller,
+    TransferRecord transfer,
   ) {
-    if (_isDialogShowing) return;
-    _isDialogShowing = true;
-
-    showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => _IncomingTransferDialog(request: request),
-    ).then((accepted) {
-      _isDialogShowing = false;
-      if (accepted == true) {
-        unawaited(controller.acceptIncomingTransfer(request));
-      } else {
-        unawaited(controller.declineIncomingTransfer(request));
-      }
-    });
+    final removed = controller.removeTransfer(transfer.transferId);
+    if (removed == null || !mounted) return;
+    showBottomUndoSnackBar(
+      context,
+      message: 'Transfer deleted',
+      onUndo: () => controller.restoreTransfer(removed),
+    );
   }
 }
 
-/// Who the files are going to, or why nobody is.
+/// The card's heading, which says what the card will do to what.
 ///
-/// Replaces a dropdown that listed every computer the phone had ever seen. The
-/// list was honest about discovery and dishonest about sending: only the
-/// connected computer can receive anything, so every other row was a choice
-/// that could not be honoured.
-class _TargetRow extends StatelessWidget {
-  const _TargetRow({required this.target, required this.isConnected});
+/// The old heading said "Send to device / Photos, videos, and files" whichever
+/// way the app was configured, which is the kind of caption that survives every
+/// state and describes none of them. This one names the device, because naming
+/// it is the thing that stops a file going somewhere the user did not intend.
+class _SendHeader extends StatelessWidget {
+  const _SendHeader({required this.target, required this.choices});
 
-  final TransferTarget? target;
-  final bool isConnected;
+  final PeerLink? target;
+  final int choices;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final ready = isConnected && target != null;
+    final text = Theme.of(context).textTheme;
 
+    final subtitle = switch (target) {
+      null => 'No device connected',
+      final PeerLink link when choices > 1 => 'to ${link.name}, of $choices',
+      final PeerLink link => 'to ${link.name}',
+    };
+
+    return Row(
+      children: <Widget>[
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: scheme.primary.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: AppIcon(AppIcons.materialNearMe, color: scheme.primary),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text('Send', style: text.titleMedium),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: text.bodySmall,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// What the card shows when there is genuinely nowhere to send.
+///
+/// A sentence and a reason, rather than the previous arrangement: a picker and
+/// a grey button, which invited the user to choose three photos and then told
+/// them nothing about why pressing Send did not work.
+class _NothingToSendTo extends StatelessWidget {
+  const _NothingToSendTo();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: ready
-            ? scheme.primary.withValues(alpha: 0.07)
-            : scheme.surfaceContainerHighest,
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: ready
-              ? scheme.primary.withValues(alpha: 0.28)
-              : scheme.outlineVariant,
-        ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(
-            ready ? Icons.computer_rounded : Icons.link_off_rounded,
-            size: 20,
-            color: ready ? scheme.primary : scheme.onSurfaceVariant,
+          Text(
+            'Nowhere to send yet',
+            style: Theme.of(context).textTheme.titleSmall,
           ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  ready ? target!.name : 'Not connected',
-                  style: Theme.of(context).textTheme.titleSmall,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 1),
-                Text(
-                  ready
-                      ? 'Connected — files go here'
-                      : 'Connect to a computer to send anything',
-                  style: Theme.of(context).textTheme.bodySmall,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
+          const SizedBox(height: 6),
+          Text(
+            'Connect to a computer, or open Remote Link on another phone on '
+            'the same Wi-Fi and it will appear here.',
+            style: Theme.of(context).textTheme.bodySmall,
           ),
-          if (ready)
-            Container(
-              width: 8,
-              height: 8,
-              decoration: const BoxDecoration(
-                color: Color(0xFF22A06B),
-                shape: BoxShape.circle,
-              ),
-            ),
         ],
       ),
     );
   }
 }
 
-/// The choose-files control and the list of what is currently chosen.
+/// Which of several devices a send goes to.
 ///
-/// This replaced a text field that asked the user to type an absolute path,
-/// next to a button that filled in a hard-coded sample one. Nothing about that
-/// arrangement could send a real file, and on iOS — where an app cannot read
-/// outside its own container without going through the picker — no typed path
-/// would ever have worked.
-class _PickedFilesField extends StatelessWidget {
-  const _PickedFilesField({
-    required this.picked,
-    required this.isMediaMode,
+/// Shown only when there is a real choice. A single-device picker is a control
+/// that cannot be operated, and the heading already names the one device.
+///
+/// This replaces a dropdown that listed every computer the phone had ever seen.
+/// That list was honest about discovery and dishonest about sending: only a
+/// device with a live session can receive anything, so most of its rows were
+/// choices that could not be honoured. Every row here is a session.
+class _DestinationPicker extends StatelessWidget {
+  const _DestinationPicker({
+    required this.links,
+    required this.selectedId,
+    required this.onSelected,
+  });
+
+  final List<PeerLink> links;
+  final DeviceId? selectedId;
+  final void Function(DeviceId) onSelected;
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: <Widget>[
+          for (final link in links)
+            ChoiceChip(
+              selected: link.id == selectedId,
+              onSelected: (_) => onSelected(link.id),
+              avatar: AppIcon(
+                link.isHandheld
+                    ? AppIcons.monitorSmartphone
+                    : AppIcons.monitorSmartphone,
+                size: 18,
+              ),
+              label: Text(link.name),
+              // The chip's own box is around 32 tall, which is under every
+              // platform's minimum and exactly the size that produces a tap
+              // landing on the chip beside the one intended.
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+              materialTapTargetSize: MaterialTapTargetSize.padded,
+            ),
+        ],
+      );
+}
+
+/// Where the things to send come from.
+///
+/// Two buttons rather than a segmented control and one button. The control was
+/// a mode: the user set it, then pressed a picker, and the picker's meaning
+/// depended on a switch several inches away that they had already stopped
+/// looking at. Two named buttons collapse that to a single decision made at the
+/// moment it matters, and — because they no longer disagree — a photo and a PDF
+/// can go in the same send.
+class _SourceButtons extends StatelessWidget {
+  const _SourceButtons({
     required this.isPicking,
-    required this.onPick,
+    required this.hasPicked,
+    required this.onPickMedia,
+    required this.onPickFiles,
+  });
+
+  final bool isPicking;
+  final bool hasPicked;
+  final Future<void> Function() onPickMedia;
+  final Future<void> Function() onPickFiles;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = OutlinedButton.styleFrom(
+      minimumSize: const Size.fromHeight(56),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+    );
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: OutlinedButton.icon(
+            style: style,
+            onPressed: isPicking ? null : () => unawaited(onPickMedia()),
+            icon: isPicking
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                // Media, not photos: the button opens the system *media*
+                // picker, which returns videos as readily as stills. Labelled
+                // "Photos" it undersold itself — someone wanting to send a
+                // clip read the two buttons, saw neither offered video, and
+                // went to Files, where the camera roll is not.
+                : const AppIcon(AppIcons.gallery),
+            label: Text(hasPicked ? 'Add media' : 'Media'),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: OutlinedButton.icon(
+            style: style,
+            onPressed: isPicking ? null : () => unawaited(onPickFiles()),
+            icon: const AppIcon(AppIcons.clipboard),
+            label: Text(hasPicked ? 'Add files' : 'Files'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// What is currently chosen, and a way to change one's mind about any of it.
+class _PickedList extends StatelessWidget {
+  const _PickedList({
+    required this.picked,
     required this.onRemove,
-    super.key,
+    required this.onClear,
   });
 
   final List<PickedFile> picked;
-  final bool isMediaMode;
-  final bool isPicking;
-  final Future<void> Function() onPick;
   final void Function(PickedFile) onRemove;
+  final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final noun = isMediaMode ? 'media' : 'files';
+    final total = picked.fold<int>(0, (sum, p) => sum + _lengthOrZero(p.file));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Material(
-          color: scheme.primary.withValues(alpha: 0.07),
-          borderRadius: BorderRadius.circular(18),
-          child: InkWell(
-            onTap: isPicking ? null : () => unawaited(onPick()),
-            borderRadius: BorderRadius.circular(18),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 96),
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-                child: Row(
-                  children: <Widget>[
-                    Container(
-                      width: 52,
-                      height: 52,
-                      decoration: BoxDecoration(
-                        color: scheme.primary.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: isPicking
-                          ? const Padding(
-                              padding: EdgeInsets.all(15),
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Icon(
-                              isMediaMode
-                                  ? Icons.add_photo_alternate_outlined
-                                  : Icons.note_add_outlined,
-                              color: scheme.primary,
-                            ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            picked.isEmpty ? 'Choose $noun' : 'Add more $noun',
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            isMediaMode
-                                ? 'Pick photos or videos from your library'
-                                : 'Browse files on this device',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                    Icon(Icons.chevron_right_rounded,
-                        color: scheme.onSurfaceVariant),
-                  ],
-                ),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                picked.length == 1
+                    ? '1 item · ${formatBytes(total)}'
+                    : '${picked.length} items · ${formatBytes(total)}',
+                style: Theme.of(context).textTheme.labelLarge,
               ),
+            ),
+            TextButton(onPressed: onClear, child: const Text('Clear')),
+          ],
+        ),
+        const SizedBox(height: 4),
+        for (final file in picked)
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              children: <Widget>[
+                // Tapping opens the picture full size. Four screenshots from
+                // the same afternoon are indistinguishable at 40 pixels, and
+                // sending the wrong one to a computer is not undoable.
+                _PickedThumbnail(file: file),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      FileNameText(
+                        file.displayName,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        formatBytes(_lengthOrZero(file.file)),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const AppIcon(AppIcons.delete, size: 21),
+                  tooltip: 'Remove ${file.displayName}',
+                  onPressed: () => onRemove(file),
+                  color: scheme.error,
+                ),
+              ],
             ),
           ),
-        ),
-        if (picked.isEmpty) ...<Widget>[
-          const SizedBox.shrink(),
-        ] else ...<Widget>[
-          const SizedBox(height: 12),
-          for (final file in picked)
-            Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                children: <Widget>[
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: scheme.surface,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      isMediaMode
-                          ? Icons.image_outlined
-                          : Icons.description_outlined,
-                      size: 20,
-                      color: scheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          file.displayName,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          formatBytes(_lengthOrZero(file.file)),
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded, size: 21),
-                    tooltip: 'Remove ${file.displayName}',
-                    onPressed: () => onRemove(file),
-                    color: scheme.error,
-                  ),
-                ],
-              ),
-            ),
-        ],
       ],
     );
   }
@@ -570,159 +570,157 @@ class _PickedFilesField extends StatelessWidget {
   }
 }
 
-class _IncomingTransferBanner extends StatelessWidget {
-  const _IncomingTransferBanner({
-    required this.request,
-    required this.onAccept,
-    required this.onDecline,
-  });
+/// Something went wrong, and the way out of it.
+///
+/// Given a dismiss rather than left to sit there, because most of what lands
+/// here is about a choice the user is in the middle of changing — a file that
+/// vanished, a picker that would not open — and an error that outlives the
+/// thing it described is just noise the user learns to read past.
+class _SendProblem extends StatelessWidget {
+  const _SendProblem({required this.message, required this.onDismiss});
 
-  final PendingIncomingTransfer request;
-  final VoidCallback onAccept;
-  final VoidCallback onDecline;
+  final String message;
+  final VoidCallback onDismiss;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-
-    return Card(
-      color: scheme.primaryContainer,
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                Icon(Icons.downloading, color: scheme.onPrimaryContainer),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Incoming transfer from ${request.peerName}',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: scheme.onPrimaryContainer,
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                ),
-              ],
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          AppIcon(AppIcons.settings, color: scheme.error, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              // A live region, so the error is spoken when it appears rather
+              // than only when someone happens to swipe onto it. The user who
+              // most needs telling that a send failed is the one who cannot see
+              // the red.
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: scheme.onErrorContainer),
             ),
-            const SizedBox(height: 8),
-            Text(
-              '${request.offer.files.length} file(s) · ${formatBytes(request.totalBytes)}',
-              style: TextStyle(color: scheme.onPrimaryContainer),
-            ),
-            if (request.isFirstTransferFromDevice) ...<Widget>[
-              const SizedBox(height: 6),
-              Text(
-                kIncomingDestinationExplanation,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: scheme.onPrimaryContainer,
-                    ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: <Widget>[
-                TextButton(
-                  onPressed: onDecline,
-                  child: const Text('Decline'),
-                ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: onAccept,
-                  child: const Text('Accept'),
-                ),
-              ],
-            ),
-          ],
-        ),
+          ),
+          IconButton(
+            icon: const AppIcon(AppIcons.settings, size: 18),
+            tooltip: 'Dismiss',
+            onPressed: onDismiss,
+            color: scheme.onErrorContainer,
+          ),
+        ],
       ),
     );
   }
 }
 
-class _IncomingTransferDialog extends StatelessWidget {
-  const _IncomingTransferDialog({required this.request});
+/// The card's one primary action, and what it says when it cannot be pressed.
+///
+/// The button used to go grey with nothing beside it, which left three
+/// different situations looking identical: nothing chosen, nothing connected,
+/// and a connection still settling. A disabled control that does not say what
+/// it is waiting for is a puzzle, and the user's usual solution to a puzzle is
+/// to press it repeatedly.
+class _SendButton extends StatelessWidget {
+  const _SendButton({
+    required this.target,
+    required this.count,
+    required this.onSend,
+  });
 
-  final PendingIncomingTransfer request;
+  final PeerLink? target;
+  final int count;
+  final VoidCallback? onSend;
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-        title: Text('Incoming transfer from ${request.peerName}'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                '${request.peerName} wants to send ${request.offer.files.length} file(s):',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 12),
-              for (final f in request.offer.files)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    children: <Widget>[
-                      const Icon(Icons.insert_drive_file, size: 16),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          f.fileName,
-                          style: const TextStyle(fontWeight: FontWeight.w500),
-                        ),
-                      ),
-                      Text(formatBytes(f.size)),
-                    ],
-                  ),
-                ),
-              const Divider(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: <Widget>[
-                  const Text(
-                    'Total size:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  Text(
-                    formatBytes(request.totalBytes),
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-              if (request.isFirstTransferFromDevice) ...<Widget>[
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color:
-                        Theme.of(context).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    'First transfer from this device.\n'
-                    '$kIncomingDestinationExplanation',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-              ],
-            ],
+  Widget build(BuildContext context) {
+    final blocked = switch ((target, count)) {
+      (null, _) => 'Connect to a device to send.',
+      (_, 0) => 'Choose media or files above.',
+      _ => null,
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        FilledButton(
+          style: FilledButton.styleFrom(
+            minimumSize: const Size.fromHeight(52),
           ),
+          onPressed: blocked == null ? onSend : null,
+          child: const Text('Send'),
         ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Decline'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Accept'),
+        if (blocked != null) ...<Widget>[
+          const SizedBox(height: 8),
+          Text(
+            blocked,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
-      );
+      ],
+    );
+  }
+}
+
+/// The 40-pixel square beside a picked file: the picture itself when it is one,
+/// and a tap target that opens it full size.
+class _PickedThumbnail extends StatelessWidget {
+  const _PickedThumbnail({required this.file});
+
+  final PickedFile file;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final previewable = isPreviewableImage(file.displayName);
+
+    final square = Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ImageThumbnail(
+        file: file.file,
+        fileName: file.displayName,
+        // Chosen per file rather than from whichever picker opened it. The
+        // two pickers can now contribute to one send, so "this came from the
+        // media button" no longer says anything about what it is.
+        fallback: AppIcon(
+          previewable ? AppIcons.gallery : AppIcons.files,
+          size: 20,
+          color: scheme.primary,
+        ),
+      ),
+    );
+
+    if (!previewable) return square;
+
+    return Semantics(
+      button: true,
+      label: 'Preview ${file.displayName}',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => unawaited(
+          ImagePreviewPage.show(
+            context,
+            file: file.file,
+            fileName: file.displayName,
+          ),
+        ),
+        child: square,
+      ),
+    );
+  }
 }
 
 class _TransferCard extends StatelessWidget {
@@ -757,10 +755,10 @@ class _TransferCard extends StatelessWidget {
                   color: scheme.primary.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(13),
                 ),
-                child: Icon(
+                child: AppIcon(
                   isIncoming
-                      ? Icons.arrow_downward_rounded
-                      : Icons.arrow_upward_rounded,
+                      ? AppIcons.materialArrowDown
+                      : AppIcons.materialArrowUp,
                   size: 21,
                   color: scheme.primary,
                 ),
@@ -784,34 +782,21 @@ class _TransferCard extends StatelessWidget {
                   ],
                 ),
               ),
-              _StatusChip(status: transfer.status),
+              _StatusChip(status: transfer.status, isIncoming: isIncoming),
               if (!transfer.isActive) ...<Widget>[
                 const SizedBox(width: 2),
                 IconButton(
                   onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outline_rounded, size: 21),
+                  icon: const AppIcon(AppIcons.delete, size: 21),
                   tooltip: 'Delete transfer',
-                  color: scheme.onSurfaceVariant,
+                  color: scheme.error,
                 ),
               ],
             ],
           ),
           const SizedBox(height: 14),
           for (final f in transfer.files) ...<Widget>[
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    f.fileName,
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                ),
-                Text(
-                  '${formatBytes(f.transferredBytes)} / ${formatBytes(f.totalBytes)}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
+            _TransferFileRow(file: f),
             const SizedBox(height: 4),
             LinearProgressIndicator(
               value: f.progress,
@@ -842,14 +827,14 @@ class _TransferCard extends StatelessWidget {
               if (transfer.canCancel)
                 IconButton(
                   onPressed: onCancel,
-                  icon: const Icon(Icons.close_rounded, size: 20),
+                  icon: const AppIcon(AppIcons.settings, size: 20),
                   tooltip: 'Cancel',
                   color: scheme.error,
                 ),
               if (transfer.canRetry)
                 FilledButton.icon(
                   onPressed: onRetry,
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  icon: const AppIcon(AppIcons.settings, size: 18),
                   label: const Text('Retry'),
                 ),
             ],
@@ -867,10 +852,127 @@ class _TransferCard extends StatelessWidget {
   }
 }
 
+/// One file's name, size, and — once it has arrived — a way to open it.
+///
+/// The name is the tap target because the name is what people press. Before
+/// this, pressing it did nothing and the only route to a received photo was to
+/// leave the app and hunt for it in the gallery, which makes the transfer list
+/// a receipt rather than a place you can do anything from.
+///
+/// What a tap does depends on what arrived. An image opens in the app, where
+/// the point is to glance at it and go back. Anything else goes to the share
+/// sheet, which is the only "open this in something" a phone offers an app
+/// that does not own the file type — and is the same sheet the file came
+/// through when it landed, so it is already familiar.
+class _TransferFileRow extends StatelessWidget {
+  const _TransferFileRow({required this.file});
+
+  final TransferFileProgress file;
+
+  bool get _isImage => isPreviewableImage(file.fileName);
+
+  Future<void> _open(BuildContext context) async {
+    final path = file.savedPath;
+    if (path == null) return;
+
+    final handle = File(path);
+    // The keep lives in a cache directory, so it can be emptied by the OS
+    // between the row being drawn and the row being tapped. Checked here rather
+    // than trusted, and said plainly when it is gone.
+    //
+    // Async on purpose, against the lint: this runs on a tap, and the file may
+    // sit on storage that is slow to stat. A frame dropped on the way into a
+    // preview is exactly the jank the synchronous version would cause.
+    // ignore: avoid_slow_async_io
+    if (!await handle.exists()) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This file is no longer stored on your phone.'),
+        ),
+      );
+      return;
+    }
+
+    if (!context.mounted) return;
+    if (_isImage) {
+      await ImagePreviewPage.show(
+        context,
+        file: handle,
+        fileName: file.fileName,
+      );
+      return;
+    }
+    await SharePlus.instance.share(
+      ShareParams(files: <XFile>[XFile(path)]),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final path = file.savedPath;
+    final size = Text(
+      '${formatBytes(file.transferredBytes)} / ${formatBytes(file.totalBytes)}',
+      style: Theme.of(context).textTheme.bodySmall,
+    );
+
+    final name = FileNameText(
+      file.fileName,
+      style: TextStyle(
+        fontWeight: FontWeight.w500,
+        color: path == null ? null : scheme.primary,
+      ),
+    );
+
+    if (path == null) {
+      return Row(
+        children: <Widget>[
+          Expanded(child: name),
+          const SizedBox(width: 8),
+          size,
+        ],
+      );
+    }
+
+    return Semantics(
+      button: true,
+      label: '${_isImage ? 'Open' : 'Share'} ${file.fileName}',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => unawaited(_open(context)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: <Widget>[
+              Expanded(child: name),
+              const SizedBox(width: 6),
+              // Says which of the two things a tap will do before it happens.
+              AppIcon(
+                _isImage ? AppIcons.zoomOut : AppIcons.materialArrowUp,
+                size: 16,
+                color: scheme.primary,
+              ),
+              const SizedBox(width: 8),
+              size,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _StatusChip extends StatelessWidget {
-  const _StatusChip({required this.status});
+  const _StatusChip({required this.status, this.isIncoming = false});
 
   final TransferStatus status;
+
+  /// Which end of the transfer this phone is on.
+  ///
+  /// Only [TransferStatus.prompting] reads differently from the two sides, but
+  /// it reads *backwards* from the wrong one, which is worse than vague.
+  final bool isIncoming;
 
   @override
   Widget build(BuildContext context) {
@@ -883,8 +985,11 @@ class _StatusChip extends StatelessWidget {
     // its text in the same hue as its own background.
     // Material 3 defines these pairs to meet 4.5:1 in both themes.
     final (label, background, foreground) = switch (status) {
+      // Which way this is waiting depends on which end asked. On a transfer
+      // this phone is receiving, "Awaiting response" describes the computer,
+      // which is not what is happening.
       TransferStatus.prompting => (
-          'Awaiting response',
+          isIncoming ? 'Waiting for you' : 'Awaiting response',
           scheme.tertiaryContainer,
           scheme.onTertiaryContainer,
         ),

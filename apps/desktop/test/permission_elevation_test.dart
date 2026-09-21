@@ -94,7 +94,13 @@ void main() {
         brightness: const UnsupportedBrightnessBackend('test'),
         systemInfo: const UnsupportedSystemInfoBackend('test'),
         networkAdapters: const UnsupportedNetworkAdapterBackend('test'),
-      );
+      )
+        // Off, because these tests are about what a device may do once it is
+        // in, not about whether it is let in. Left on, every one of them would
+        // be asserting against a session the transport is holding, and the
+        // first failure would look like a permission bug.
+        // `connection_approval_test.dart` is where being let in is tested.
+        ..asksBeforeConnecting = false;
       await service.start();
 
       client = RemoteLinkClient(

@@ -44,7 +44,7 @@ Future<void> _pumpClipboardTab(
   await tester.pump();
   await tester.pump();
 
-  await tester.tap(find.byIcon(Icons.content_paste_outlined));
+  await tester.tap(find.text('Clipboard'));
   await tester.pumpAndSettle();
 }
 
@@ -80,6 +80,17 @@ Future<void> _scrollTo(WidgetTester tester, Finder target) async {
         )
         .first,
   );
+  await tester.pumpAndSettle();
+}
+
+/// Moves off the touchpad tab so the host status strip is on screen.
+///
+/// The strip is deliberately hidden on the gesture tabs — see [ControlScreen] —
+/// so a test that pumps the screen and looks for it is looking at the one tab
+/// that does not show it. Any non-gesture tab does; the clipboard is used here
+/// because it needs no extra provider overrides.
+Future<void> _leaveTheGestureTab(WidgetTester tester) async {
+  await tester.tap(find.text('Clipboard'));
   await tester.pumpAndSettle();
 }
 
@@ -119,6 +130,7 @@ void main() {
 
     await tester.pump();
     await tester.pump();
+    await _leaveTheGestureTab(tester);
 
     expect(find.text('88%'), findsOneWidget);
     expect(find.byIcon(Icons.battery_charging_full), findsOneWidget);
@@ -162,6 +174,7 @@ void main() {
 
     await tester.pump();
     await tester.pump();
+    await _leaveTheGestureTab(tester);
 
     expect(find.byIcon(Icons.battery_full), findsNothing);
     expect(find.byIcon(Icons.battery_charging_full), findsNothing);
@@ -254,6 +267,54 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('the strip stands aside on the touchpad tab, and comes back',
+      (tester) async {
+    const status = SystemStatus(
+      volume: 0.8,
+      isMuted: false,
+      uptimeSeconds: 3600,
+      batteryPercent: 88,
+      isCharging: true,
+      cpuPercent: 12.4,
+      memoryPercent: 64.0,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          identityProvider.overrideWith(
+            (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
+          ),
+          clientStateProvider.overrideWith(
+            (ref) => Stream<ClientState>.value(ClientState.connected),
+          ),
+          systemStatusProvider.overrideWith(
+            (ref) => Stream<SystemStatus?>.value(status),
+          ),
+          connectionQualityProvider.overrideWith(
+            (ref) => const Stream<ConnectionQuality>.empty(),
+          ),
+        ],
+        child: const MaterialApp(home: ControlScreen()),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump();
+
+    // The tab the app opens on is the gesture surface, and the strip gives up
+    // its height to it. Asserted rather than left implicit, because a strip
+    // that quietly came back would take the height back with it.
+    expect(find.text('CPU 12%'), findsNothing);
+
+    await _leaveTheGestureTab(tester);
+    expect(find.text('CPU 12%'), findsOneWidget);
+
+    await tester.tap(find.text('Touchpad').last);
+    await tester.pumpAndSettle();
+    expect(find.text('CPU 12%'), findsNothing);
+  });
+
   testWidgets('renders TouchpadSurfaceView and handles gestures cleanly',
       (tester) async {
     await tester.pumpWidget(
@@ -298,12 +359,7 @@ void main() {
 
     await _scrollTo(tester, find.text('History'));
 
-    expect(find.text('Keep history on this phone'), findsOneWidget);
-    expect(
-      find.textContaining('disappears when you close Remote Link'),
-      findsOneWidget,
-      reason: 'the user must be able to tell where this list lives',
-    );
+    expect(find.text('Keep history on this phone'), findsNothing);
     expect(find.textContaining('marks confidential is never recorded'),
         findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -363,8 +419,8 @@ void main() {
     await _pumpClipboardTab(tester, history);
     await _scrollTo(tester, find.text('worth keeping'));
 
-    // The older row is the second one; pin it.
-    await tester.tap(find.byIcon(Icons.push_pin_outlined).last);
+    // Pin the older row; pinned entries move above recent unpinned entries.
+    await tester.tap(find.byTooltip('Pin').last);
     await tester.pumpAndSettle();
 
     expect(history.pinnedCount, equals(1));
@@ -375,7 +431,7 @@ void main() {
       isTrue,
     );
 
-    await tester.tap(find.byIcon(Icons.delete_outline_rounded).first);
+    await tester.tap(find.byTooltip('Remove').last);
     await tester.pumpAndSettle();
 
     expect(history.entries, hasLength(1));

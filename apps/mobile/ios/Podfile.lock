@@ -2,28 +2,60 @@ PODS:
   - bonsoir_darwin (0.0.1):
     - Flutter
     - FlutterMacOS
+  - file_selector_ios (0.0.1):
+    - Flutter
   - Flutter (1.0.0)
   - flutter_secure_storage (6.0.0):
+    - Flutter
+  - gal (1.0.0):
+    - Flutter
+    - FlutterMacOS
+  - image_picker_ios (0.0.1):
+    - Flutter
+  - mobile_scanner (7.0.0):
+    - Flutter
+    - FlutterMacOS
+  - share_plus (0.0.1):
     - Flutter
 
 DEPENDENCIES:
   - bonsoir_darwin (from `.symlinks/plugins/bonsoir_darwin/darwin`)
+  - file_selector_ios (from `.symlinks/plugins/file_selector_ios/ios`)
   - Flutter (from `Flutter`)
   - flutter_secure_storage (from `.symlinks/plugins/flutter_secure_storage/ios`)
+  - gal (from `.symlinks/plugins/gal/darwin`)
+  - image_picker_ios (from `.symlinks/plugins/image_picker_ios/ios`)
+  - mobile_scanner (from `.symlinks/plugins/mobile_scanner/darwin`)
+  - share_plus (from `.symlinks/plugins/share_plus/ios`)
 
 EXTERNAL SOURCES:
   bonsoir_darwin:
     :path: ".symlinks/plugins/bonsoir_darwin/darwin"
+  file_selector_ios:
+    :path: ".symlinks/plugins/file_selector_ios/ios"
   Flutter:
     :path: Flutter
   flutter_secure_storage:
     :path: ".symlinks/plugins/flutter_secure_storage/ios"
+  gal:
+    :path: ".symlinks/plugins/gal/darwin"
+  image_picker_ios:
+    :path: ".symlinks/plugins/image_picker_ios/ios"
+  mobile_scanner:
+    :path: ".symlinks/plugins/mobile_scanner/darwin"
+  share_plus:
+    :path: ".symlinks/plugins/share_plus/ios"
 
 SPEC CHECKSUMS:
   bonsoir_darwin: 29c7ccf356646118844721f36e1de4b61f6cbd0e
+  file_selector_ios: ec57ec07954363dd730b642e765e58f199bb621a
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_secure_storage: 1ed9476fba7e7a782b22888f956cce43e2c62f13
+  gal: baecd024ebfd13c441269ca7404792a7152fde89
+  image_picker_ios: e0ece4aa2a75771a7de3fa735d26d90817041326
+  mobile_scanner: 9157936403f5a0644ca3779a38ff8404c5434a93
+  share_plus: 50da8cb520a8f0f65671c6c6a99b3617ed10a58a
 
-PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+PODFILE CHECKSUM: 30d505a55b9838f3cd050f155dedca6853864f4d
 
 COCOAPODS: 1.16.2

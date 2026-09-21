@@ -37,6 +37,36 @@ final class FileTransferStore implements IncomingTransferStore {
   final Map<String, int> _reservations = <String, int>{};
   Future<void> _prepareChain = Future<void>.value();
 
+  /// Where each finished file actually landed, keyed by transfer and file id.
+  ///
+  /// Kept because nothing else can answer it afterwards. The name on the wire
+  /// is not necessarily the name on disk — a collision renames it — and the
+  /// transfer engine drops the file the instant it commits, so a UI offering
+  /// "open" or "show in folder" has nowhere else to look.
+  final Map<String, String> _committedPaths = <String, String>{};
+
+  /// Bounded because this map has no natural end: it lives as long as the app
+  /// and grows by one entry per received file. Five hundred is far more than
+  /// the transfer list shows and small enough to ignore.
+  static const int _kRememberedPaths = 512;
+
+  /// Absolute path [fileId] of [transferId] was saved to, if it finished.
+  String? committedPath({
+    required String transferId,
+    required String fileId,
+  }) =>
+      _committedPaths[_pathKey(transferId, fileId)];
+
+  static String _pathKey(String transferId, String fileId) =>
+      '$transferId\u0000$fileId';
+
+  void _rememberCommitted(String transferId, String fileId, String path) {
+    if (_committedPaths.length >= _kRememberedPaths) {
+      _committedPaths.remove(_committedPaths.keys.first);
+    }
+    _committedPaths[_pathKey(transferId, fileId)] = path;
+  }
+
   @override
   Future<Map<String, IncomingFile>> prepare(
     FileOffer offer, {
@@ -112,7 +142,12 @@ final class FileTransferStore implements IncomingTransferStore {
     await manifest.persist();
     return <String, IncomingFile>{
       for (final entry in manifest.entries.entries)
-        entry.key: _DiskIncomingFile(manifest, entry.value, root),
+        entry.key: _DiskIncomingFile(
+          manifest,
+          entry.value,
+          root,
+          _rememberCommitted,
+        ),
     };
   }
 
@@ -199,11 +234,18 @@ final class _DiskEntry {
 }
 
 final class _DiskIncomingFile implements IncomingFile {
-  _DiskIncomingFile(this._manifest, this._entry, this._canonicalRoot);
+  _DiskIncomingFile(
+    this._manifest,
+    this._entry,
+    this._canonicalRoot,
+    this._onCommitted,
+  );
 
   final _DiskManifest _manifest;
   final _DiskEntry _entry;
   final String _canonicalRoot;
+  final void Function(String transferId, String fileId, String path)
+      _onCommitted;
 
   @override
   OfferedFile get offer => _entry.offer;
@@ -248,6 +290,7 @@ final class _DiskIncomingFile implements IncomingFile {
     );
     await _entry.partial.rename(destination.path);
     await _verifyRegularFileInside(destination, _canonicalRoot);
+    _onCommitted(_manifest.transferId, offer.fileId, destination.path);
     _manifest.entries.remove(offer.fileId);
     await _manifest.persist();
   }

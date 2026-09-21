@@ -5,8 +5,10 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../app/app_icons.dart';
 import '../app/brand.dart';
 import '../app/providers.dart';
+import '../domain/file_launcher.dart';
 import 'diagnostics_screen.dart';
 
 /// Everything about the app itself, as opposed to the devices it talks to.
@@ -31,6 +33,8 @@ class SettingsScreen extends ConsumerWidget {
               _AboutHeader(),
               SizedBox(height: 28),
               _StartupSection(),
+              SizedBox(height: 24),
+              _ConnectionsSection(),
               SizedBox(height: 24),
               _WindowSection(),
               SizedBox(height: 24),
@@ -98,9 +102,45 @@ class _StartupSection extends ConsumerWidget {
                 : "Your phone will not find this computer until you open "
                     '$kProductName yourself.',
           ),
-          secondary: const Icon(Icons.play_circle_outline),
+          secondary: const AppIcon(AppIcons.materialMonitorPlay),
           onChanged: (value) =>
               ref.read(startAtLoginProvider.notifier).set(enabled: value),
+        ),
+      ],
+    );
+  }
+}
+
+/// The one decision about who reaches this computer, and when.
+class _ConnectionsSection extends ConsumerWidget {
+  const _ConnectionsSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final asks = ref.watch(askBeforeConnectingProvider);
+
+    return _Section(
+      title: 'Connections',
+      children: <Widget>[
+        SwitchListTile(
+          value: asks,
+          title: const Text('Ask before a paired device connects'),
+          // Both halves say what actually happens, because the cost of each
+          // answer is real and the user is choosing between them rather than
+          // between "safe" and "unsafe". Off is a legitimate choice for a
+          // computer nobody else can reach.
+          subtitle: Text(
+            asks
+                ? 'A device you have paired with waits until you allow it. '
+                    'Asked once per device each time $kProductName starts, so '
+                    'a dropped Wi-Fi connection does not ask again.'
+                : 'Any device you have paired with connects straight away, '
+                    'whoever is holding it.',
+          ),
+          secondary: const AppIcon(AppIcons.materialSettings),
+          onChanged: (value) => ref
+              .read(askBeforeConnectingProvider.notifier)
+              .set(enabled: value),
         ),
       ],
     );
@@ -156,7 +196,7 @@ class _SavingSection extends ConsumerWidget {
       title: 'Saving received files',
       children: <Widget>[
         ListTile(
-          leading: const Icon(Icons.folder_outlined),
+          leading: const AppIcon(AppIcons.materialFiles),
           title: const Text('Folder'),
           subtitle: Text(
             switch (directory) {
@@ -165,6 +205,14 @@ class _SavingSection extends ConsumerWidget {
               _ => 'Checking…',
             },
           ),
+          // Tapping the row opens it. Showing someone a path and making them
+          // retype it into a file manager is the sort of thing that is only
+          // fine until you have done it twice.
+          onTap: switch (directory) {
+            AsyncData<Directory>(:final value) => () =>
+                unawaited(FileLauncher.openFolder(value.path)),
+            _ => null,
+          },
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
@@ -207,7 +255,7 @@ class _ThisComputerSection extends ConsumerWidget {
       title: 'This computer',
       children: <Widget>[
         ListTile(
-          leading: const Icon(Icons.desktop_windows_outlined),
+          leading: const AppIcon(AppIcons.materialMonitorSmartphone),
           title: const Text('Name'),
           subtitle: Text('$name — this is what your phone shows in its list.'),
           trailing: TextButton(
@@ -284,13 +332,13 @@ class _SupportSection extends StatelessWidget {
         title: 'Support',
         children: <Widget>[
           ListTile(
-            leading: const Icon(Icons.monitor_heart_outlined),
+            leading: const AppIcon(AppIcons.analytics),
             title: const Text('Diagnostics'),
             subtitle: const Text(
               'Connection counters, permissions, and a log you can copy into '
               'a bug report.',
             ),
-            trailing: const Icon(Icons.chevron_right),
+            trailing: const AppIcon(AppIcons.materialChevronRight),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
                 builder: (context) => const DiagnosticsScreen(),

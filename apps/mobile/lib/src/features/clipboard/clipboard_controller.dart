@@ -10,23 +10,40 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
+import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
+import '../devices/link_service.dart';
+import '../host/host_providers.dart';
+import '../host/phone_host_service.dart';
 import 'clipboard_history_controller.dart';
+import 'clipboard_watcher.dart';
 
 /// What the phone currently holds, for display.
 final class ClipboardState {
   const ClipboardState({
     this.text,
     this.fromDesktop = false,
+    this.sourceName,
     this.updatedAt,
     this.sending = false,
   });
 
   final String? text;
 
-  /// True when this arrived from the computer rather than being copied here.
+  /// True when this arrived from the other end rather than being copied here.
+  ///
+  /// Named for the computer because for most of this app's life the other end
+  /// could only be one. It can now also be a phone that sent text over, which
+  /// is what [sourceName] is for.
   final bool fromDesktop;
+
+  /// What to call where this came from, when it was not the computer.
+  ///
+  /// Null for text from the connected computer, whose name the clipboard
+  /// screen does not need to say — there is only ever one of those, and the
+  /// app bar is already showing it.
+  final String? sourceName;
 
   final DateTime? updatedAt;
   final bool sending;
@@ -34,12 +51,14 @@ final class ClipboardState {
   ClipboardState copyWith({
     String? text,
     bool? fromDesktop,
+    String? sourceName,
     DateTime? updatedAt,
     bool? sending,
   }) =>
       ClipboardState(
         text: text ?? this.text,
         fromDesktop: fromDesktop ?? this.fromDesktop,
+        sourceName: sourceName ?? this.sourceName,
         updatedAt: updatedAt ?? this.updatedAt,
         sending: sending ?? this.sending,
       );
@@ -47,42 +66,92 @@ final class ClipboardState {
 
 /// Mirrors the clipboard between this phone and the connected computer.
 ///
-/// ## Why this is not symmetric, and cannot be
+/// ## What is automatic, and where the limit actually is
 ///
-/// The brief asks for clipboard sync with no buttons, like Apple's Universal
-/// Clipboard. Half of that is achievable and half is not, and the asymmetry is
-/// imposed by the platform rather than chosen:
+/// Nothing here needs a button pressed:
 ///
-/// * **Computer → phone is fully automatic.** An update arrives over the
-///   session and is written with `Clipboard.setData`. Writing costs nothing and
-///   is invisible.
-/// * **Phone → computer cannot be.** Reading the clipboard is what would need
-///   to be continuous, and since iOS 14 every programmatic read shows the user
-///   a "pasted from" banner. Polling at the desktop's 50 ms would produce a
-///   banner storm; even polling once a second would make the app unusable.
-///   Android 12+ shows a toast for the same reason.
+/// * **Computer → phone.** An update arrives over the session and is written
+///   with `Clipboard.setData`. Writing costs nothing and is invisible.
+/// * **Phone → computer.** A [ClipboardWatcher] reports that the clipboard
+///   changed — without reading it — and that is what triggers the one read.
+///   Copy anything on the phone and it is on the computer a moment later.
 ///
-/// So the phone sends its clipboard at the two moments a read is justified:
-/// when the app comes to the foreground — the user just switched to it, almost
-/// always to use what they copied — and when they explicitly ask. That is one
-/// banner per visit rather than one per second, and it covers the actual
-/// workflow: copy on the phone, pick up the phone's remote, paste on the
-/// computer.
+/// The limit that remains is not this app's to lift: **the phone must be in
+/// the foreground.** Android refuses clipboard reads to apps without focus,
+/// and has since Android 10; iOS puts a permission alert in front of them. So
+/// "copy on the phone with Remote Link buried in the background, paste on the
+/// computer" cannot work from user space, and the resume hook below is what
+/// covers it — the app catches up the moment it is looked at again.
 ///
-/// Universal Clipboard avoids this because it is the operating system. A
-/// third-party app is not, and pretending otherwise would just mean shipping
-/// something users disable.
+/// Reading is also why this is driven by change notifications rather than by
+/// polling: every read is an interruption on both platforms (a toast on
+/// Android 12+, an alert on iOS 16+), so it happens once per copy, at the
+/// moment there is something new to send, and never on a timer.
+///
+/// Universal Clipboard has neither restriction because it is the operating
+/// system. A third-party app is not, and the honest version of this feature is
+/// one that says so rather than one that silently stops working when the
+/// screen locks.
 final class MobileClipboardController extends StateNotifier<ClipboardState>
     with WidgetsBindingObserver {
-  MobileClipboardController(this._ref) : super(const ClipboardState()) {
+  MobileClipboardController(
+    this._ref, {
+    ClipboardWatcher watcher = const PlatformClipboardWatcher(),
+  })  : _watcher = watcher,
+        super(const ClipboardState()) {
     WidgetsBinding.instance.addObserver(this);
     unawaited(_listen());
+    // The app is in the foreground when this is built — that is what building
+    // it means — so the watcher starts now rather than waiting for a resume
+    // that will not come until the user has already left and returned.
+    _startWatching();
   }
 
   final Ref _ref;
+  final ClipboardWatcher _watcher;
   final Log _log = Log.scoped('mobile.clipboard');
 
   StreamSubscription<Message>? _messages;
+  StreamSubscription<InboundMessage>? _inbound;
+  StreamSubscription<ClientState>? _states;
+  StreamSubscription<void>? _clipboardChanges;
+  StreamSubscription<String>? _backgroundCopies;
+  Timer? _settle;
+
+  /// Set when a send was wanted but the link was down.
+  ///
+  /// The link dropping is not the exception on a phone, it is the normal
+  /// shape of the thing: Android freezes a backgrounded app and takes its
+  /// sockets with it, so returning to Remote Link and reconnecting are
+  /// seconds apart — and the copy the user made in between falls exactly in
+  /// that gap. Without this, that copy was read, found undeliverable, and
+  /// dropped, and nothing ever asked again.
+  bool _sendWhenReconnected = false;
+
+  /// When this controller last wrote the phone's clipboard itself.
+  ///
+  /// Writing fires the same change notification a user copy does, and the two
+  /// are indistinguishable from the outside. Without this, every update from
+  /// the computer would provoke a read on the phone — and a read is a toast on
+  /// Android and an alert on iOS, so the user would be interrupted by their
+  /// own clipboard arriving. The [_lastHash] guard would still stop the update
+  /// being echoed back; it would just stop it after the interruption.
+  DateTime? _lastSelfWrite;
+
+  /// How long after our own write a change notification is treated as ours.
+  ///
+  /// Generous, because it only ever costs a send that [_lastHash] would have
+  /// refused anyway: a user copying something new inside this window has their
+  /// copy picked up by the next change, the next resume, or the Send button.
+  static const Duration _kSelfWriteWindow = Duration(seconds: 2);
+
+  /// How long to wait for the clipboard to stop changing before reading it.
+  ///
+  /// One copy can produce several notifications — an app that writes plain
+  /// text and then the rich version of it fires twice — and each read is an
+  /// interruption. Waiting a moment turns a burst into one read of the final
+  /// content.
+  static const Duration _kSettleDelay = Duration(milliseconds: 300);
 
   /// Fingerprint of the content last seen, in either direction.
   ///
@@ -106,6 +175,63 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
       },
       cancelOnError: false,
     );
+    // Copies made while another app was on screen, which only arrive at all
+    // when the user has enabled the accessibility service. Sent through the
+    // same path as everything else, so the same echo guard and clock apply —
+    // and so applying the computer's own update cannot bounce back from here.
+    _backgroundCopies = _ref
+        .read(linkServiceProvider)
+        .backgroundCopies
+        .listen(_onBackgroundCopy, cancelOnError: false);
+
+    // Text from a nearby phone arrives on the listening half rather than on
+    // the client, and until this line nothing read it. The sending phone put a
+    // `ClipboardUpdate` on the wire, the host let it through — `isAllowedFromPeer`
+    // has always allowed it — and it was published to a stream whose only
+    // subscriber handled file transfers, so it was dropped one step from the
+    // clipboard it was addressed to. Half of "send and clipboard" therefore
+    // worked on one end only.
+    try {
+      final host = await _ref.read(phoneHostServiceProvider.future);
+      _inbound = host.messages.listen(
+        (inbound) {
+          final message = inbound.message;
+          if (message is! ClipboardUpdate) return;
+          final name = host.links
+              .where((link) => link.peerId == inbound.session.peerId)
+              .map((link) => link.name)
+              .firstOrNull;
+          unawaited(_applyRemote(message, from: name));
+        },
+        cancelOnError: false,
+      );
+    } on Object catch (error) {
+      // A phone that cannot host is a phone that still syncs with its
+      // computer, so this is logged and stepped over rather than thrown at a
+      // screen that has nothing useful to say about it.
+      _log.warn('not listening for text from nearby devices', error: error);
+    }
+
+    // No flush without this. The states stream is the only thing that says the
+    // link came back, and the copy the drop interrupted is waiting on it.
+    _states = client.states.listen(
+      (state) {
+        if (state == ClientState.connected) _flushDeferredSend();
+      },
+      cancelOnError: false,
+    );
+  }
+
+  /// Sends the clipboard a dropped link stopped us sending.
+  ///
+  /// Only while the watcher is running, which is this controller's one signal
+  /// that the app is on screen. A reconnect that lands with Remote Link in the
+  /// background is a read Android would refuse anyway, and the deferral is
+  /// kept rather than spent — the next resume is where it belongs.
+  void _flushDeferredSend() {
+    if (!_sendWhenReconnected || _clipboardChanges == null) return;
+    _log.debug(() => 'the link is back; sending the copy it missed');
+    unawaited(sendCurrent(silent: true));
   }
 
   Future<void> _onSyncToggle(ClipboardSyncToggle toggle) async {
@@ -138,8 +264,25 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     }
   }
 
-  /// Writes an update from the computer into the phone's clipboard.
-  Future<void> _applyRemote(ClipboardUpdate update) async {
+  /// Writes an update from the other end into the phone's clipboard.
+  ///
+  /// [from] names the sender when it was a nearby phone. The same path serves
+  /// both ends deliberately: the Lamport clock, the echo guard, the sensitive
+  /// flag and the history entry all have to happen exactly once per piece of
+  /// content, and a second copy of this for phones is how those drift apart.
+  Future<void> _applyRemote(ClipboardUpdate update, {String? from}) async {
+    // Adopted before anything can return early, and deliberately so. This is
+    // a Lamport clock: seeing a message advances it whether or not the message
+    // is used, and the desktop breaks an equal-clock tie by device id.
+    // Adopting it further down — after the "same content" and "sync disabled"
+    // guards, where it used to live — left the phone's counter behind the
+    // computer's, so the phone's next copy tied, lost the tie-break, and was
+    // discarded. From the user's side the clipboard simply did not sync, with
+    // the only trace a debug line on the other machine.
+    if (update.originSequence > _sequence) {
+      _sequence = update.originSequence;
+    }
+
     final settings = _ref.read(clipboardSettingsProvider);
     if (!settings.syncFromDesktop) {
       _log.debug(
@@ -161,14 +304,12 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     if (Primitives.constantTimeEquals(update.contentHash, _lastHash)) return;
     _lastHash = update.contentHash;
 
-    if (update.originSequence > _sequence) {
-      _sequence = update.originSequence;
-    }
-
+    _lastSelfWrite = DateTime.now();
     await Clipboard.setData(ClipboardData(text: text));
     state = ClipboardState(
       text: text,
       fromDesktop: true,
+      sourceName: from,
       updatedAt: DateTime.now(),
     );
 
@@ -185,6 +326,19 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     _log.debug(() => 'applied ${text.length} clipboard characters');
   }
 
+  /// Puts [text] on the computer's clipboard without reading this phone's.
+  ///
+  /// For content that arrived some other way — the share sheet, principally,
+  /// which is how a copy made in another app reaches the computer at all when
+  /// Android will not serve this one a clipboard read.
+  ///
+  /// It goes through the same bookkeeping as a local copy, so it takes its turn
+  /// in the same clock and cannot be echoed back.
+  Future<bool> sendText(String text) async {
+    if (text.isEmpty) return false;
+    return _send(text);
+  }
+
   /// Reads this phone's clipboard and sends it, if it has changed.
   ///
   /// [silent] suppresses the "nothing to send" feedback for the automatic
@@ -198,46 +352,23 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     }
 
     final client = _ref.read(clientProvider).valueOrNull;
-    if (client == null || !client.isConnected) return false;
+    if (client == null || !client.isConnected) {
+      // Deferred, not dropped. The clipboard is read on reconnect instead of
+      // now, because reading it now would cost the user an interruption for
+      // content that has nowhere to go.
+      _sendWhenReconnected = true;
+      _log.debug(
+          () => 'nothing to send to; holding the copy for the reconnect');
+      return false;
+    }
+    _sendWhenReconnected = false;
 
     state = state.copyWith(sending: true);
     try {
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       final text = data?.text;
       if (text == null || text.isEmpty) return false;
-
-      final bytes = utf8.encode(text);
-      final digest = await Primitives.sha256(bytes);
-      final hash = Uint8List.sublistView(digest, 0, 16);
-
-      // Already synced, in either direction. Re-sending would be harmless but
-      // would bump the computer's change counter and could start a loop.
-      if (Primitives.constantTimeEquals(hash, _lastHash)) return false;
-      _lastHash = hash;
-
-      final identity = await _ref.read(identityProvider.future);
-      final sent = await client.send(
-        ClipboardUpdate(
-          items: <ClipboardItem>[ClipboardItem.text(text)],
-          contentHash: hash,
-          originDeviceId: identity.id.value,
-          originSequence: ++_sequence,
-        ),
-      );
-
-      if (sent) {
-        state = ClipboardState(
-          text: text,
-          updatedAt: DateTime.now(),
-        );
-        _recordHistory(
-          kind: ClipboardHistoryKind.text,
-          data: Uint8List.fromList(bytes),
-          hash: hash,
-        );
-        _log.debug(() => 'sent ${bytes.length} clipboard bytes');
-      }
-      return sent;
+      return await _send(text);
     } on PlatformException catch (e) {
       // A clipboard read can be refused outright — a managed device policy, or
       // the user denying the paste prompt. Not worth an error dialog.
@@ -246,6 +377,47 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     } finally {
       state = state.copyWith(sending: false);
     }
+  }
+
+  /// Puts [text] on the computer's clipboard and records it here.
+  ///
+  /// The one path out, whether the text came from a clipboard read or from a
+  /// share: the hash guard, the clock and the local history all have to happen
+  /// exactly once per piece of content, and two call sites doing it separately
+  /// is how they drift apart.
+  Future<bool> _send(String text) async {
+    final client = _ref.read(clientProvider).valueOrNull;
+    if (client == null || !client.isConnected) return false;
+
+    final bytes = utf8.encode(text);
+    final digest = await Primitives.sha256(bytes);
+    final hash = Uint8List.sublistView(digest, 0, 16);
+
+    // Already synced, in either direction. Re-sending would be harmless but
+    // would bump the computer's change counter and could start a loop.
+    if (Primitives.constantTimeEquals(hash, _lastHash)) return false;
+    _lastHash = hash;
+
+    final identity = await _ref.read(identityProvider.future);
+    final sent = await client.send(
+      ClipboardUpdate(
+        items: <ClipboardItem>[ClipboardItem.text(text)],
+        contentHash: hash,
+        originDeviceId: identity.id.value,
+        originSequence: ++_sequence,
+      ),
+    );
+
+    if (sent) {
+      state = ClipboardState(text: text, updatedAt: DateTime.now());
+      _recordHistory(
+        kind: ClipboardHistoryKind.text,
+        data: Uint8List.fromList(bytes),
+        hash: hash,
+      );
+      _log.debug(() => 'sent ${bytes.length} clipboard bytes');
+    }
+    return sent;
   }
 
   /// The only path from this phone's clipboard into its history.
@@ -300,19 +472,78 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
     await client.send(const ClipboardRequest());
   }
 
+  /// Subscribes to clipboard changes, which is also what starts the platform
+  /// watcher.
+  void _startWatching() {
+    if (_clipboardChanges != null) return;
+    _clipboardChanges = _watcher.changes.listen(
+      (_) => _onClipboardChanged(),
+      cancelOnError: false,
+    );
+  }
+
+  /// Cancels it, which is also what stops the platform watcher.
+  void _stopWatching() {
+    unawaited(_clipboardChanges?.cancel());
+    _clipboardChanges = null;
+    _settle?.cancel();
+    _settle = null;
+  }
+
+  /// Sends text the accessibility service read while the app was off screen.
+  ///
+  /// The self-write suppression applies here too: writing an update from the
+  /// computer into this phone's clipboard fires the same change the service
+  /// watches for, and without the guard every sync would be read back and
+  /// returned.
+  void _onBackgroundCopy(String text) {
+    final settings = _ref.read(clipboardSettingsProvider);
+    if (!settings.syncToDesktop) return;
+
+    final selfWrite = _lastSelfWrite;
+    if (selfWrite != null &&
+        DateTime.now().difference(selfWrite) < _kSelfWriteWindow) {
+      return;
+    }
+
+    _log.debug(() => 'a copy arrived from the background reader');
+    unawaited(sendText(text));
+  }
+
+  void _onClipboardChanged() {
+    final selfWrite = _lastSelfWrite;
+    if (selfWrite != null &&
+        DateTime.now().difference(selfWrite) < _kSelfWriteWindow) {
+      _log.debug(() => 'ignoring the change our own clipboard write caused');
+      return;
+    }
+
+    _settle?.cancel();
+    _settle = Timer(_kSettleDelay, () => unawaited(sendCurrent(silent: true)));
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) return;
+    if (state != AppLifecycleState.resumed) {
+      // Nothing to watch from the background: Android will not serve a
+      // clipboard read to an app without focus, so a watcher left running
+      // there reports changes that cannot be acted on.
+      _stopWatching();
+      return;
+    }
+
+    _startWatching();
+    // A reconnect that happened while this app was in the background left its
+    // deferral unspent on purpose. This is the moment it is owed.
+    _flushDeferredSend();
 
     final settings = _ref.read(clipboardSettingsProvider);
     if (!settings.syncToDesktop) return;
 
-    // The one automatic read. Coming to the foreground is the strongest signal
-    // available that the user is about to use what they copied, and it costs a
-    // single paste banner per visit instead of one per poll.
-    //
-    // Android is exempt from the banner but kept on the same schedule: two
-    // different sync behaviours would be harder to explain than one.
+    // Still read on resume, and not only when the watcher fires. Everything
+    // copied while this app was in the background happened where no watcher of
+    // ours could see it, and coming to the foreground is the moment that
+    // backlog is worth one read.
     if (Platform.isIOS || Platform.isAndroid) {
       unawaited(sendCurrent(silent: true));
     }
@@ -321,7 +552,11 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _stopWatching();
     unawaited(_messages?.cancel());
+    unawaited(_inbound?.cancel());
+    unawaited(_states?.cancel());
+    unawaited(_backgroundCopies?.cancel());
     super.dispose();
   }
 }

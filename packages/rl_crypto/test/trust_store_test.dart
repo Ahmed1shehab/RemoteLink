@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:rl_core/rl_core.dart';
@@ -137,6 +139,74 @@ void main() {
         // "start over", revoking means "refuse".
         expect(await store.findByPublicKey(peer.publicKey), isNull);
       });
+    });
+  });
+
+  group('FileTrustStore persistence', () {
+    late Directory directory;
+    late File file;
+
+    // A real device id, unlike the readable ones above: this store writes ids
+    // to disk and parses them back, and a made-up one is dropped on load.
+    final key = Uint8List(32)..fillRange(0, 32, 7);
+    final stored = TrustedPeer(
+      id: DeviceId.fromDigest(key),
+      publicKey: key,
+      name: 'Pixel 9 Pro',
+      platform: PlatformKind.android,
+      pairedAt: DateTime.utc(2026),
+      permissionTier: 2,
+    );
+
+    setUp(() async {
+      directory = await Directory.systemTemp.createTemp('rl_trust');
+      file = File('${directory.path}/trusted.json');
+    });
+
+    tearDown(() => directory.delete(recursive: true));
+
+    test('a remembered device is still remembered after a restart', () async {
+      // The field is what stops a device being asked about on every
+      // connection, so a save that drops it is indistinguishable from the two
+      // people never having agreed — and the only symptom is the prompt coming
+      // back, which reads as the switch doing nothing.
+      final first = FileTrustStore(file);
+      await first.upsert(
+        stored.copyWith(autoAdmit: true, rememberAsked: true),
+      );
+      await first.dispose();
+
+      final reopened = FileTrustStore(file);
+      final peer = await reopened.findById(stored.id);
+      await reopened.dispose();
+
+      expect(peer?.autoAdmit, isTrue);
+      expect(peer?.rememberAsked, isTrue);
+    });
+
+    test('a file written before these existed reads as nobody having agreed',
+        () async {
+      final store = FileTrustStore(file);
+      await store.upsert(stored);
+      await store.dispose();
+
+      // Exactly what an older build wrote: no keys for either field.
+      final written =
+          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final peers = written['peers'] as List<dynamic>;
+      for (final entry in peers) {
+        (entry as Map<String, dynamic>)
+          ..remove('autoAdmit')
+          ..remove('rememberAsked');
+      }
+      await file.writeAsString(jsonEncode(written));
+
+      final reopened = FileTrustStore(file);
+      final peer = await reopened.findById(stored.id);
+      await reopened.dispose();
+
+      expect(peer?.autoAdmit, isFalse);
+      expect(peer?.rememberAsked, isFalse);
     });
   });
 }

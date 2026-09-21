@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:remotelink_mobile/src/app/providers.dart';
+import 'package:remotelink_mobile/src/features/host/host_providers.dart';
 import 'package:remotelink_mobile/src/features/transfer/file_picker.dart';
 import 'package:remotelink_mobile/src/features/transfer/mobile_transfer_store.dart';
 import 'package:remotelink_mobile/src/features/transfer/transfer_controller.dart';
@@ -106,13 +107,19 @@ void main() {
           identityProvider.overrideWith(
             (ref) => DeviceIdentity.fromPrivateKey(Uint8List(32)),
           ),
-          // The screen sends to the connected computer and only that one, so
-          // this is the seam that decides whether Send is live. Overridden
-          // directly rather than by faking a session: the provider it reads
-          // needs an established `Session`, which cannot be built in a widget
-          // test without a socket.
-          transferTargetProvider.overrideWithValue(
-            (id: const DeviceId('desktop-1'), name: 'Work Mac'),
+          // Who the screen can send to. This is the seam that decides
+          // whether Send is live, and it is a plain list precisely so a widget
+          // test can state it: the link deliberately carries no `Session`,
+          // which cannot be built without a socket.
+          peerLinksProvider.overrideWithValue(
+            const <PeerLink>[
+              PeerLink(
+                id: DeviceId('desktop-1'),
+                name: 'Work Mac',
+                platform: PlatformKind.macos,
+                origin: LinkOrigin.outbound,
+              ),
+            ],
           ),
           clientStateProvider.overrideWith(
             (ref) => Stream<ClientState>.value(ClientState.connected),
@@ -135,10 +142,22 @@ void main() {
         child: const MaterialApp(home: Scaffold(body: TransferScreen())),
       );
 
-  /// Switches the send card to the File tab and lets the frame settle.
-  Future<void> openFileTab(WidgetTester tester) async {
+  /// Opens the file picker, which no longer needs a tab to be chosen first.
+  ///
+  /// The screen used to carry a Media/File switch that decided what the one
+  /// picker button meant. Both sources are now their own button, so a test that
+  /// wants files taps "Files" — and, like the user, never has to put the screen
+  /// into a mode beforehand.
+  Future<void> chooseFiles(WidgetTester tester) async {
     await tester.pumpAndSettle();
-    await tester.tap(find.text('File'));
+    await tester.tap(find.text('Files'));
+    await tester.pumpAndSettle();
+  }
+
+  /// The same, for photos and videos.
+  Future<void> choosePhotos(WidgetTester tester) async {
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Media'));
     await tester.pumpAndSettle();
   }
 
@@ -161,12 +180,7 @@ void main() {
           ),
         ),
       );
-      await openFileTab(tester);
-
-      expect(find.text('Choose files'), findsOneWidget);
-
-      await tester.tap(find.text('Choose files'));
-      await tester.pumpAndSettle();
+      await chooseFiles(tester);
 
       expect(picker.fileCalls, 1);
       expect(find.text('Quarterly report.pdf'), findsOneWidget);
@@ -188,25 +202,32 @@ void main() {
           ),
         ),
       );
-      await openFileTab(tester);
-
-      FilledButton sendButton() => tester.widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Send File'),
-          );
-
-      expect(sendButton().onPressed, isNull);
-
-      await tester.tap(find.text('Choose files'));
       await tester.pumpAndSettle();
 
       expect(
         tester
             .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Send 1 File'),
+              find.widgetWithText(FilledButton, 'Send'),
+            )
+            .onPressed,
+        isNull,
+      );
+      // The button being dead is not enough on its own — the whole point of
+      // the rewrite is that it says which of the two reasons it is.
+      expect(find.text('Choose media or files above.'), findsOneWidget);
+
+      await tester.tap(find.text('Files'));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Send'),
             )
             .onPressed,
         isNotNull,
       );
+      expect(find.text('Choose media or files above.'), findsNothing);
     });
 
     testWidgets('a second pick adds to the selection rather than replacing it',
@@ -230,18 +251,19 @@ void main() {
           ),
         ),
       );
-      await openFileTab(tester);
-
-      await tester.tap(find.text('Choose files'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Add more files'));
+      await chooseFiles(tester);
+      await tester.tap(find.text('Add files'));
       await tester.pumpAndSettle();
 
       expect(find.text('first.txt'), findsOneWidget);
       expect(find.text('second.txt'), findsOneWidget);
       expect(
-        find.widgetWithText(FilledButton, 'Send 2 Files'),
-        findsOneWidget,
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Send'),
+            )
+            .onPressed,
+        isNotNull,
       );
     });
 
@@ -259,17 +281,14 @@ void main() {
           ),
         ),
       );
-      await openFileTab(tester);
-
-      await tester.tap(find.text('Choose files'));
-      await tester.pumpAndSettle();
+      await chooseFiles(tester);
 
       expect(picker.fileCalls, 1);
-      expect(find.text('Choose files'), findsOneWidget);
+      expect(find.text('Files'), findsOneWidget);
       expect(
         tester
             .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Send File'),
+              find.widgetWithText(FilledButton, 'Send'),
             )
             .onPressed,
         isNull,
@@ -287,17 +306,13 @@ void main() {
           ),
         ),
       );
-      await openFileTab(tester);
-
-      await tester.tap(find.text('Choose files'));
-      await tester.pumpAndSettle();
+      await chooseFiles(tester);
 
       expect(find.textContaining('Could not open the picker'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('the Media tab asks for media (photos and videos), not files',
-        (tester) async {
+    testWidgets('the Photos button asks for media, not files', (tester) async {
       final picker = _FakePicker(
         media: <PickedFile>[
           makePicked('IMG_4021.HEIC'),
@@ -314,12 +329,7 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Media'));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('Choose media'));
-      await tester.pumpAndSettle();
+      await choosePhotos(tester);
 
       expect(picker.mediaCalls, 1);
       expect(picker.fileCalls, 0);
@@ -346,11 +356,8 @@ void main() {
           ),
         ),
       );
-      await openFileTab(tester);
-
-      await tester.tap(find.text('Choose files'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Send 2 Files'));
+      await chooseFiles(tester);
+      await tester.tap(find.widgetWithText(FilledButton, 'Send'));
       await tester.pumpAndSettle();
 
       expect(
@@ -364,7 +371,7 @@ void main() {
     });
 
     testWidgets(
-        'choosing a video through the Media tab sends video to the controller',
+        'choosing a video through the Photos button reaches the controller',
         (tester) async {
       final video = makePicked('vacation_clip.mp4');
       final picker = _FakePicker(media: <PickedFile>[video]);
@@ -379,15 +386,10 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Media'));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('Choose media'));
-      await tester.pumpAndSettle();
+      await choosePhotos(tester);
 
       expect(find.text('vacation_clip.mp4'), findsOneWidget);
-      await tester.tap(find.text('Send 1 Item'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Send'));
       await tester.pumpAndSettle();
 
       expect(recorded.sentNames, <String>['vacation_clip.mp4']);
@@ -409,14 +411,11 @@ void main() {
           ),
         ),
       );
-      await openFileTab(tester);
-
-      await tester.tap(find.text('Choose files'));
-      await tester.pumpAndSettle();
+      await chooseFiles(tester);
 
       vanishing.file.deleteSync();
 
-      await tester.tap(find.text('Send 1 File'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Send'));
       await tester.pumpAndSettle();
 
       expect(recorded.sentFiles, isNull);
@@ -433,15 +432,20 @@ void main() {
           ),
         ),
       );
-      await openFileTab(tester);
-
-      await tester.tap(find.text('Choose files'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Send 1 File'));
+      await chooseFiles(tester);
+      await tester.tap(find.widgetWithText(FilledButton, 'Send'));
       await tester.pumpAndSettle();
 
       expect(find.text('once.txt'), findsNothing);
-      expect(find.text('Choose files'), findsOneWidget);
+      expect(find.text('Choose media or files above.'), findsOneWidget);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Send'),
+            )
+            .onPressed,
+        isNull,
+      );
     });
   });
 

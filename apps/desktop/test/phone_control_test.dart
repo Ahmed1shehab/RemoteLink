@@ -30,6 +30,9 @@ void main() {
         gesturesAvailable: true,
         brightnessAvailable: true,
         screenCaptureAvailable: true,
+        // The forward direction switched on, so this test says something about
+        // phone control rather than about the release switch.
+        screenSharingShipped: true,
       );
 
       expect(everything.has(Capabilities.phoneControl), isFalse);

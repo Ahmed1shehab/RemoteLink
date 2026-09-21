@@ -14,9 +14,9 @@ void main() {
       (tester) async {
     await _pumpDeviceList(tester, discoveryOperational: true);
 
-    expect(find.text('Computers'), findsOneWidget);
+    expect(find.text('Devices'), findsOneWidget);
     expect(find.text('Looking for computers'), findsOneWidget);
-    expect(find.text('Connect by address'), findsOneWidget);
+    expect(find.text('Scan code'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -175,7 +175,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Original Mac'), findsOneWidget);
-    final editButton = find.byIcon(Icons.edit_outlined);
+    final editButton = find.byTooltip('Rename computer');
     expect(editButton, findsOneWidget);
 
     await tester.tap(editButton);

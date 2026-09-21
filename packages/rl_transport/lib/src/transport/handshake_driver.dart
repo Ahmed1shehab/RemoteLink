@@ -115,12 +115,19 @@ abstract final class HandshakeDriver {
 
   /// Server side. Returns the session and the handshake result, since the
   /// caller needs the peer's static key to complete pairing.
+  ///
+  /// [holdKnownPeers] starts an *already trusted* session blocked as well, so
+  /// the caller can ask a person whether to let this connection in. It has no
+  /// effect on a peer that was going to be held for pairing anyway, which is
+  /// why one flag covers both: the question "may it through" is the same one,
+  /// and only the reason for asking differs.
   static Future<(Session, HandshakeResult)> runServer({
     required FramedConnection connection,
     required DeviceIdentity identity,
     required Capabilities capabilities,
     required Clock clock,
     required PeerLookup lookupPeer,
+    bool holdKnownPeers = false,
     Duration timeout = kHandshakeTimeout,
   }) async {
     final log = Log.scoped('transport.handshake.server');
@@ -164,7 +171,14 @@ abstract final class HandshakeDriver {
           },
         );
 
-        await reader.detach();
+        // Attach before detaching, and carry over whatever arrived in between,
+        // for the same reason the client does: `records` is a broadcast stream,
+        // so a record delivered while no one is listening is dropped without a
+        // trace. A phone that pipelines its first session record behind its
+        // handshake finish — which it does, the two are written back to back —
+        // would lose it here, and a lost record is not a lost message: both
+        // sides derive the AEAD nonce from the record count, so the next record
+        // fails to authenticate and the session dies claiming corruption.
         final session = Session(
           connection: connection,
           keys: result.keys,
@@ -174,8 +188,15 @@ abstract final class HandshakeDriver {
           shortAuthenticationString: result.shortAuthenticationString,
           capabilities: result.capabilities,
           isServer: true,
-          requiresPairing: result.requiresPairing,
+          // Held from the first record, never admitted and then retracted.
+          // The peer writes its first session record immediately behind its
+          // handshake finish — a clipboard update, a file offer — and a gate
+          // raised one turn later would have let that one through. Deciding
+          // here means there is no such turn.
+          requiresPairing: result.requiresPairing || holdKnownPeers,
+          initialRecords: reader.takePendingRecords(),
         );
+        await reader.detach();
         return (session, result);
       });
     } on Object {

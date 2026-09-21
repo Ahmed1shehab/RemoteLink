@@ -183,12 +183,89 @@ iPhone. Apply for `com.apple.developer.networking.multicast` at
 manual and not instant.
 
 Once granted, add it to `apps/mobile/ios/Runner/Runner.entitlements` and select
-the matching provisioning profile. Until then, a real device will pair only if
-you reach it another way — the Simulator and Android have no such gate.
+the matching provisioning profile. Until then, a real device pairs by scanning:
+click **Pair a phone** on the desktop and tap **Scan code** on the iPhone. The
+code carries the address, so nothing has to be discovered. The Simulator and
+Android have no such gate.
 
 Everything else (free or paid) is unaffected: signing for local development
 works with the automatically managed "Apple Development" certificate Flutter
 already picked up.
+
+---
+
+## 3c. The Apple Watch app
+
+The watch app lives in `apps/mobile/ios/RemoteLinkWatch/` and is a target of
+`Runner.xcodeproj`, because a watchOS app has to be embedded in its companion
+iPhone app to install at all. It is a full-screen trackpad and nothing else:
+drag to move the pointer, tap to click, double tap to double click, and hold for
+450 ms before moving to press and drag. There are no buttons, icons, or status
+row taking space from the touch surface.
+
+It does **not** speak the Remote Link protocol. It talks to the iPhone over
+WatchConnectivity and the iPhone puts what it says on the session it already
+holds — [ADR 0004](adr/0004-apple-watch-relays-through-the-phone.md) has the
+measured reasoning and states what that costs. A physical-watch spike confirmed
+that watchOS blocks a normal app's `NWConnection` and `NWBrowser` with
+`ENETDOWN`, so a direct TCP client is not available through public APIs.
+
+### Pairing the watch
+
+The watch does not pair independently and never shows a SAS. Pair the iPhone to
+the computer using the six-digit confirmation in the normal client flow, then
+install and open the companion watch app. Keep Remote Link open on the iPhone
+for the first connection. The watch uses that phone's authenticated session; it
+does not copy the phone's private key or appear separately in the desktop trust
+store.
+
+### One thing that changes for everyone
+
+A project with a watch companion cannot be built for a simulator without naming
+the device, because Flutter will not guess which paired watch simulator to
+build for:
+
+```bash
+cd apps/mobile && flutter build ios --simulator -d <iphone-simulator-id>
+```
+
+`flutter run -d <id>` is unaffected — it already passes one. Device builds and
+`flutter build ipa` are unaffected.
+
+### If the target is missing
+
+The Xcode target is added by a script rather than by a hand-merged
+`project.pbxproj`, so it survives `flutter create`, `pod install`, and anything
+else that rewrites that file. Re-run it any time the target has gone:
+
+```bash
+cd apps/mobile/ios && ruby tool/add_watch_target.rb
+```
+
+It is idempotent — it reports and exits if the target is already there — and it
+needs the `xcodeproj` gem, which ships with CocoaPods.
+
+### Running it in the Simulator
+
+The watch app installs onto whichever watch simulator is *paired* with the
+iPhone simulator you are running (`xcrun simctl list pairs` shows which):
+
+```bash
+xcrun simctl boot <watch-simulator-id>
+cd apps/mobile
+flutter build ios --simulator --debug -d <iphone-simulator-id>
+xcrun simctl install <watch-simulator-id> build/ios/Debug-watchsimulator/RemoteLinkWatch.app
+xcrun simctl launch  <watch-simulator-id> com.remotelink.app.watchkitapp
+```
+
+The watch shows text only when there is nothing to control, and says which link
+is down rather than collapsing both into “not connected”:
+
+| The watch says | What is wrong |
+|---|---|
+| `Open Remote Link on your iPhone` | The watch cannot reach the phone app. Launch it on the phone. |
+| `Your iPhone isn’t connected to a computer` | The watch reached the phone; the phone is not connected to a computer. |
+| No text; the dot field fills the screen | Working. |
 
 ---
 
@@ -226,6 +303,33 @@ the phone clears the stored key and starts a fresh exchange.
 **Cursor does not move but everything else works** — Accessibility permission.
 See step 2.
 
+**The phone disconnects seconds after you leave the app** — check the
+background switch and the battery manager, in that order. Settings ›
+Background › "Stay connected in the background" runs a foreground service that
+keeps the process networked; without it, Android freezes the app and takes its
+sockets. On Xiaomi, Huawei, Oppo and Samsung the service is not enough on its
+own: those phones kill foreground services the user has not exempted, and the
+"Remote Link keeps stopping?" entry beside the switch says what to grant. iOS
+has no equivalent and the switch does not appear there.
+
+**Nothing copied on the phone reaches the computer while the phone app is in
+the background** — turn on Settings › Background › "Copy in any app, paste on
+your computer". That enables an accessibility service, which is the only way
+Android permits a background clipboard read: `getPrimaryClip` returns null to
+an app without window focus, and no permission or service type changes it.
+Some manufacturers refuse the read even then, and the app says so in the log
+rather than going quiet.
+
+The share sheet is the route that needs no grant at all: Select
+the text, Share, pick Remote Link, and it lands on the computer's clipboard
+without the app being opened first; shared files become an ordinary transfer
+offer. The restriction is the reason that route exists, and it is not fixable
+from user space.
+Android has refused clipboard reads to apps without focus since Android 10, and
+iOS puts a permission alert in front of them. The phone watches for changes and
+sends them while it is on screen, and catches up on whatever it missed the
+moment it is opened again.
+
 **Clipboard syncs one way only** — likely the concealed-content flag. Content
 copied from a password manager is deliberately not mirrored.
 
@@ -233,6 +337,35 @@ copied from a password manager is deliberately not mirrored.
 Isolation blocks synthetic input from an unelevated process into an elevated
 one. This is Windows working correctly and cannot be worked around from user
 space.
+
+---
+
+## The background service, which cannot be unit tested
+
+A foreground service needs a device, so `flutter test` cannot reach it. The
+Dart half — that the service runs for exactly as long as there is a link worth
+keeping — is pinned in `apps/mobile/test/link_service_test.dart`. The Android
+half is this table, and it wants three phones: a Pixel or emulator, one OEM
+device with battery restrictions lifted, and the same device with them applied.
+
+| # | Do this | Expect |
+|---|---|---|
+| 1 | Connect, background the app, wait ten minutes | No `socket error`, no reconnect in the log |
+| 2 | Start a file transfer, background the app halfway | It completes |
+| 3 | Look at the notification while connected | It names the computer |
+| 4 | Press Disconnect on it | Client `idle`, notification gone, app still running |
+| 5 | Deny the notification permission, then connect | No notification, link still survives (1) |
+| 6 | Disconnect from inside the app | Notification gone |
+| 7 | Turn the Background switch off mid-session | Notification gone, session intact |
+| 8 | Swipe the app out of Recents | Notification gone, session ended |
+
+Row 8 is deliberate. Swiping the task away destroys the activity and the
+Flutter engine with it, so a service that outlived it would be a notification
+claiming a connection that no longer exists.
+
+On the unexempted OEM device, rows 1 and 2 are expected to fail — that is what
+the guidance dialog is for, and the point of testing it there is to confirm the
+app says so rather than appearing broken.
 
 ---
 

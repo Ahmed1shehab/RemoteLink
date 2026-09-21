@@ -363,11 +363,11 @@ final class Win32ClipboardBackend implements ClipboardBackend {
       final bufferSize = stride * absHeight;
       final topDownBuffer = calloc<Uint8>(bufferSize);
       try {
-        final srcPixels = pointer.cast<Uint8>().elementAt(offset);
+        final srcPixels = pointer.cast<Uint8>() + offset;
         if (isBottomUp) {
           for (var y = 0; y < absHeight; y++) {
-            final srcRow = srcPixels.elementAt((absHeight - 1 - y) * stride);
-            final dstRow = topDownBuffer.elementAt(y * stride);
+            final srcRow = srcPixels + (absHeight - 1 - y) * stride;
+            final dstRow = topDownBuffer + (y * stride);
             dstRow.asTypedList(stride).setAll(0, srcRow.asTypedList(stride));
           }
         } else {
@@ -844,11 +844,10 @@ final class Win32ClipboardBackend implements ClipboardBackend {
                     p32[27] = LCS_GM_IMAGES; // bV5Intent
 
                     // Flip scanlines to bottom-up DIB order
-                    final destPixels = pointer.cast<Uint8>().elementAt(124);
+                    final destPixels = pointer.cast<Uint8>() + 124;
                     for (var y = 0; y < height; y++) {
-                      final srcRow = tempPixels.elementAt(y * stride);
-                      final dstRow =
-                          destPixels.elementAt((height - 1 - y) * stride);
+                      final srcRow = tempPixels + (y * stride);
+                      final dstRow = destPixels + (height - 1 - y) * stride;
                       dstRow
                           .asTypedList(stride)
                           .setAll(0, srcRow.asTypedList(stride));

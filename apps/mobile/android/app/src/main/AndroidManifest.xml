@@ -4,6 +4,34 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
 
+    <!-- Reading the pairing code off the computer's screen, and nothing else.
+
+         The camera is opened only by the scanner screen and closed when it
+         closes. Declared here rather than left to the scanner plugin's own
+         manifest so the permission this app asks for is visible in this app's
+         manifest, next to the reason it asks. A phone whose owner refuses it
+         still pairs: the computer appears in the list on any network that does
+         not block discovery. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- Not required: a tablet or TV box without a camera should still install
+         and work, since scanning is one of two ways in rather than the only
+         one. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+
+    <!-- Keeping the link alive while the app is off screen.
+
+         `connectedDevice` rather than `dataSync`: Android 15 caps dataSync at
+         six hours a day, which is wrong for something meant to run as long as a
+         computer is paired. connectedDevice needs one qualifying permission and
+         CHANGE_WIFI_MULTICAST_STATE above already qualifies, so this asks the
+         user for nothing they have not already granted for discovery.
+
+         POST_NOTIFICATIONS is Android 13+. Denying it hides the notification
+         and stops nothing: the service still runs and the link still holds. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
         android:label="Remote Link"
         android:name="${applicationName}"
@@ -41,6 +69,43 @@
                 <data android:mimeType="*/*"/>
             </intent-filter>
         </activity>
+        <!-- `stopWithTask="true"` on purpose, against the first instinct.
+
+             Swiping the task away destroys the activity, and the activity owns
+             the Flutter engine that owns the connection. A service outliving it
+             would be a notification saying "Connected" over a Dart isolate that
+             no longer exists. Surviving the swipe would need the engine cached
+             in the Application rather than owned by the activity — a larger
+             change than this feature justifies, and one to make deliberately if
+             the swipe-away case ever turns out to matter. -->
+        <service
+            android:name=".LinkService"
+            android:exported="false"
+            android:stopWithTask="true"
+            android:foregroundServiceType="connectedDevice"/>
+
+        <!-- Reading the clipboard while another app is on screen.
+
+             Since Android 10 `getPrimaryClip` returns null unless the calling
+             app has focus or is the default keyboard. An accessibility service
+             is the remaining route, and the only one that makes "copy in
+             Chrome, paste on the computer" possible at all.
+
+             Off unless the user enables it on the system's Accessibility
+             screen, and the app is fully functional without it. -->
+        <service
+            android:name=".ClipboardAccessibilityService"
+            android:exported="false"
+            android:label="@string/clipboard_service_summary"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/clipboard_accessibility_service"/>
+        </service>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

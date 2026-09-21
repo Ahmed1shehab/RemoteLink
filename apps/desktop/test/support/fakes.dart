@@ -11,19 +11,19 @@ import 'package:rl_protocol/rl_protocol.dart';
 
 /// Fake diagnostics snapshot for widget testing.
 const fakeDiagnostics = DiagnosticsInfo(
-  serviceStatus: const DesktopStatus(
+  serviceStatus: DesktopStatus(
     isRunning: true,
     deviceName: 'Test computer',
     boundPort: 41234,
     localAddresses: <String>['192.168.1.100', '10.0.0.5'],
     deviceId: 'test-device-id',
   ),
-  dispatcherCounters: const DispatcherCounters(
+  dispatcherCounters: DispatcherCounters(
     applied: 128,
     denied: 7,
     unsupported: 3,
   ),
-  backends: const BackendAvailability(
+  backends: BackendAvailability(
     input: BackendDiagnostic(
       name: 'Input injection',
       isAvailable: false,
@@ -41,7 +41,7 @@ const fakeDiagnostics = DiagnosticsInfo(
       unavailableReason: 'Media control is not supported on this platform',
     ),
   ),
-  devices: const <DeviceDiagnostic>[
+  devices: <DeviceDiagnostic>[
     DeviceDiagnostic(
       id: 'test-phone-1',
       name: 'Pixel 8 Pro',

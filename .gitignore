@@ -55,3 +55,6 @@ coverage/
 # so a committed baseline would be misleading rather than useful. Publish
 # numbers in docs/PERFORMANCE.md with their conditions instead.
 *.latency.json
+
+# macOS Finder metadata.
+.DS_Store

@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
@@ -439,7 +440,10 @@ void main() {
       // Shift stuck on is invisible in its consequences until three keystrokes
       // later, and the only cue was a colour change.
       final shift = tester.getSemantics(find.bySemanticsLabel('Shift').first);
-      expect(shift.getSemanticsData().hasFlag(SemanticsFlag.isToggled), isTrue);
+      expect(
+        shift.getSemanticsData().flagsCollection.isToggled,
+        Tristate.isTrue,
+      );
 
       handle.dispose();
     });
@@ -450,10 +454,14 @@ void main() {
       await tester.pump();
 
       final shift = tester.getSemantics(find.bySemanticsLabel('Shift').first);
-      expect(shift.getSemanticsData().hasFlag(SemanticsFlag.hasToggledState),
-          isTrue);
       expect(
-          shift.getSemanticsData().hasFlag(SemanticsFlag.isToggled), isFalse);
+        shift.getSemanticsData().flagsCollection.isToggled != Tristate.none,
+        isTrue,
+      );
+      expect(
+        shift.getSemanticsData().flagsCollection.isToggled,
+        isNot(Tristate.isTrue),
+      );
 
       handle.dispose();
     });
@@ -468,8 +476,8 @@ void main() {
       // one of sixty keys.
       final q = tester.getSemantics(find.bySemanticsLabel('Q'));
       expect(
-        q.getSemanticsData().hasFlag(SemanticsFlag.hasToggledState),
-        isFalse,
+        q.getSemanticsData().flagsCollection.isToggled,
+        Tristate.none,
       );
 
       handle.dispose();

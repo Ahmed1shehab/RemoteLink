@@ -299,12 +299,15 @@ final class Win32BrightnessBackend implements BrightnessBackend {
 
   Future<bool> _setWmiBrightness(int levelPercent) async {
     try {
+      final command =
+          '(Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightnessMethods) '
+          '| Invoke-CimMethod -MethodName WmiSetBrightness '
+          '-Arguments @{Timeout=1; Brightness=$levelPercent}';
       final res = await Process.run('powershell', <String>[
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        '(Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightnessMethods) | '
-            'Invoke-CimMethod -MethodName WmiSetBrightness -Arguments @{Timeout=1; Brightness=$levelPercent}',
+        command,
       ]);
       return res.exitCode == 0;
     } catch (e) {

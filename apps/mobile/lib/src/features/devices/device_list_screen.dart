@@ -8,13 +8,16 @@ import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/brand.dart';
 import '../../app/providers.dart';
 import '../control/control_screen.dart';
+import '../host/host_providers.dart';
+import '../host/phone_host_service.dart';
 import '../pairing/pairing_screen.dart';
+import '../pairing/qr_scanner_screen.dart';
 import '../settings/settings_screen.dart';
 import 'auto_connect.dart';
-import 'wake_on_lan.dart';
 
 /// One row in the list, from either discovery or the trust store.
 ///
@@ -33,7 +36,6 @@ class _Entry {
     required this.isLive,
     this.platform = PlatformKind.unknown,
     this.publicKey,
-    this.macAddress,
   });
 
   final DeviceId? id;
@@ -46,8 +48,8 @@ class _Entry {
   /// address used to be dropped entirely, so the one thing the user was sure
   /// they had set up was the one thing the screen would not show them — and on
   /// a network where discovery finds nothing, that left the list permanently
-  /// empty. Showing the row and asking for the address when it is tapped is
-  /// strictly better than pretending the pairing does not exist.
+  /// empty. Showing the row and sending the tap to the scanner is strictly
+  /// better than pretending the pairing does not exist.
   final String? host;
   final int port;
 
@@ -62,20 +64,6 @@ class _Entry {
   /// Present only when paired; turns trust-on-first-use into strict
   /// verification.
   final Uint8List? publicKey;
-
-  /// The computer's hardware address, if it reported one while connected.
-  ///
-  /// Its only use is Wake-on-LAN, so it is absent for anything this phone has
-  /// not paired with and for computers running a build that predates the field.
-  final MacAddress? macAddress;
-
-  /// Whether offering to wake this computer could plausibly do something.
-  ///
-  /// A live computer does not need waking, an unpaired one is not ours to wake,
-  /// and without a hardware address there is nothing to address the packet to.
-  /// The last of those is the reason this is a getter rather than a bare
-  /// `!isLive`: a Wake button that cannot possibly work is worse than no button.
-  bool get canWake => isPaired && !isLive && macAddress != null;
 }
 
 /// Lists computers and connects to one.
@@ -90,8 +78,12 @@ class _Entry {
 const Duration kDiscoveryPatience = Duration(seconds: 6);
 
 /// The app's first screen, and its job is to have as little on it as possible:
-/// open RemoteLink, see your computer, tap it, be in control. Manual entry
-/// exists as a fallback, not as the path — it is one tap away, not in the way.
+/// open RemoteLink, see your computer, tap it, be in control. There are two
+/// ways in and no third: tap a computer the phone found, or scan the code the
+/// computer is showing. Typing an address and sending a wake-up packet used to
+/// sit here too, and both were removed — the first because scanning carries
+/// the address *and* the key, and the second because it could not report
+/// whether it had done anything, so it read as a broken button.
 class DeviceListScreen extends ConsumerStatefulWidget {
   const DeviceListScreen({super.key});
 
@@ -141,6 +133,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     // Navigating from a listener rather than from build: build can run many
     // times, and pushing a route from it would stack duplicate touchpads.
     ref.listen(autoConnectProvider, (previous, next) {
@@ -170,8 +163,14 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
         const <DiscoveredDevice>[];
     final paired =
         ref.watch(trustedPeersProvider).valueOrNull ?? const <TrustedPeer>[];
-    final wakeAddresses = ref.watch(wakeAddressesProvider);
-    final entries = _merge(discovered, paired, wakeAddresses);
+    final connectedPeers = ref.watch(peerLinksProvider);
+    final connectedIds = ref.watch(connectedDeviceIdsProvider);
+    final entries = _merge(
+      discovered,
+      paired,
+      connectedPeers: connectedPeers,
+      connectedIds: connectedIds,
+    );
     final clientState = ref.watch(clientStateProvider).valueOrNull;
     final client = ref.watch(clientProvider).valueOrNull;
     final connectedId = ref.watch(connectedDeviceIdProvider);
@@ -189,10 +188,14 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
           padding: EdgeInsets.only(left: 12),
           child: Center(child: BrandMark(size: 28)),
         ),
-        title: const Text('Computers'),
+        // "Devices", not "Computers". The list has never been only computers
+        // since a phone could advertise itself, and a heading that says
+        // otherwise is the app telling the user the phone they can see in the
+        // list is not really there.
+        title: const Text('Devices'),
         actions: <Widget>[
           IconButton(
-            icon: const Icon(Icons.refresh_rounded),
+            icon: const AppIcon(AppIcons.filter),
             tooltip: 'Search again',
             onPressed: () async {
               _beginSearchWindow();
@@ -201,7 +204,10 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
             },
           ),
           IconButton(
-            icon: const Icon(Icons.settings_outlined),
+            icon: AppIcon(
+              AppIcons.settings,
+              color: scheme.onSurfaceVariant,
+            ),
             tooltip: 'Settings',
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
@@ -211,10 +217,14 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
           ),
         ],
       ),
+      // The one action on this screen, because tapping a row is the other one
+      // and there is no third. It is also the only route that works on a
+      // network where discovery is blocked, which is why it is a button on the
+      // screen rather than an item in a menu.
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _promptForAddress(context),
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Connect by address'),
+        onPressed: () => _scanCode(context),
+        icon: const AppIcon(AppIcons.qrCode),
+        label: const Text('Scan code'),
       ),
       body: entries.isEmpty
           ? _Searching(
@@ -226,6 +236,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
                 final backend = await ref.read(discoveryProvider.future);
                 await backend.refresh();
               },
+              onScanCode: () => _scanCode(context),
             )
           : RefreshIndicator(
               onRefresh: () async {
@@ -240,7 +251,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
                   final entry = entries[index];
                   final wasRevoked = entry.id == revokedPeerId;
                   final isConnected =
-                      entry.id != null && entry.id == connectedId;
+                      entry.id != null && connectedIds.contains(entry.id);
                   return _DeviceTile(
                     entry: entry,
                     wasRevoked: wasRevoked,
@@ -256,12 +267,11 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
                                 ),
                     onPairAgain:
                         wasRevoked ? () => _pairAgain(context, entry) : null,
-                    onDisconnect: isConnected ? _disconnect : null,
+                    onDisconnect: isConnected
+                        ? () => _disconnect(peerId: entry.id)
+                        : null,
                     onRename: entry.isPaired && entry.id != null
                         ? () => _renameComputer(context, entry)
-                        : null,
-                    onWake: entry.canWake && !wasRevoked
-                        ? () => _wake(context, entry)
                         : null,
                   );
                 },
@@ -273,35 +283,69 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
   /// Combines live beacons with stored pairings, preferring the live address.
   static List<_Entry> _merge(
     List<DiscoveredDevice> discovered,
-    List<TrustedPeer> paired,
-    Map<String, MacAddress> wakeAddresses,
-  ) {
+    List<TrustedPeer> paired, {
+    List<PeerLink> connectedPeers = const <PeerLink>[],
+    Set<DeviceId> connectedIds = const <DeviceId>{},
+  }) {
     final byId = <String, TrustedPeer>{
       for (final peer in paired) peer.id.value: peer,
+    };
+    final discById = <String, DiscoveredDevice>{
+      for (final device in discovered) device.id.value: device,
     };
     final entries = <_Entry>[];
     final seen = <String>{};
 
+    // 1. Any device currently connected (inbound or outbound) is always shown and is live.
+    for (final peer in connectedPeers) {
+      if (seen.contains(peer.id.value)) continue;
+      final storedPeer = byId[peer.id.value];
+      final disc = discById[peer.id.value];
+      final effectiveName = peer.name.isNotEmpty && peer.name != peer.id.short
+          ? peer.name
+          : (storedPeer?.name ?? peer.name);
+      final effectivePlatform = peer.platform != PlatformKind.unknown
+          ? peer.platform
+          : (storedPeer?.platform ??
+              disc?.beacon.platform ??
+              PlatformKind.unknown);
+
+      seen.add(peer.id.value);
+      entries.add(
+        _Entry(
+          id: peer.id,
+          name: effectiveName,
+          host: disc?.address ?? storedPeer?.lastAddress ?? 'Connected device',
+          port: disc?.port ??
+              (peer.isHandheld ? kPhoneHostPort : kDefaultServicePort),
+          isPaired: storedPeer != null,
+          isLive: true,
+          platform: effectivePlatform,
+          publicKey: storedPeer?.publicKey,
+        ),
+      );
+    }
+
+    // 2. Discovered devices.
     for (final device in discovered) {
+      if (seen.contains(device.id.value)) continue;
       final peer = byId[device.id.value];
       seen.add(device.id.value);
       entries.add(
         _Entry(
           id: device.id,
           name: peer?.name ?? device.name,
-          // The live address wins over the stored one: a computer that moved to
-          // a new DHCP lease is announcing where it actually is now.
           host: device.address,
           port: device.port,
           isPaired: peer != null,
           isLive: true,
           platform: device.beacon.platform,
           publicKey: peer?.publicKey,
-          macAddress: wakeAddresses[device.id.value],
         ),
       );
     }
 
+    // 3. Paired devices that are neither currently connected nor discovered.
     for (final peer in paired) {
       if (seen.contains(peer.id.value)) continue;
       final address = peer.lastAddress;
@@ -310,17 +354,22 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
           id: peer.id,
           name: peer.name,
           host: address,
-          port: kDefaultServicePort,
+          port: peer.platform == PlatformKind.android ||
+                  peer.platform == PlatformKind.ios
+              ? kPhoneHostPort
+              : kDefaultServicePort,
           isPaired: true,
           isLive: false,
           platform: peer.platform,
           publicKey: peer.publicKey,
-          macAddress: wakeAddresses[peer.id.value],
         ),
       );
     }
 
     entries.sort((a, b) {
+      final aConnected = a.id != null && connectedIds.contains(a.id);
+      final bConnected = b.id != null && connectedIds.contains(b.id);
+      if (aConnected != bConnected) return aConnected ? -1 : 1;
       if (a.isLive != b.isLive) return a.isLive ? -1 : 1;
       if (a.isPaired != b.isPaired) return a.isPaired ? -1 : 1;
       return a.name.toLowerCase().compareTo(b.name.toLowerCase());
@@ -328,36 +377,61 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     return entries;
   }
 
-  /// Asks for an address, optionally to reach an already-paired computer.
+  /// Opens the camera, and connects to whatever computer the code names.
   ///
-  /// [forEntry] carries the pairing through, so typing the address of a
-  /// computer already in the trust store still verifies against its stored key
-  /// rather than dropping back to trust-on-first-use.
-  Future<void> _promptForAddress(
-    BuildContext context, {
-    _Entry? forEntry,
-  }) async {
-    final typed = await showDialog<_Entry>(
-      context: context,
-      builder: (context) => _ManualAddressDialog(knownName: forEntry?.name),
+  /// The scanned key is passed as the expected server key, which is the entire
+  /// reason this path exists: the handshake then either authenticates against
+  /// the key the camera read or fails outright, with no window in which an
+  /// attacker on the network could substitute their own. That is strictly
+  /// stronger than the six digits, and it is why a scan never falls back to
+  /// them — see [PairingScreen.viaScannedCode].
+  ///
+  /// It also happens to carry the address, which is what makes it the answer
+  /// on a network where discovery finds nothing.
+  Future<void> _scanCode(BuildContext context) async {
+    final payload = await Navigator.of(context).push<PairingPayload>(
+      MaterialPageRoute<PairingPayload>(
+        builder: (_) => const QrScannerScreen(),
+      ),
     );
-    if (typed == null || !context.mounted) return;
+    if (payload == null || !context.mounted) return;
 
-    final entry = forEntry == null
-        ? typed
-        : _Entry(
-            id: forEntry.id,
-            name: forEntry.name,
-            host: typed.host,
-            port: typed.port,
-            isPaired: forEntry.isPaired,
-            isLive: false,
-            platform: forEntry.platform,
-            publicKey: forEntry.publicKey,
-            macAddress: forEntry.macAddress,
-          );
+    // Switching computers is still worth asking about, exactly as it is when
+    // tapping a row: a scan is a deliberate act, but it is not a decision to
+    // drop a transfer that is halfway through.
+    final connectedId = ref.read(connectedDeviceIdProvider);
+    if (connectedId != null && connectedId != payload.deviceId) {
+      if (!await _confirmSwitch(context, payload.name)) return;
+      if (!context.mounted) return;
+      await _disconnect();
+      if (!context.mounted) return;
+    }
+
+    final client = await ref.read(clientProvider.future);
     if (!context.mounted) return;
-    await _connect(context, entry);
+
+    await client.connect(
+      ConnectionTarget(
+        host: payload.host,
+        port: payload.port,
+        deviceId: payload.deviceId,
+        serverPublicKey: payload.publicKey,
+        displayName: payload.name,
+      ),
+    );
+
+    unawaited(_rememberAddress(payload.deviceId, payload.host));
+
+    if (!context.mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PairingScreen(
+          deviceName: payload.name,
+          address: payload.host,
+          viaScannedCode: true,
+        ),
+      ),
+    );
   }
 
   /// Goes back to the computer already connected, without reconnecting.
@@ -377,12 +451,20 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
   /// The app could reach a connected state and offer no way out of it short of
   /// force-quitting: auto-connect reconnects on launch, and leaving the
   /// touchpad only cancels auto-connect for that one attempt.
-  Future<void> _disconnect() async {
+  Future<void> _disconnect({DeviceId? peerId}) async {
     // Cancelled first. Without this the supervisor treats the close as a drop
     // and dials straight back in, so the button appears to do nothing.
     ref.read(autoConnectProvider.notifier).cancel();
     final client = await ref.read(clientProvider.future);
-    await client.disconnect();
+    if (peerId == null || client.session?.peerId == peerId) {
+      await client.disconnect();
+    }
+    if (peerId != null) {
+      final host = ref.read(phoneHostServiceProvider).valueOrNull;
+      if (host != null) {
+        await host.disconnectPeer(peerId);
+      }
+    }
   }
 
   /// Asks before replacing a live connection with a different computer.
@@ -422,12 +504,13 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     bool freshPairing = false,
     bool replacing = false,
   }) async {
-    // A paired computer we have no address for. Asking is the only thing that
-    // can help, and it is what the user would have to do anyway — the
-    // alternative was hiding the row, which taught them nothing.
+    // A paired computer we have no address for. The code on its screen is the
+    // only thing that can supply one, so the tap goes there rather than
+    // failing — the alternative was hiding the row, which taught the user
+    // nothing at all.
     final host = entry.host;
     if (host == null) {
-      await _promptForAddress(context, forEntry: entry);
+      await _scanCode(context);
       return;
     }
 
@@ -510,46 +593,6 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     await _connect(context, entry, freshPairing: true);
   }
 
-  /// Sends a Wake-on-LAN magic packet, after telling the user what it needs.
-  ///
-  /// The confirmation step is not ceremony. Wake-on-LAN depends on three
-  /// settings the phone cannot see and cannot check — firmware, driver, and
-  /// whether the machine is on Ethernet at all — and it reports nothing back,
-  /// so a bare button that fires and shrugs leaves the user with no idea
-  /// whether to wait, retry, or go and change a BIOS setting. Saying so before
-  /// the packet goes out is the only place the explanation is useful.
-  Future<void> _wake(BuildContext context, _Entry entry) async {
-    final mac = entry.macAddress;
-    if (mac == null) return;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => _WakeDialog(name: entry.name, mac: mac),
-    );
-    if (confirmed != true || !context.mounted) return;
-
-    final messenger = ScaffoldMessenger.of(context);
-    final attempt = await ref
-        .read(wakeOnLanSenderProvider)
-        .wake(mac, lastKnownAddress: entry.host);
-
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          attempt.anyDelivered
-              // Deliberately not "waking up": nothing acknowledges a magic
-              // packet, so claiming the computer is waking would be a guess
-              // presented as a fact.
-              ? 'Wake-up sent to ${entry.name}. Give it up to a minute, then '
-                  'search again.'
-              : 'This network refused the wake-up broadcast. It cannot be sent '
-                  'from a mobile data connection or a guest network.',
-        ),
-        duration: const Duration(seconds: 6),
-      ),
-    );
-  }
-
   Future<void> _renameComputer(BuildContext context, _Entry entry) async {
     final peerId = entry.id;
     if (peerId == null) return;
@@ -585,126 +628,6 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
       }
     }
   }
-}
-
-/// Asks for a host and port.
-///
-/// The only way in on a network that blocks multicast, or on an iPhone without
-/// the multicast entitlement Apple grants by application. Not a debug affordance
-/// — it is the documented fallback, so it is built to be used.
-class _ManualAddressDialog extends StatefulWidget {
-  const _ManualAddressDialog({this.knownName});
-
-  /// The computer this address is for, when it is already paired.
-  ///
-  /// Only changes what the dialog says. Being told "Where is Ahmed's MacBook?"
-  /// rather than "Connect by address" is the difference between answering a
-  /// question about a machine you own and being asked to configure something.
-  final String? knownName;
-
-  @override
-  State<_ManualAddressDialog> createState() => _ManualAddressDialogState();
-}
-
-class _ManualAddressDialogState extends State<_ManualAddressDialog> {
-  final TextEditingController _host = TextEditingController();
-  final TextEditingController _port =
-      TextEditingController(text: '$kDefaultServicePort');
-  String? _error;
-
-  @override
-  void dispose() {
-    _host.dispose();
-    _port.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final host = _host.text.trim();
-    final port = int.tryParse(_port.text.trim());
-
-    if (host.isEmpty) {
-      setState(() => _error = 'Enter the address shown on your computer.');
-      return;
-    }
-    if (port == null || port <= 0 || port > 65535) {
-      setState(() => _error = 'Port must be between 1 and 65535.');
-      return;
-    }
-
-    Navigator.of(context).pop(
-      _Entry(
-        name: host,
-        host: host,
-        port: port,
-        isPaired: false,
-        isLive: false,
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-        title: Text(
-          widget.knownName == null
-              ? 'Connect by address'
-              : 'Where is ${widget.knownName}?',
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'Remote Link on your computer shows its address under '
-              '“Discoverable on this network”.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _host,
-              autofocus: true,
-              keyboardType: TextInputType.url,
-              autocorrect: false,
-              // A hostname or IP is never a sentence; autocapitalising it turns
-              // a working address into a failed connection.
-              textCapitalization: TextCapitalization.none,
-              decoration: const InputDecoration(
-                labelText: 'Address',
-                hintText: '192.168.1.42',
-                border: OutlineInputBorder(),
-              ),
-              onSubmitted: (_) => _submit(),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _port,
-              keyboardType: TextInputType.number,
-              inputFormatters: <TextInputFormatter>[
-                FilteringTextInputFormatter.digitsOnly,
-              ],
-              decoration: const InputDecoration(
-                labelText: 'Port',
-                border: OutlineInputBorder(),
-              ),
-              onSubmitted: (_) => _submit(),
-            ),
-            if (_error != null) ...<Widget>[
-              const SizedBox(height: 12),
-              Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
-          ],
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(onPressed: _submit, child: const Text('Connect')),
-        ],
-      );
 }
 
 /// The "this is the one you are on" marker.
@@ -758,7 +681,6 @@ class _DeviceTile extends StatelessWidget {
     this.isConnected = false,
     this.onDisconnect,
     this.onRename,
-    this.onWake,
   });
 
   final _Entry entry;
@@ -775,10 +697,6 @@ class _DeviceTile extends StatelessWidget {
 
   final VoidCallback? onRename;
 
-  /// Null unless this computer is paired, absent, and has a known hardware
-  /// address — the only combination where waking it is a real option.
-  final VoidCallback? onWake;
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -789,16 +707,17 @@ class _DeviceTile extends StatelessWidget {
         leading: Container(
           width: 48,
           height: 48,
+          alignment: Alignment.center,
           decoration: BoxDecoration(
             color: (entry.isLive ? scheme.primary : scheme.onSurfaceVariant)
                 .withValues(alpha: isConnected ? 0.18 : 0.10),
             borderRadius: BorderRadius.circular(15),
           ),
-          child: Icon(
+          child: AppIcon(
             switch (entry.platform) {
-              PlatformKind.macos => Icons.laptop_mac_rounded,
-              PlatformKind.windows => Icons.laptop_windows_rounded,
-              _ => Icons.computer_rounded,
+              PlatformKind.macos => AppIcons.monitorSmartphone,
+              PlatformKind.windows => AppIcons.monitorSmartphone,
+              _ => AppIcons.monitorSmartphone,
             },
             // The platform is carried by the glyph alone. `ListTile` merges its
             // children into one node, so this is announced ahead of the name:
@@ -809,13 +728,8 @@ class _DeviceTile extends StatelessWidget {
               PlatformKind.linux => 'Linux computer',
               _ => 'Computer',
             },
-            size: 25,
-            // Dimmed when the computer is paired but not currently announcing: the
-            // address may be stale, and the tap may fail. Better to show it looking
-            // uncertain than to hide it or pretend it is online.
-            color: entry.isLive
-                ? null
-                : scheme.onSurfaceVariant.withValues(alpha: 0.5),
+            size: 28,
+            color: scheme.onSurfaceVariant,
           ),
         ),
         // The badge sits on the second line rather than beside the name.
@@ -831,7 +745,7 @@ class _DeviceTile extends StatelessWidget {
                     ? 'This computer removed your access'
                     : switch ((entry.isPaired, entry.isLive)) {
                         _ when entry.host == null =>
-                          'Paired · tap to enter its address',
+                          'Paired · tap to scan its code',
                         (true, true) => 'Paired · ${entry.host}',
                         (true, false) =>
                           'Paired · not seen right now · ${entry.host}',
@@ -853,14 +767,12 @@ class _DeviceTile extends StatelessWidget {
                     ? Row(
                         mainAxisSize: MainAxisSize.min,
                         children: <Widget>[
-                          if (onWake != null)
-                            TextButton(
-                              onPressed: onWake,
-                              child: const Text('Wake'),
-                            ),
                           if (onRename != null)
                             IconButton(
-                              icon: const Icon(Icons.edit_outlined),
+                              icon: AppIcon(
+                                AppIcons.edit,
+                                color: scheme.onSurfaceVariant,
+                              ),
                               tooltip: 'Rename computer',
                               onPressed: onRename,
                             ),
@@ -869,78 +781,20 @@ class _DeviceTile extends StatelessWidget {
                           // Excluded rather than labelled: the fix for an unlabelled
                           // icon is not always a label.
                           ExcludeSemantics(
-                            child: Icon(Icons.verified_rounded,
-                                color: scheme.primary),
+                            child: AppIcon(
+                              AppIcons.qrCode,
+                              size: 18,
+                              color: scheme.primary,
+                            ),
                           ),
                         ],
                       )
                     : const ExcludeSemantics(
-                        child: Icon(Icons.chevron_right_rounded),
+                        child: AppIcon(AppIcons.qrCode, size: 18),
                       ),
         onTap: onTap,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       ),
-    );
-  }
-}
-
-/// Explains what Wake-on-LAN needs, then sends the packet.
-///
-/// Every requirement listed here is one the phone cannot detect and the user
-/// cannot infer from a failure, because a failed wake looks exactly like a
-/// successful one from this side. Stating them up front is what stops "Wake"
-/// from being a button that appears broken on the very common setup — a laptop
-/// on Wi-Fi — where it can never work.
-class _WakeDialog extends StatelessWidget {
-  const _WakeDialog({required this.name, required this.mac});
-
-  final String name;
-  final MacAddress mac;
-
-  @override
-  Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-    return AlertDialog(
-      title: Text('Wake $name'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(
-            'Broadcasts a wake-up packet to ${mac.canonical}.',
-            style: textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 12),
-          Text('This only works if:', style: textTheme.bodyMedium),
-          const SizedBox(height: 8),
-          Text(
-            '•  The computer is connected by Ethernet cable. Most Wi-Fi '
-            'adapters cannot be woken this way.\n'
-            '•  Wake-on-LAN is enabled in the computer’s BIOS or UEFI '
-            'firmware.\n'
-            '•  “Wake on Magic Packet” is enabled for its network adapter in '
-            'the operating system.\n'
-            '•  This phone is on the same Wi-Fi network, not mobile data.',
-            style: textTheme.bodySmall,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'A sleeping computer cannot confirm it heard the packet, so '
-            'Remote Link cannot tell you whether this worked.',
-            style: textTheme.bodySmall,
-          ),
-        ],
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('Send wake-up'),
-        ),
-      ],
     );
   }
 }
@@ -1053,6 +907,7 @@ class _Searching extends StatelessWidget {
     required this.discoveryWorks,
     required this.stillLooking,
     required this.onSearchAgain,
+    required this.onScanCode,
   });
 
   /// False once the platform has actually refused the discovery traffic.
@@ -1074,6 +929,12 @@ class _Searching extends StatelessWidget {
 
   final Future<void> Function() onSearchAgain;
 
+  /// The way in when searching cannot work, offered right here rather than
+  /// left to the button at the bottom of the screen. This is the moment the
+  /// user needs it, and a paragraph pointing at a control somewhere else is
+  /// how an empty screen becomes a dead end.
+  final VoidCallback onScanCode;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -1088,8 +949,8 @@ class _Searching extends StatelessWidget {
           const Center(child: CircularProgressIndicator())
         else
           ExcludeSemantics(
-            child: Icon(
-              Icons.wifi_find_outlined,
+            child: AppIcon(
+              AppIcons.qrCode,
               size: 48,
               color: scheme.onSurfaceVariant,
             ),
@@ -1109,9 +970,9 @@ class _Searching extends StatelessWidget {
           switch ((discoveryWorks, stillLooking)) {
             (false, _) => 'iPhones need a special Apple permission to search '
                 'the local network, and some Wi-Fi networks block it '
-                'entirely.\n\nTap \u201cConnect by address\u201d and enter the '
-                'address shown on your computer. Everything else works exactly '
-                'the same.',
+                'entirely.\n\nScan the code your computer shows instead — it '
+                'carries the address, so searching is not needed. Everything '
+                'else works exactly the same.',
             (true, true) => 'Make sure Remote Link is running on your computer '
                 'and both devices are on the same Wi-Fi network.',
             // Said plainly, because after this long the honest answer is that
@@ -1121,9 +982,9 @@ class _Searching extends StatelessWidget {
               'Check that Remote Link is running on your computer and that both '
                   'devices are on the same Wi-Fi.\n\nSome networks — guest '
                   'Wi-Fi in particular — block the traffic that finds '
-                  'computers automatically. If yours does, tap \u201cConnect by '
-                  'address\u201d and enter the address shown on your computer. '
-                  'It is remembered afterwards.',
+                  'computers automatically. If yours does, click '
+                  '\u201cPair a phone\u201d on the computer and scan the code '
+                  'it shows. It is remembered afterwards.',
           },
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodySmall,
@@ -1131,9 +992,17 @@ class _Searching extends StatelessWidget {
         if (!searching) ...<Widget>[
           const SizedBox(height: 24),
           Center(
+            child: FilledButton.icon(
+              onPressed: onScanCode,
+              icon: const AppIcon(AppIcons.qrCode),
+              label: const Text('Scan code'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Center(
             child: TextButton.icon(
               onPressed: onSearchAgain,
-              icon: const Icon(Icons.refresh),
+              icon: const AppIcon(AppIcons.settings),
               label: const Text('Search again'),
             ),
           ),

@@ -1,0 +1,95 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "UnifiedLInk",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "desktop",
+            "cwd": "apps/desktop",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "desktop (profile mode)",
+            "cwd": "apps/desktop",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "desktop (release mode)",
+            "cwd": "apps/desktop",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        },
+        {
+            "name": "mobile",
+            "cwd": "apps/mobile",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "mobile (profile mode)",
+            "cwd": "apps/mobile",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "mobile (release mode)",
+            "cwd": "apps/mobile",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        },
+        {
+            "name": "rl_core",
+            "cwd": "packages/rl_core",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "rl_crypto",
+            "cwd": "packages/rl_crypto",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "rl_native",
+            "cwd": "packages/rl_native",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "rl_protocol",
+            "cwd": "packages/rl_protocol",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "rl_transport",
+            "cwd": "packages/rl_transport",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "brand",
+            "cwd": "tool/brand",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "latency_harness",
+            "cwd": "tool/latency_harness",
+            "request": "launch",
+            "type": "dart"
+        }
+    ]
+}

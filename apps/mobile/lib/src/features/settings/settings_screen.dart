@@ -8,9 +8,16 @@ import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/brand.dart';
 import '../../app/providers.dart';
+import '../clipboard/clipboard_history_controller.dart';
 import '../devices/bonjour_discovery.dart';
+import '../devices/link_service.dart';
+import '../devices/remember_prompt.dart';
+import '../host/host_providers.dart';
+import '../host/phone_host_service.dart';
+import '../watch/watch_bridge.dart';
 
 /// Settings screen for configuring device identity, managing paired computers,
 /// adjusting touchpad and clipboard preferences, inspecting diagnostics, and
@@ -25,20 +32,28 @@ class SettingsScreen extends ConsumerWidget {
         title: const Text('Settings'),
       ),
       body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         children: const <Widget>[
           _ThisPhoneSection(),
-          SizedBox(height: 16),
-          _PairedComputersSection(),
-          SizedBox(height: 16),
+          SizedBox(height: 12),
+          _AppearanceSection(),
+          SizedBox(height: 12),
           _TouchpadSection(),
-          SizedBox(height: 16),
+          SizedBox(height: 12),
+          _ReceivingSection(),
+          SizedBox(height: 12),
+          _PairedComputersSection(),
+          SizedBox(height: 12),
           _ClipboardSection(),
-          SizedBox(height: 16),
+          SizedBox(height: 12),
+          _BackgroundSection(),
+          SizedBox(height: 12),
+          _AppleWatchSection(),
+          SizedBox(height: 12),
           _DiagnosticsSection(),
-          SizedBox(height: 16),
+          SizedBox(height: 12),
           _AboutSection(),
-          SizedBox(height: 24),
+          SizedBox(height: 16),
         ],
       ),
     );
@@ -69,16 +84,16 @@ class _ThisPhoneSection extends ConsumerWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.smartphone,
+              icon: AppIcons.monitorSmartphone,
               title: 'This Phone',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Device name'),
@@ -89,12 +104,15 @@ class _ThisPhoneSection extends ConsumerWidget {
                 ),
               ),
               trailing: IconButton(
-                icon: const Icon(Icons.edit_outlined),
+                icon: AppIcon(
+                  AppIcons.edit,
+                  color: colorScheme.onSurfaceVariant,
+                ),
                 tooltip: 'Rename this phone',
                 onPressed: () => _promptRenamePhone(context, ref, phoneName),
               ),
             ),
-            const Divider(height: 16),
+            const Divider(height: 12),
             identityAsync.when(
               loading: () => const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
@@ -115,7 +133,7 @@ class _ThisPhoneSection extends ConsumerWidget {
                         color: colorScheme.onSurfaceVariant,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     SelectableText(
                       identity.id.value,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -123,14 +141,14 @@ class _ThisPhoneSection extends ConsumerWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     Text(
                       'Public-key fingerprint',
                       style: theme.textTheme.labelMedium?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     SelectableText(
                       fingerprint,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -227,7 +245,181 @@ class _RenamePhoneDialogState extends ConsumerState<_RenamePhoneDialog> {
 }
 
 // ---------------------------------------------------------------------------
-// 2. PAIRED COMPUTERS
+// 2. APPEARANCE
+// ---------------------------------------------------------------------------
+
+/// Light, dark, or whatever the phone says.
+///
+/// A [SegmentedButton] rather than a switch, because there are three states and
+/// the third one — follow the system — is not the absence of the other two.
+class _AppearanceSection extends ConsumerWidget {
+  const _AppearanceSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final mode = ref.watch(themeModeProvider);
+    final notifier = ref.read(themeModeProvider.notifier);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            _SectionHeader(
+              icon: AppIcons.settings,
+              title: 'Appearance',
+              color: colorScheme.primary,
+            ),
+            const SizedBox(height: 10),
+            // Full width so the three labels have room at a large text size;
+            // a segmented button sized to its content wraps 'System' onto two
+            // lines before the phone runs out of width.
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<ThemeMode>(
+                showSelectedIcon: false,
+                segments: const <ButtonSegment<ThemeMode>>[
+                  ButtonSegment<ThemeMode>(
+                    value: ThemeMode.system,
+                    icon: AppIcon(AppIcons.settings, size: 18),
+                    label: Text('System'),
+                    tooltip: 'Follow the phone\u2019s setting',
+                  ),
+                  ButtonSegment<ThemeMode>(
+                    value: ThemeMode.light,
+                    icon: AppIcon(AppIcons.settings, size: 18),
+                    label: Text('Light'),
+                    tooltip: 'Always light',
+                  ),
+                  ButtonSegment<ThemeMode>(
+                    value: ThemeMode.dark,
+                    icon: AppIcon(AppIcons.settings, size: 18),
+                    label: Text('Dark'),
+                    tooltip: 'Always dark',
+                  ),
+                ],
+                selected: <ThemeMode>{mode},
+                onSelectionChanged: (selection) =>
+                    notifier.setThemeMode(selection.first),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 3. RECEIVING
+// ---------------------------------------------------------------------------
+
+/// Whether other devices can find this phone and send to it.
+///
+/// The one switch in this app that turns a feature off rather than on, and it
+/// is here because the feature has a cost that is not obvious from using it:
+/// while it is on, this phone publishes its name on the Wi-Fi and holds a
+/// listening socket. Nothing can arrive unasked — an unknown device still has
+/// to be confirmed by six digits, and a known one still has to have its
+/// transfer accepted — but being *listed* is itself something a person may not
+/// want on a network they do not trust, and that is not a decision this app
+/// gets to make for them.
+class _ReceivingSection extends ConsumerWidget {
+  const _ReceivingSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final wanted = ref.watch(receivingProvider);
+    final live = ref.watch(receivingLiveProvider);
+    final name = ref.watch(deviceNameProvider);
+    final connected =
+        ref.watch(inboundLinksProvider).valueOrNull ?? const <InboundLink>[];
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            _SectionHeader(
+              icon: AppIcons.receive,
+              title: 'Receiving',
+              color: colorScheme.primary,
+            ),
+            const SizedBox(height: 10),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: wanted,
+              onChanged: (enabled) =>
+                  ref.read(receivingProvider.notifier).setReceiving(enabled),
+              title: const Text('Let nearby devices send to this phone'),
+              subtitle: Text(
+                wanted
+                    // The state, not the setting. The two differ when the
+                    // socket could not bind or has not come up yet, and a line
+                    // that reported the preference would tell someone they are
+                    // findable at the exact moment they are not.
+                    ? live
+                        ? 'Visible on this Wi-Fi as “$name”'
+                        : 'Starting…'
+                    : 'This phone will not appear on other devices',
+              ),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: ref.watch(askBeforeConnectingProvider),
+              onChanged: (enabled) => ref
+                  .read(askBeforeConnectingProvider.notifier)
+                  .set(enabled: enabled),
+              title: const Text('Ask before a paired device connects'),
+              subtitle: Text(
+                ref.watch(askBeforeConnectingProvider)
+                    ? 'Wait for approval before connecting'
+                    : 'Connect automatically without asking',
+              ),
+            ),
+            if (connected.isNotEmpty) ...<Widget>[
+              const Divider(height: 16),
+              Text(
+                connected.length == 1
+                    ? 'Connected now'
+                    : '${connected.length} connected now',
+                style: theme.textTheme.labelLarge,
+              ),
+              const SizedBox(height: 6),
+              for (final link in connected)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    children: <Widget>[
+                      AppIcon(
+                        AppIcons.monitorSmartphone,
+                        size: 18,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child:
+                            Text(link.name, style: theme.textTheme.bodyMedium),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 4. PAIRED DEVICES
 // ---------------------------------------------------------------------------
 
 class _PairedComputersSection extends ConsumerWidget {
@@ -241,16 +433,18 @@ class _PairedComputersSection extends ConsumerWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.devices,
-              title: 'Paired Computers',
+              icon: AppIcons.monitorSmartphone,
+              // Not "Computers" any more: a paired phone lands in the same
+              // trust store and is revoked from the same list.
+              title: 'Paired Devices',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             peersAsync.when(
               loading: () => const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
@@ -263,7 +457,7 @@ class _PairedComputersSection extends ConsumerWidget {
               data: (peers) {
                 if (peers.isEmpty) {
                   return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Text(
                       'No paired computers yet. Pair with a computer on your '
                       'Wi-Fi network to start.',
@@ -278,7 +472,7 @@ class _PairedComputersSection extends ConsumerWidget {
                 return Column(
                   children: <Widget>[
                     for (var i = 0; i < peers.length; i++) ...<Widget>[
-                      if (i > 0) const Divider(height: 16),
+                      if (i > 0) const Divider(height: 12),
                       _PairedComputerTile(peer: peers[i]),
                     ],
                   ],
@@ -303,52 +497,68 @@ class _PairedComputerTile extends ConsumerWidget {
     final colorScheme = theme.colorScheme;
 
     final platformIcon = switch (peer.platform) {
-      PlatformKind.macos => Icons.laptop_mac,
-      PlatformKind.windows => Icons.laptop_windows,
-      PlatformKind.linux => Icons.computer,
-      _ => Icons.computer,
+      PlatformKind.macos => AppIcons.monitorSmartphone,
+      PlatformKind.windows => AppIcons.monitorSmartphone,
+      PlatformKind.linux => AppIcons.monitorSmartphone,
+      _ => AppIcons.monitorSmartphone,
     };
 
-    final tier = PermissionTier.fromWire(peer.permissionTier);
-    final tierLabel = switch (tier) {
-      PermissionTier.readOnly => 'View Only',
-      PermissionTier.standard => 'Standard',
-      PermissionTier.extended => 'Extended',
-      PermissionTier.admin => 'Admin',
-    };
-
+    // Where this computer was last reached. Kept in the row because it is the
+    // only thing that tells two identically named machines apart, and the only
+    // hint available when a paired computer has moved to a different network.
     final addressText = peer.lastAddress != null
-        ? 'Last seen: ${peer.lastAddress} · Tier: $tierLabel'
-        : 'No address recorded · Tier: $tierLabel';
+        ? 'Last seen: ${peer.lastAddress}'
+        : 'No address recorded';
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: Icon(platformIcon, color: colorScheme.primary, size: 28),
+      leading: AppIcon(platformIcon, color: colorScheme.primary, size: 28),
       title: Text(
         peer.name,
         style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
       ),
       subtitle: Text(
         addressText,
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: colorScheme.onSurfaceVariant,
-        ),
+        style: theme.textTheme.bodySmall
+            ?.copyWith(color: colorScheme.onSurfaceVariant),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           IconButton(
-            icon: const Icon(Icons.shield_outlined),
+            icon: const AppIcon(AppIcons.protection),
             tooltip: 'Permissions for ${peer.name}',
             onPressed: () => _requestPermission(context, ref, peer),
           ),
           IconButton(
-            icon: const Icon(Icons.edit_outlined),
+            icon: AppIcon(
+              AppIcons.edit,
+              color: colorScheme.onSurfaceVariant,
+            ),
             tooltip: 'Rename ${peer.name}',
             onPressed: () => _renameComputer(context, ref, peer),
           ),
+          // The way out of a remembered connection, and the only one short of
+          // forgetting the device entirely. Turning it off does not un-pair
+          // anything: the device goes back to being asked about, which is
+          // where it was before either end agreed to anything.
           IconButton(
-            icon: Icon(Icons.delete_outline, color: colorScheme.error),
+            icon: AppIcon(
+              AppIcons.protection,
+              color: peer.autoAdmit
+                  ? colorScheme.primary
+                  : colorScheme.onSurfaceVariant,
+            ),
+            tooltip: peer.autoAdmit
+                ? '${peer.name} connects without being asked. '
+                    'Tap to start asking again.'
+                : 'Tap to let ${peer.name} connect without being asked.',
+            onPressed: () => ref
+                .read(rememberPromptProvider.notifier)
+                .setRemembered(peer.id, remember: !peer.autoAdmit),
+          ),
+          IconButton(
+            icon: AppIcon(AppIcons.delete, color: colorScheme.error),
             tooltip: 'Forget ${peer.name}',
             onPressed: () => _confirmForgetComputer(context, ref, peer),
           ),
@@ -762,7 +972,7 @@ class _RequestPermissionDialogState
 }
 
 // ---------------------------------------------------------------------------
-// 3. TOUCHPAD
+// 4. TOUCHPAD
 // ---------------------------------------------------------------------------
 
 class _TouchpadSection extends ConsumerWidget {
@@ -777,25 +987,28 @@ class _TouchpadSection extends ConsumerWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.touch_app,
+              icon: AppIcons.handTap,
               title: 'Touchpad',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
-                Text(
-                  'Pointer sensitivity',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
+                Expanded(
+                  child: Text(
+                    'Pointer sensitivity',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
+                const SizedBox(width: 8),
                 Text(
                   '${pointerSettings.sensitivity.toStringAsFixed(1)}x',
                   style: theme.textTheme.labelLarge?.copyWith(
@@ -813,7 +1026,7 @@ class _TouchpadSection extends ConsumerWidget {
               label: '${pointerSettings.sensitivity.toStringAsFixed(1)}x',
               onChanged: (value) => notifier.setSensitivity(value),
             ),
-            const Divider(height: 16),
+            const Divider(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Natural scrolling'),
@@ -821,7 +1034,7 @@ class _TouchpadSection extends ConsumerWidget {
               value: pointerSettings.naturalScrolling,
               onChanged: (val) => notifier.setNaturalScrolling(val),
             ),
-            const Divider(height: 16),
+            const Divider(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Tap to click'),
@@ -839,7 +1052,7 @@ class _TouchpadSection extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 4. CLIPBOARD
+// 5. CLIPBOARD
 // ---------------------------------------------------------------------------
 
 class _ClipboardSection extends ConsumerWidget {
@@ -851,19 +1064,22 @@ class _ClipboardSection extends ConsumerWidget {
     final colorScheme = theme.colorScheme;
     final clipboardSettings = ref.watch(clipboardSettingsProvider);
     final notifier = ref.read(clipboardSettingsProvider.notifier);
+    final history = ref.watch(clipboardHistoryControllerProvider);
+    final historyController =
+        ref.read(clipboardHistoryControllerProvider.notifier);
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.content_paste,
+              icon: AppIcons.clipboard,
               title: 'Clipboard',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Sync from computer'),
@@ -873,7 +1089,7 @@ class _ClipboardSection extends ConsumerWidget {
               value: clipboardSettings.syncFromDesktop,
               onChanged: (val) => notifier.setSyncFromDesktop(val),
             ),
-            const Divider(height: 16),
+            const Divider(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Sync to computer'),
@@ -883,30 +1099,52 @@ class _ClipboardSection extends ConsumerWidget {
               value: clipboardSettings.syncToDesktop,
               onChanged: (val) => notifier.setSyncToDesktop(val),
             ),
-            const SizedBox(height: 12),
+            const Divider(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Keep history on this phone'),
+              subtitle: Text(
+                history.isPersistent
+                    ? 'Encrypted and saved securely on this device.'
+                    : 'Off — the list is kept in memory and disappears when you '
+                        'close Remote Link.',
+              ),
+              value: history.isPersistent,
+              onChanged: (enabled) async {
+                final applied = await historyController.setPersistenceEnabled(
+                  enabled: enabled,
+                );
+                if (!context.mounted || applied) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'This phone’s secure storage is unavailable, so history '
+                      'stays in memory only.',
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 10),
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Icon(
-                    Icons.info_outline,
-                    size: 18,
+                  AppIcon(
+                    AppIcons.settings,
+                    size: 16,
                     color: colorScheme.onSurfaceVariant,
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Why is phone-to-computer manual on iOS?\n'
-                      'Reading the pasteboard on iOS shows a system “pasted from” '
-                      'banner every time an app reads your clipboard. To prevent '
-                      'constant banner alerts, Remote Link does not poll continuously '
-                      '— it only reads the clipboard when you switch to the app '
-                      'or press the Send button.',
+                      'Why does my phone need to be open?\n'
+                      'OS security requires Remote Link to be open to read clipboard.',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
@@ -923,7 +1161,370 @@ class _ClipboardSection extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 5. DIAGNOSTICS
+// 6. BACKGROUND
+// ---------------------------------------------------------------------------
+
+class _BackgroundSection extends ConsumerWidget {
+  const _BackgroundSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final service = ref.watch(linkServiceProvider);
+    final enabled = ref.watch(backgroundLinkEnabledProvider);
+
+    // Nothing here applies to a platform with no service to run. iOS grants no
+    // persistent background networking to an app of this kind, so offering the
+    // switch there would be offering a setting that does nothing.
+    if (!service.isSupported) return const SizedBox.shrink();
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            _SectionHeader(
+              icon: AppIcons.settings,
+              title: 'Background',
+              color: colorScheme.primary,
+            ),
+            const SizedBox(height: 10),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Stay connected in the background'),
+              subtitle: const Text(
+                'Keeps transfers running when you switch apps. Shows a '
+                'notification while connected.',
+              ),
+              value: enabled,
+              onChanged: (value) =>
+                  ref.read(backgroundLinkEnabledProvider.notifier).set(value),
+            ),
+            const Divider(height: 12),
+            const _BackgroundClipboardTile(),
+            const Divider(height: 12),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: AppIcon(
+                AppIcons.settings,
+                color: colorScheme.onSurfaceVariant,
+              ),
+              title: const Text('Remote Link keeps stopping?'),
+              subtitle: const Text(
+                'Some phones close it anyway. Here is how to stop that.',
+              ),
+              trailing: const AppIcon(AppIcons.settings),
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (context) => const _BatteryGuidanceDialog(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Turns on reading the clipboard while another app is on screen.
+///
+/// The only feature in this app that asks for an accessibility service, and it
+/// asks because Android leaves no other way: `getPrimaryClip` returns null to
+/// an app without window focus, so copying in a browser cannot reach the
+/// computer through any permission, service or entitlement. Off unless the
+/// user turns it on, and everything else works without it.
+class _BackgroundClipboardTile extends ConsumerStatefulWidget {
+  const _BackgroundClipboardTile();
+
+  @override
+  ConsumerState<_BackgroundClipboardTile> createState() =>
+      _BackgroundClipboardTileState();
+}
+
+class _BackgroundClipboardTileState
+    extends ConsumerState<_BackgroundClipboardTile>
+    with WidgetsBindingObserver {
+  bool _enabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(_refresh());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The switch is thrown on a system screen this app cannot see, so the only
+    // moment its state can be trusted is on the way back from there.
+    if (state == AppLifecycleState.resumed) unawaited(_refresh());
+  }
+
+  Future<void> _refresh() async {
+    final enabled =
+        await ref.read(linkServiceProvider).backgroundClipboardEnabled();
+    if (!mounted) return;
+    setState(() => _enabled = enabled);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: AppIcon(
+        _enabled ? AppIcons.settings : AppIcons.clipboard,
+        color: _enabled ? colorScheme.primary : colorScheme.onSurfaceVariant,
+      ),
+      title: const Text('Copy in any app, paste on your computer'),
+      subtitle: Text(
+        _enabled
+            ? 'On. What you copy anywhere goes to your computer.'
+            : 'Off. Android only allows this through Accessibility settings.',
+      ),
+      trailing: const AppIcon(AppIcons.settings),
+      onTap: () => showDialog<void>(
+        context: context,
+        builder: (context) => _BackgroundClipboardDialog(enabled: _enabled),
+      ),
+    );
+  }
+}
+
+/// Explains what enabling the service means before sending the user to do it.
+///
+/// Written plainly and without persuasion. An accessibility service is a large
+/// thing to grant, the system screen says so in stronger words than these, and
+/// a user who reads this and decides against it has decided correctly for
+/// them — the app works without it.
+class _BackgroundClipboardDialog extends ConsumerWidget {
+  const _BackgroundClipboardDialog({required this.enabled});
+
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return AlertDialog(
+      title: const Text('Copying while Remote Link is closed'),
+      content: const SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Android does not let an app read the clipboard unless it is the '
+              'app you are looking at. That is why copying in Chrome does not '
+              'reach your computer on its own.',
+            ),
+            SizedBox(height: 12),
+            Text(
+              'The one exception is an accessibility service, which you turn '
+              'on yourself in Android settings. Remote Link uses it for the '
+              'clipboard and nothing else: it cannot read your screen, and it '
+              'does not see what you type.',
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Settings › Accessibility › Remote Link › turn it on. Some '
+              'phones refuse the read even then — if nothing arrives after '
+              'enabling it, yours is one of them.',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Not now'),
+        ),
+        FilledButton(
+          onPressed: () async {
+            final opened =
+                await ref.read(linkServiceProvider).openAccessibilitySettings();
+            if (!context.mounted) return;
+            Navigator.of(context).pop();
+            if (opened) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Could not open Accessibility settings.'),
+              ),
+            );
+          },
+          child: Text(enabled ? 'Open settings' : 'Turn it on'),
+        ),
+      ],
+    );
+  }
+}
+
+/// What to do when the phone's own battery manager closes the app anyway.
+///
+/// Written as instructions rather than an apology, because on the phones where
+/// this matters the user genuinely can fix it and nothing in the app can. The
+/// manufacturer screens are named rather than linked: Xiaomi's Autostart and
+/// Huawei's protected-apps lists have no public intent, and a button that
+/// silently does nothing would be worse than a sentence that says where to look.
+class _BatteryGuidanceDialog extends ConsumerWidget {
+  const _BatteryGuidanceDialog();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return AlertDialog(
+      title: const Text('If Remote Link keeps disconnecting'),
+      content: const SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Android stops apps it thinks you are not using, and some phones '
+              'are stricter than others. Remote Link asks to keep running, but '
+              'only you can grant it.',
+            ),
+            SizedBox(height: 16),
+            Text('On any phone', style: TextStyle(fontWeight: FontWeight.w600)),
+            SizedBox(height: 4),
+            Text('Allow unrestricted battery use for Remote Link.'),
+            SizedBox(height: 16),
+            Text(
+              'Xiaomi, Redmi and POCO',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            SizedBox(height: 4),
+            Text(
+              'Settings › Apps › Remote Link: turn on Autostart, and set '
+              'Battery saver to No restrictions. Then hold Remote Link in the '
+              'recent-apps list and tap the lock.',
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Huawei, Oppo, vivo and OnePlus',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            SizedBox(height: 4),
+            Text(
+              'Add Remote Link to the protected or auto-launch list in your '
+              'battery settings.',
+            ),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+        FilledButton(
+          onPressed: () async {
+            final opened =
+                await ref.read(linkServiceProvider).openBatterySettings();
+            if (!context.mounted) return;
+            Navigator.of(context).pop();
+            if (opened) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'This phone has no battery settings screen to open. Look '
+                  'under Settings › Apps › Remote Link.',
+                ),
+              ),
+            );
+          },
+          child: const Text('Open battery settings'),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 7. APPLE WATCH
+// ---------------------------------------------------------------------------
+
+/// Whether there is a watch, whether it has the app, and whether it is in
+/// range — reported separately, because each sends the user somewhere else.
+///
+/// Hidden entirely on a phone that cannot have one. A permanently empty section
+/// explaining that Android has no Apple Watch is noise on every Android
+/// install, and there is nothing the user could do about it.
+class _AppleWatchSection extends ConsumerWidget {
+  const _AppleWatchSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final availability = ref.watch(watchAvailabilityProvider).valueOrNull ??
+        const WatchAvailability();
+
+    if (!availability.supported) return const SizedBox.shrink();
+
+    final (icon, headline, detail) = switch (availability) {
+      WatchAvailability(paired: false) => (
+          AppIcons.settings,
+          'No Apple Watch paired',
+          'Pair a watch with this iPhone and Remote Link appears on it.',
+        ),
+      WatchAvailability(installed: false) => (
+          AppIcons.settings,
+          'Not installed on your watch',
+          'Install Remote Link from the Watch app on this iPhone.',
+        ),
+      WatchAvailability(reachable: false) => (
+          AppIcons.settings,
+          'Watch out of range',
+          'The watch controls the pointer whenever it can reach this iPhone.',
+        ),
+      _ => (
+          AppIcons.settings,
+          'Ready on your wrist',
+          'Drag on the watch to move the pointer, tap to click, and turn the '
+              'Digital Crown to scroll.',
+        ),
+    };
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            _SectionHeader(
+              icon: AppIcons.settings,
+              title: 'Apple Watch',
+              color: colorScheme.primary,
+            ),
+            const SizedBox(height: 10),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: AppIcon(icon, color: colorScheme.primary),
+              title: Text(headline),
+              subtitle: Text(detail),
+              trailing: IconButton(
+                tooltip: 'Check again',
+                icon: const AppIcon(AppIcons.settings),
+                onPressed: () => ref.invalidate(watchAvailabilityProvider),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 8. DIAGNOSTICS
 // ---------------------------------------------------------------------------
 
 class _DiagnosticsSection extends ConsumerStatefulWidget {
@@ -1036,6 +1637,7 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
       ClientState.connecting => 'Connecting…',
       ClientState.reconnecting => 'Reconnecting…',
       ClientState.pairing => 'Pairing…',
+      ClientState.awaitingApproval => 'Waiting to be let in…',
       ClientState.failed => 'Connection failed',
       ClientState.idle => 'Idle (Not connected)',
     };
@@ -1043,7 +1645,8 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
     final stateColor = switch (clientState) {
       ClientState.connected => colorScheme.primary,
       ClientState.connecting ||
-      ClientState.reconnecting =>
+      ClientState.reconnecting ||
+      ClientState.awaitingApproval =>
         colorScheme.tertiary,
       ClientState.failed => colorScheme.error,
       _ => colorScheme.onSurfaceVariant,
@@ -1051,33 +1654,41 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.analytics_outlined,
+              icon: AppIcons.analytics,
               title: 'Diagnostics',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             _DiagnosticRow(
               label: 'Connection state',
               value: stateLabel,
               valueColor: stateColor,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             _DiagnosticRow(
               label: 'Round-trip time',
               value: rttText,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             _DiagnosticRow(
               label: 'Discovery route',
               value: discoveryRoute,
             ),
-            const Divider(height: 24),
-            Row(
+            const Divider(height: 14),
+            // Wrapped rather than a Row with a Spacer: the filter label, the
+            // level names and "Export Logs" together need more width than a
+            // phone has once the card's padding is taken out, and a Row answers
+            // that by painting the overflow stripes over the button. Wrapping
+            // puts the button on its own line instead.
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
                 Text(
                   'Log filter:',
@@ -1085,7 +1696,6 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
                     color: colorScheme.onSurfaceVariant,
                   ),
                 ),
-                const SizedBox(width: 8),
                 DropdownButton<LogLevel?>(
                   value: _selectedLevel,
                   underline: const SizedBox.shrink(),
@@ -1113,15 +1723,14 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
                     ),
                   ],
                 ),
-                const Spacer(),
                 FilledButton.tonalIcon(
                   onPressed: () => _exportLogs(context, memorySink.records),
-                  icon: const Icon(Icons.copy_all, size: 16),
+                  icon: const AppIcon(AppIcons.clipboard, size: 16),
                   label: const Text('Export Logs'),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               '${memorySink.records.length} log records stored in memory',
               style: theme.textTheme.bodySmall?.copyWith(
@@ -1150,19 +1759,29 @@ class _DiagnosticRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(
-          label,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+        Expanded(
+          child: Text(
+            label,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
-        Text(
-          value,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-            color: valueColor,
+        const SizedBox(width: 12),
+        // Flexible and right-aligned rather than a bare Text: a discovery route
+        // reads `mDNS · 192.168.1.50:47811`, which is longer than the space
+        // left beside its label on a phone, and a Row answers that by painting
+        // overflow stripes over it.
+        Flexible(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: valueColor,
+            ),
           ),
         ),
       ],
@@ -1171,7 +1790,7 @@ class _DiagnosticRow extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 6. ABOUT
+// 9. ABOUT
 // ---------------------------------------------------------------------------
 
 class _AboutSection extends StatelessWidget {
@@ -1184,16 +1803,16 @@ class _AboutSection extends StatelessWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _SectionHeader(
-              icon: Icons.info_outline,
+              icon: AppIcons.settings,
               title: 'About',
               color: colorScheme.primary,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const BrandMark(size: 40),
@@ -1226,7 +1845,7 @@ class _SectionHeader extends StatelessWidget {
     required this.color,
   });
 
-  final IconData icon;
+  final AppIconData icon;
   final String title;
   final Color color;
 
@@ -1235,7 +1854,7 @@ class _SectionHeader extends StatelessWidget {
     final theme = Theme.of(context);
     return Row(
       children: <Widget>[
-        Icon(icon, size: 20, color: color),
+        AppIcon(icon, size: 20, color: color),
         const SizedBox(width: 8),
         Text(
           title,

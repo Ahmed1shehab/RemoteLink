@@ -25,7 +25,7 @@ void main() {
     expect(
       find.text(
         'No devices connected. Open Remote Link on your phone — it should find '
-        'this computer automatically.',
+        'this computer automatically, or you can show it a code to scan.',
       ),
       findsOneWidget,
     );

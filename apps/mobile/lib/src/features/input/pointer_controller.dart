@@ -107,6 +107,19 @@ final class PointerController {
   double _residualX = 0;
   double _residualY = 0;
 
+  /// The same carry, for scrolling.
+  double _scrollResidualX = 0;
+  double _scrollResidualY = 0;
+
+  /// Fractions of a wheel notch carried between frames.
+  ///
+  /// Without this a slow two-finger drag reports zero lines on every frame —
+  /// ten pixels is a quarter of a notch, and a quarter rounds to nothing — so
+  /// a Windows application that only reads the line count scrolls not at all
+  /// while the finger is moving steadily down the glass.
+  double _lineResidualX = 0;
+  double _lineResidualY = 0;
+
   /// Timestamp of the previous sample, for velocity.
   Duration? _lastTimestamp;
 
@@ -171,17 +184,31 @@ final class PointerController {
     Offset delta,
   ) {
     final direction = settings.naturalScrolling ? 1 : -1;
-    final scaled = delta * settings.scrollSensitivity * direction.toDouble();
+    final scaledX =
+        delta.dx * settings.scrollSensitivity * direction + _scrollResidualX;
+    final scaledY =
+        delta.dy * settings.scrollSensitivity * direction + _scrollResidualY;
+
+    final pixelsX = scaledX.truncate();
+    final pixelsY = scaledY.truncate();
+    _scrollResidualX = scaledX - pixelsX;
+    _scrollResidualY = scaledY - pixelsY;
 
     // Roughly one notch per 40 logical pixels, matching the distance a physical
     // wheel click scrolls on both platforms.
     const pixelsPerLine = 40.0;
+    _lineResidualX += pixelsX / pixelsPerLine;
+    _lineResidualY += pixelsY / pixelsPerLine;
+    final linesX = _lineResidualX.truncate();
+    final linesY = _lineResidualY.truncate();
+    _lineResidualX -= linesX;
+    _lineResidualY -= linesY;
 
     return (
-      linesX: (scaled.dx / pixelsPerLine).round(),
-      linesY: (scaled.dy / pixelsPerLine).round(),
-      pixelsX: scaled.dx.round(),
-      pixelsY: scaled.dy.round(),
+      linesX: linesX,
+      linesY: linesY,
+      pixelsX: pixelsX,
+      pixelsY: pixelsY,
     );
   }
 
@@ -193,6 +220,10 @@ final class PointerController {
   void endGesture() {
     _residualX = 0;
     _residualY = 0;
+    _scrollResidualX = 0;
+    _scrollResidualY = 0;
+    _lineResidualX = 0;
+    _lineResidualY = 0;
     _lastTimestamp = null;
   }
 }

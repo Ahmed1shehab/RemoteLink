@@ -247,6 +247,8 @@ final class FileTrustStore implements TrustStore {
         'lastSeenAt': peer.lastSeenAt?.toUtc().toIso8601String(),
         'lastAddress': peer.lastAddress,
         'revoked': peer.revoked,
+        'autoAdmit': peer.autoAdmit,
+        'rememberAsked': peer.rememberAsked,
       };
 
   static TrustedPeer? _decodePeer(Map<String, dynamic> json) {
@@ -279,6 +281,10 @@ final class FileTrustStore implements TrustStore {
       lastAddress:
           json['lastAddress'] is String ? json['lastAddress'] as String : null,
       revoked: json['revoked'] == true,
+      // Absent reads as false, which is what a file written before this
+      // existed means: nobody has agreed to anything, so keep asking.
+      autoAdmit: json['autoAdmit'] == true,
+      rememberAsked: json['rememberAsked'] == true,
     );
   }
 

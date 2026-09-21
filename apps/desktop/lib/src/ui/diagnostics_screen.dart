@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
+import '../app/app_icons.dart';
 import '../app/providers.dart';
 import '../app/theme.dart';
 
@@ -51,7 +52,7 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
           diagnosticsAsync.maybeWhen(
             data: (info) => FilledButton.tonalIcon(
               onPressed: () => _copyFullReport(context, info, memorySink),
-              icon: const Icon(Icons.copy_all, size: 18),
+              icon: const AppIcon(AppIcons.materialClipboard, size: 18),
               label: const Text('Copy All'),
             ),
             orElse: () => const SizedBox.shrink(),
@@ -241,8 +242,8 @@ class _ServiceStatusCard extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Icon(
-                  Icons.dns_outlined,
+                AppIcon(
+                  AppIcons.materialSettings,
                   color: colorScheme.primary,
                   size: 24,
                 ),
@@ -266,10 +267,10 @@ class _ServiceStatusCard extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
-                      Icon(
+                      AppIcon(
                         status.isRunning
-                            ? Icons.check_circle_outline
-                            : Icons.pause_circle_outline,
+                            ? AppIcons.materialSettings
+                            : AppIcons.materialMonitorPlay,
                         size: 14,
                         color: status.isRunning
                             ? colorScheme.onPrimaryContainer
@@ -396,8 +397,8 @@ class _DispatcherCountersCard extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Icon(
-                  Icons.speed_outlined,
+                AppIcon(
+                  AppIcons.materialSettings,
                   color: colorScheme.primary,
                   size: 24,
                 ),
@@ -419,7 +420,7 @@ class _DispatcherCountersCard extends StatelessWidget {
                     label: 'Applied',
                     count: counters.applied,
                     color: colorScheme.primary,
-                    icon: Icons.check_circle_outline,
+                    icon: AppIcons.materialSettings,
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -429,7 +430,7 @@ class _DispatcherCountersCard extends StatelessWidget {
                     label: 'Denied',
                     count: counters.denied,
                     color: colorScheme.error,
-                    icon: Icons.block_outlined,
+                    icon: AppIcons.materialSettings,
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -439,7 +440,7 @@ class _DispatcherCountersCard extends StatelessWidget {
                     label: 'Unsupported',
                     count: counters.unsupported,
                     color: colorScheme.outline,
-                    icon: Icons.help_outline,
+                    icon: AppIcons.materialSettings,
                   ),
                 ),
               ],
@@ -455,7 +456,7 @@ class _DispatcherCountersCard extends StatelessWidget {
     required String label,
     required int count,
     required Color color,
-    required IconData icon,
+    required AppIconData icon,
   }) {
     final theme = Theme.of(context);
 
@@ -470,7 +471,7 @@ class _DispatcherCountersCard extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              Icon(icon, size: 16, color: color),
+              AppIcon(icon, size: 16, color: color),
               const SizedBox(width: 6),
               Text(
                 label,
@@ -512,8 +513,8 @@ class _BackendsCard extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Icon(
-                  Icons.extension_outlined,
+                AppIcon(
+                  AppIcons.materialSettings,
                   color: colorScheme.primary,
                   size: 24,
                 ),
@@ -527,12 +528,12 @@ class _BackendsCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            _backendItem(context, backends.input, Icons.mouse_outlined),
+            _backendItem(context, backends.input, AppIcons.materialMouse),
             const Divider(height: 24),
             _backendItem(
-                context, backends.clipboard, Icons.content_paste_outlined),
+                context, backends.clipboard, AppIcons.materialClipboard),
             const Divider(height: 24),
-            _backendItem(context, backends.media, Icons.play_circle_outline),
+            _backendItem(context, backends.media, AppIcons.materialMonitorPlay),
           ],
         ),
       ),
@@ -542,7 +543,7 @@ class _BackendsCard extends StatelessWidget {
   Widget _backendItem(
     BuildContext context,
     BackendDiagnostic backend,
-    IconData icon,
+    AppIconData icon,
   ) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
@@ -552,7 +553,7 @@ class _BackendsCard extends StatelessWidget {
       children: <Widget>[
         Row(
           children: <Widget>[
-            Icon(icon, size: 20, color: colorScheme.onSurfaceVariant),
+            AppIcon(icon, size: 20, color: colorScheme.onSurfaceVariant),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -573,10 +574,10 @@ class _BackendsCard extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Icon(
+                  AppIcon(
                     backend.isAvailable
-                        ? Icons.check_circle_outline
-                        : Icons.error_outline,
+                        ? AppIcons.materialSettings
+                        : AppIcons.materialSettings,
                     size: 14,
                     color: backend.isAvailable
                         ? colorScheme.onPrimaryContainer
@@ -613,8 +614,8 @@ class _BackendsCard extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Icon(
-                  Icons.info_outline,
+                AppIcon(
+                  AppIcons.materialSettings,
                   size: 16,
                   color: colorScheme.onErrorContainer,
                 ),
@@ -654,8 +655,8 @@ class _ConnectedDevicesCard extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Icon(
-                  Icons.devices_outlined,
+                AppIcon(
+                  AppIcons.materialMonitorSmartphone,
                   color: colorScheme.primary,
                   size: 24,
                 ),
@@ -701,8 +702,10 @@ class _ConnectedDevicesCard extends StatelessWidget {
 
     return Row(
       children: <Widget>[
-        Icon(
-          device.awaitingPairing ? Icons.hourglass_top : Icons.smartphone,
+        AppIcon(
+          device.awaitingPairing
+              ? AppIcons.qrCode
+              : AppIcons.materialMonitorSmartphone,
           color: colorScheme.primary,
         ),
         const SizedBox(width: 12),
@@ -734,8 +737,8 @@ class _ConnectedDevicesCard extends StatelessWidget {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Icon(
-                      Icons.phonelink_off_outlined,
+                    AppIcon(
+                      AppIcons.materialSettings,
                       size: 14,
                       color: colorScheme.onSurfaceVariant,
                     ),
@@ -798,8 +801,8 @@ class _LogViewerCard extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Icon(
-                  Icons.terminal_outlined,
+                AppIcon(
+                  AppIcons.materialSettings,
                   color: colorScheme.primary,
                   size: 24,
                 ),
@@ -813,7 +816,7 @@ class _LogViewerCard extends StatelessWidget {
                 const Spacer(),
                 OutlinedButton.icon(
                   onPressed: onCopyLogs,
-                  icon: const Icon(Icons.copy, size: 16),
+                  icon: const AppIcon(AppIcons.materialClipboard, size: 16),
                   label: const Text('Copy Logs'),
                 ),
               ],

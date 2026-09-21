@@ -209,7 +209,10 @@ final class ClipboardHistorySnapshot {
     isPersistent: false,
   );
 
-  /// Newest first, pinned entries interleaved by recency rather than hoisted.
+  /// Newest first, with pinned entries hoisted ahead of unpinned entries.
+  ///
+  /// The underlying ring keeps its recency order for eviction. This is the
+  /// presentation order exposed to the UI so pinning has a visible effect.
   final List<ClipboardHistoryEntry> entries;
 
   final bool isPersistent;
@@ -308,9 +311,18 @@ final class ClipboardHistory {
   int get maxPinned => _maxPinned;
 
   ClipboardHistorySnapshot get snapshot => ClipboardHistorySnapshot(
-        entries: entries,
+        entries: _presentationEntries,
         isPersistent: isPersistent,
       );
+
+  List<ClipboardHistoryEntry> get _presentationEntries {
+    final visible = List<ClipboardHistoryEntry>.of(_entries);
+    visible.sort((a, b) {
+      if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+      return 0;
+    });
+    return List<ClipboardHistoryEntry>.unmodifiable(visible);
+  }
 
   Stream<ClipboardHistorySnapshot> get changes => _changes.stream;
 
@@ -372,11 +384,26 @@ final class ClipboardHistory {
 
   /// Forgets one entry, pinned or not.
   bool remove(String id) {
+    return removeEntry(id) != null;
+  }
+
+  /// Removes and returns one entry so a UI can offer a short-lived undo.
+  ClipboardHistoryEntry? removeEntry(String id) {
     final index = _entries.indexWhere((entry) => entry.id == id);
-    if (index == -1) return false;
-    _entries.removeAt(index);
+    if (index == -1) return null;
+    final removed = _entries.removeAt(index);
     _publish();
-    return true;
+    return removed;
+  }
+
+  /// Restores an entry removed moments ago by an undo action.
+  void restoreEntry(ClipboardHistoryEntry entry) {
+    if (_disposed || _entries.any((existing) => existing.id == entry.id)) {
+      return;
+    }
+    _entries.insert(0, entry);
+    _evict();
+    _publish();
   }
 
   /// Forgets everything, pinned entries included.

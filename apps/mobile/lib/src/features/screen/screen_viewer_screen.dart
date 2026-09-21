@@ -4,10 +4,10 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:meta/meta.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/providers.dart';
 import '../input/pointer_controller.dart';
 import 'remote_cursor.dart';
@@ -267,7 +267,7 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
                             ),
                           ),
                         IconButton(
-                          icon: const Icon(Icons.stop_circle_outlined,
+                          icon: const AppIcon(AppIcons.monitorPlay,
                               color: Colors.white),
                           tooltip: 'Stop Streaming',
                           onPressed: () => _stopStream(pop: true),
@@ -301,9 +301,8 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
               ),
             ),
           IconButton(
-            icon: Icon(_isStreaming
-                ? Icons.stop_circle_outlined
-                : Icons.play_circle_outlined),
+            icon: AppIcon(
+                _isStreaming ? AppIcons.monitorPlay : AppIcons.monitorPlay),
             tooltip: _isStreaming ? 'Stop Streaming' : 'Start Streaming',
             onPressed: () {
               if (_isStreaming) {
@@ -333,8 +332,8 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   ExcludeSemantics(
-                    child: Icon(
-                      Icons.screen_share_outlined,
+                    child: AppIcon(
+                      AppIcons.monitorPlay,
                       size: 48,
                       color: Colors.white54,
                     ),
@@ -350,14 +349,14 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
       floatingActionButton: _isStreaming
           ? FloatingActionButton.extended(
               onPressed: () => _stopStream(pop: true),
-              icon: const Icon(Icons.stop),
+              icon: const AppIcon(AppIcons.monitorPlay),
               label: const Text('Stop Sharing'),
               backgroundColor: Theme.of(context).colorScheme.error,
               foregroundColor: Theme.of(context).colorScheme.onError,
             )
           : FloatingActionButton.extended(
               onPressed: _startStream,
-              icon: const Icon(Icons.play_arrow),
+              icon: const AppIcon(AppIcons.monitorPlay),
               label: const Text('Start Stream'),
             ),
     );
@@ -576,7 +575,7 @@ class _UnsupportedScreenViewer extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               const ExcludeSemantics(
-                child: Icon(Icons.screen_share_outlined, size: 48),
+                child: AppIcon(AppIcons.monitorPlay, size: 48),
               ),
               const SizedBox(height: 16),
               Text(

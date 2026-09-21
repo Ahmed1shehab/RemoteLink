@@ -108,6 +108,14 @@ final class DesktopPreferences {
 abstract final class PreferenceKeys {
   static const String startAtLogin = 'startAtLogin';
 
+  /// Whether an already paired device is asked about each time it connects.
+  ///
+  /// Defaults to on where it is read, which is the unusual direction for a
+  /// setting that costs the user a tap: pairing is a promise about a device,
+  /// not a standing invitation, and a computer that lets a paired phone in
+  /// while its owner is not holding it is doing something nobody agreed to.
+  static const String askBeforeConnecting = 'askBeforeConnecting';
+
   /// Absolute path of the folder incoming files are saved into.
   ///
   /// Absent until the user picks one, and absence means "wherever this machine

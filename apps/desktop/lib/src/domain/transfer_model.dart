@@ -30,6 +30,7 @@ final class TransferFileProgress {
     required this.transferredBytes,
     this.isComplete = false,
     this.error,
+    this.savedPath,
   });
 
   final String fileId;
@@ -39,6 +40,13 @@ final class TransferFileProgress {
   final bool isComplete;
   final String? error;
 
+  /// Where an incoming file ended up on this machine, once it finished.
+  ///
+  /// Null for outgoing files and for anything still arriving. It is not
+  /// derivable from [fileName]: a name that collides with an existing file is
+  /// saved under a different one.
+  final String? savedPath;
+
   double get progress =>
       totalBytes > 0 ? (transferredBytes / totalBytes).clamp(0.0, 1.0) : 0.0;
 
@@ -46,6 +54,7 @@ final class TransferFileProgress {
     int? transferredBytes,
     bool? isComplete,
     String? error,
+    String? savedPath,
   }) =>
       TransferFileProgress(
         fileId: fileId,
@@ -54,6 +63,7 @@ final class TransferFileProgress {
         transferredBytes: transferredBytes ?? this.transferredBytes,
         isComplete: isComplete ?? this.isComplete,
         error: error ?? this.error,
+        savedPath: savedPath ?? this.savedPath,
       );
 }
 
@@ -100,10 +110,19 @@ final class TransferRecord {
 
   bool get canCancel => isActive;
 
+  /// Whether this computer can start this transfer again.
+  ///
+  /// Only outgoing ones. Retrying means re-sending the offer, and the offer
+  /// and its sources belong to whichever side chose the files — for an
+  /// incoming transfer this machine has neither, so the button offered nothing
+  /// but a silent failure. The phone has always had this check; the desktop
+  /// did not, and a cancelled photo arriving from a phone therefore grew a
+  /// Retry button that could not work.
   bool get canRetry =>
-      status == TransferStatus.failed ||
-      status == TransferStatus.cancelled ||
-      status == TransferStatus.declined;
+      direction == TransferDirection.outgoing &&
+      (status == TransferStatus.failed ||
+          status == TransferStatus.cancelled ||
+          status == TransferStatus.declined);
 
   TransferRecord copyWith({
     TransferStatus? status,

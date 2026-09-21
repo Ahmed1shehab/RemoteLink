@@ -7,17 +7,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart';
+import 'package:window_manager/window_manager.dart';
 
+import '../app/app_icons.dart';
 import '../app/brand.dart';
 import '../app/desktop_ui.dart';
 import '../app/motion.dart';
 import '../app/providers.dart';
 import '../app/theme.dart';
 import '../domain/desktop_service.dart';
+import '../domain/file_launcher.dart';
 import '../domain/transfer_model.dart';
 import 'clipboard_history_panel.dart';
 import 'diagnostics_screen.dart';
 import 'pairing_code.dart';
+import 'pairing_qr.dart';
 import 'settings_screen.dart';
 
 /// The desktop's only window: status, connected devices, pairing, and file transfers.
@@ -54,6 +58,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if (request != null) _showPairingDialog(request);
     });
 
+    // A device this computer already trusts, asking to come in now. Separate
+    // from the pairing dialog because it is a different question — see
+    // [ConnectionRequestDialog] — and separate from the list of connected
+    // devices because the phone on the other end is waiting on the answer.
+    ref.listen(connectionRequestProvider, (previous, next) {
+      final request = next.valueOrNull;
+      if (request != null) _showConnectionRequestDialog(request);
+    });
+
+    // And, once a device is in, whether this computer should stop asking about
+    // it at all. Asked after the connection rather than at the door, because
+    // it is a question about every future connection and stacking it on the
+    // one in front of the user turns two decisions into one tap.
+    ref.listen(rememberRequestProvider, (previous, next) {
+      final request = next.valueOrNull;
+      if (request != null) _showRememberDialog(request);
+    });
+
     // Incoming file transfers also require explicit confirmation before any
     // bytes are accepted.
     ref.listen(incomingTransferRequestProvider, (previous, next) {
@@ -81,6 +103,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildBody(DesktopStatus status) {
     final input = ref.watch(inputAvailabilityProvider).valueOrNull;
     final devices = ref.watch(connectedDevicesProvider);
+    // Empty while the trust store is still opening, which reads as "not
+    // remembered" — the honest answer, and the one that errs towards showing a
+    // switch the user can turn on rather than one that claims a promise.
+    final remembered =
+        ref.watch(rememberedPeersProvider).valueOrNull ?? const <String>{};
     final transfers =
         ref.watch(transfersProvider).valueOrNull ?? <TransferRecord>[];
 
@@ -146,7 +173,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 // without a banner of its own there was nothing anywhere in the app
                 // saying why screen sharing did not appear on the phone. The button
                 // simply never showed up and the reason lived only in a log line.
-                if (screenCapture != null && !screenCapture.available)
+                //
+                // Held back with the feature itself: while `kScreenSharingShipped`
+                // is false the phone has no screen button, so asking the user for a
+                // permission that unlocks nothing they can reach is a chore with no
+                // reward at the end of it. Both this and the status row below come
+                // back when the flag does.
+                if (kScreenSharingShipped &&
+                    screenCapture != null &&
+                    !screenCapture.available)
                   FocusTraversalOrder(
                     order: const NumericFocusOrder(1),
                     child: _PermissionBanner(
@@ -163,7 +198,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     key: _overviewKey,
                     child: _StatusCard(
                       status: status,
-                      screenCaptureReady: screenCapture?.available ?? false,
+                      screenCaptureReady: kScreenSharingShipped &&
+                          (screenCapture?.available ?? false),
+                      onPairPhone:
+                          status.localAddresses.isEmpty ? null : _showPairingQr,
                     ),
                   ),
                 ),
@@ -194,16 +232,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                     error: (error, _) => _EmptyState(message: 'Error: $error'),
                     data: (list) => list.isEmpty
-                        ? const _EmptyState(
+                        ? _EmptyState(
                             message:
                                 'No devices connected. Open Remote Link on your '
-                                'phone — it should find this computer automatically.',
+                                'phone — it should find this computer '
+                                'automatically, or you can show it a code to '
+                                'scan.',
+                            action: status.localAddresses.isEmpty
+                                ? null
+                                : _EmptyStateAction(
+                                    label: 'Show pairing code',
+                                    icon: AppIcons.qrCode,
+                                    onPressed: _showPairingQr,
+                                  ),
                           )
                         : Column(
                             children: <Widget>[
                               for (final device in list)
                                 _DeviceTile(
                                   device: device,
+                                  remembered: remembered.contains(
+                                    device.id.value,
+                                  ),
                                   onRevoke: () => _revoke(device.id),
                                   onTierChanged: (tier) =>
                                       _setTier(device.id, tier),
@@ -211,6 +261,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                       _renameDevice(device.id, device.name),
                                   onClipboardSyncChanged: (enabled) =>
                                       _setClipboardSync(device.id, enabled),
+                                  onRememberChanged: (value) =>
+                                      _setRemembered(device.id, value),
                                 ),
                             ],
                           ),
@@ -265,31 +317,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               selectedIndex: _sidebarIndex,
               destinations: const <DesktopNavDestination>[
                 DesktopNavDestination(
-                  icon: Icons.space_dashboard_outlined,
+                  icon: AppIcons.settings,
                   label: 'Overview',
                 ),
                 DesktopNavDestination(
-                  icon: Icons.devices_rounded,
+                  icon: AppIcons.monitorSmartphone,
                   label: 'Devices',
                 ),
                 DesktopNavDestination(
-                  icon: Icons.near_me_outlined,
+                  icon: AppIcons.send,
                   label: 'Send',
                 ),
                 DesktopNavDestination(
-                  icon: Icons.swap_vert_rounded,
+                  icon: AppIcons.receive,
                   label: 'Activity',
                 ),
                 DesktopNavDestination(
-                  icon: Icons.content_paste_outlined,
+                  icon: AppIcons.clipboard,
                   label: 'Clipboard',
                 ),
                 DesktopNavDestination(
-                  icon: Icons.monitor_heart_outlined,
+                  icon: AppIcons.analytics,
                   label: 'Diagnostics',
                 ),
                 DesktopNavDestination(
-                  icon: Icons.settings_outlined,
+                  icon: AppIcons.settings,
                   label: 'Settings',
                 ),
               ],
@@ -348,6 +400,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  /// Shows the code a phone scans to pair.
+  ///
+  /// The service is read here rather than inside the dialog so that the dialog
+  /// stays a pure widget over a payload builder — and so a computer whose
+  /// service has not finished starting simply does not open it, instead of
+  /// rendering a code for an address and port that are not listening yet.
+  Future<void> _showPairingQr() async {
+    final service = await ref.read(desktopServiceProvider.future);
+    if (!mounted) return;
+
+    final addresses = service.localAddresses;
+    if (addresses.isEmpty) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => PairingQrDialog(
+        addresses: addresses,
+        buildPayload: (host) => service.pairingPayload(host: host),
+      ),
+    );
+  }
+
   void _openDiagnostics() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -373,6 +447,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
+  Future<void> _setRemembered(DeviceId deviceId, bool remember) async {
+    final service = ref.read(desktopServiceProvider).valueOrNull;
+    if (service == null) return;
+    await service.setAutoAdmit(deviceId, remember: remember);
+  }
+
   Future<void> _revoke(DeviceId deviceId) async {
     final service = await ref.read(desktopServiceProvider.future);
     await service.revoke(deviceId);
@@ -395,7 +475,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Future<void> _retryTransfer(String transferId) async {
     final service = await ref.read(desktopServiceProvider.future);
-    await service.retryTransfer(transferId);
+    try {
+      await service.retryTransfer(transferId);
+    } on StateError catch (e) {
+      // Said out loud rather than swallowed. A retry can legitimately fail —
+      // the phone went away, or the offer is no longer held — and a button
+      // that appears to do nothing is the worst way to report it.
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not retry: ${e.message}')),
+      );
+    }
   }
 
   Future<void> _renameDevice(DeviceId deviceId, String currentName) async {
@@ -418,9 +508,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
+  /// Brings this window forward, because something is waiting on an answer
+  /// here.
+  ///
+  /// The red button hides this app to the tray rather than quitting it, which
+  /// is the whole point of a companion — and it means a dialog raised while it
+  /// is hidden is a dialog nobody sees. The phone then waits out the full
+  /// minute and is turned away by a timeout, and the person holding it tries
+  /// again, and again, with no way to learn that the answer was always on a
+  /// window behind everything else.
+  ///
+  /// Only for the two questions a device is actually blocked on. Stealing
+  /// focus for anything less than that is the behaviour that gets a companion
+  /// app quit for good.
+  Future<void> _raiseWindow() async {
+    try {
+      await windowManager.show();
+      await windowManager.focus();
+    } on Object catch (error) {
+      // A window that will not come forward is not a reason to skip the
+      // question — the dialog still goes up, and the user may already be
+      // looking at the app.
+      Log.scoped('desktop.window').debug(() => 'could not raise: $error');
+    }
+  }
+
   Future<void> _showPairingDialog(PendingPairing request) async {
     final service = ref.read(desktopServiceProvider).valueOrNull;
     if (service == null) return;
+    await _raiseWindow();
+    if (!mounted) return;
 
     final approved = await showDialog<bool>(
       context: context,
@@ -438,6 +555,92 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       await service.approvePairing(request);
     } else {
       await service.declinePairing(request);
+    }
+  }
+
+  bool _isConnectionRequestShowing = false;
+
+  Future<void> _showConnectionRequestDialog(PendingConnection request) async {
+    final service = ref.read(desktopServiceProvider).valueOrNull;
+    if (service == null) return;
+
+    // One at a time, then the next. Two phones can reconnect in the same
+    // second — a router coming back does exactly that — and stacked dialogs are
+    // how a user ends up answering the one they did not read. Asking in turn
+    // rather than dropping the second is what stops a device nobody was asked
+    // about being refused by its own timeout a minute later.
+    if (_isConnectionRequestShowing) return;
+    _isConnectionRequestShowing = true;
+
+    await _raiseWindow();
+    if (!mounted) {
+      _isConnectionRequestShowing = false;
+      return;
+    }
+
+    try {
+      var next = request;
+      while (true) {
+        final allowed = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => ConnectionRequestDialog(
+            peerName: next.peerName,
+          ),
+        );
+
+        if (!mounted) return;
+        if (allowed ?? false) {
+          await service.approveConnection(next);
+        } else {
+          await service.declineConnection(next);
+        }
+
+        // Re-read rather than captured: a device can give up while its
+        // question was on screen, and the list is the only place that knows.
+        final waiting = service.pendingConnections;
+        if (waiting.isEmpty) return;
+        next = waiting.first;
+      }
+    } finally {
+      _isConnectionRequestShowing = false;
+    }
+  }
+
+  bool _isRememberShowing = false;
+
+  Future<void> _showRememberDialog(PendingRemember request) async {
+    final service = ref.read(desktopServiceProvider).valueOrNull;
+    if (service == null) return;
+
+    // One at a time, as with the others. Unlike the others there is no queue to
+    // work through: a question that is missed costs nothing but being asked
+    // again next time, which is exactly what declining it would have meant.
+    if (_isRememberShowing) return;
+    _isRememberShowing = true;
+
+    try {
+      final agreed = await showDialog<bool>(
+        context: context,
+        builder: (context) => RememberDeviceDialog(peerName: request.peerName),
+      );
+      if (!mounted) return;
+      await service.answerRemember(request, agreed: agreed ?? false);
+
+      if (!mounted) return;
+      if (agreed ?? false) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                '${request.peerName} will be remembered once it agrees too.',
+              ),
+            ),
+          );
+      }
+    } finally {
+      _isRememberShowing = false;
     }
   }
 
@@ -563,7 +766,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
                     color: scheme.primary.withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Icon(Icons.near_me_rounded, color: scheme.primary),
+                  child: AppIcon(AppIcons.materialSend, color: scheme.primary),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -595,7 +798,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Send to',
-                  prefixIcon: Icon(Icons.smartphone_rounded),
+                  prefixIcon: AppIcon(AppIcons.materialMonitorSmartphone),
                 ),
                 items: <DropdownMenuItem<String>>[
                   for (final d in availableDevices)
@@ -616,12 +819,12 @@ class _SendCardState extends ConsumerState<_SendCard> {
                   ButtonSegment<int>(
                     value: 0,
                     label: Text('File / Drag & Drop'),
-                    icon: Icon(Icons.insert_drive_file_outlined),
+                    icon: AppIcon(AppIcons.materialFiles),
                   ),
                   ButtonSegment<int>(
                     value: 1,
                     label: Text('Text / URL'),
-                    icon: Icon(Icons.text_snippet_outlined),
+                    icon: AppIcon(AppIcons.materialFiles),
                   ),
                 ],
                 selected: <int>{_tab},
@@ -660,8 +863,8 @@ class _SendCardState extends ConsumerState<_SendCard> {
                     ),
                     child: Column(
                       children: <Widget>[
-                        Icon(
-                          Icons.cloud_upload_outlined,
+                        AppIcon(
+                          AppIcons.materialSend,
                           size: 40,
                           color: _isDraggingOver
                               ? scheme.primary
@@ -679,7 +882,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
                         OutlinedButton.icon(
                           onPressed:
                               _isPicking ? null : () => unawaited(_pick()),
-                          icon: const Icon(Icons.folder_open_rounded),
+                          icon: const AppIcon(AppIcons.materialFiles),
                           label: Text(
                             _picked.isEmpty ? 'Choose files' : 'Add more files',
                           ),
@@ -709,8 +912,8 @@ class _SendCardState extends ConsumerState<_SendCard> {
                               color: scheme.surface,
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            child: Icon(
-                              Icons.description_outlined,
+                            child: AppIcon(
+                              AppIcons.materialFiles,
                               size: 19,
                               color: scheme.primary,
                             ),
@@ -725,8 +928,8 @@ class _SendCardState extends ConsumerState<_SendCard> {
                             ),
                           ),
                           IconButton(
-                            icon: const Icon(
-                              Icons.delete_outline_rounded,
+                            icon: const AppIcon(
+                              AppIcons.delete,
                               size: 20,
                             ),
                             tooltip: 'Remove ${file.uri.pathSegments.last}',
@@ -761,8 +964,8 @@ class _SendCardState extends ConsumerState<_SendCard> {
                 const SizedBox(height: 8),
                 Row(
                   children: <Widget>[
-                    Icon(
-                      Icons.error_outline_rounded,
+                    AppIcon(
+                      AppIcons.materialSettings,
                       size: 18,
                       color: scheme.error,
                     ),
@@ -786,7 +989,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
                           availableDevices.isNotEmpty
                       ? () => _send(availableDevices)
                       : null,
-                  icon: const Icon(Icons.arrow_upward_rounded),
+                  icon: const AppIcon(AppIcons.materialSend),
                   label: Text(_tab == 0 ? 'Send File' : 'Send Text'),
                 ),
               ),
@@ -923,7 +1126,7 @@ class _TransfersSection extends StatelessWidget {
           const SizedBox(height: 12),
           if (transfers.isEmpty)
             const DesktopEmptyState(
-              icon: Icons.swap_vert_circle_outlined,
+              icon: AppIcons.materialReceive,
               title: 'No transfers yet',
               message: 'No active or recent transfers.',
             )
@@ -970,10 +1173,13 @@ class _TransferTile extends StatelessWidget {
                     color: scheme.primary.withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(13),
                   ),
-                  child: Icon(
+                  // Down for arriving, up for leaving — the same pair the
+                  // phone uses. The diagonal arrows read as "back" and
+                  // "forward" at this size and pointed the eye off the card.
+                  child: AppIcon(
                     isIncoming
-                        ? Icons.south_west_rounded
-                        : Icons.north_east_rounded,
+                        ? AppIcons.materialReceive
+                        : AppIcons.materialSend,
                     size: 20,
                     color: scheme.primary,
                   ),
@@ -987,7 +1193,10 @@ class _TransferTile extends StatelessWidget {
                     style: Theme.of(context).textTheme.titleSmall,
                   ),
                 ),
-                _TransferStatusChip(status: transfer.status),
+                _TransferStatusChip(
+                  status: transfer.status,
+                  isIncoming: transfer.direction == TransferDirection.incoming,
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -995,11 +1204,29 @@ class _TransferTile extends StatelessWidget {
               Row(
                 children: <Widget>[
                   Expanded(
-                    child: Text(
-                      f.fileName,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
-                    ),
+                    child: switch (f.savedPath) {
+                      final String path => _SavedFileName(
+                          fileName: f.fileName,
+                          path: path,
+                        ),
+                      null => Text(
+                          f.fileName,
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                    },
                   ),
+                  if (f.savedPath case final String path) ...<Widget>[
+                    IconButton(
+                      onPressed: () => unawaited(FileLauncher.revealFile(path)),
+                      icon: const AppIcon(AppIcons.materialFiles, size: 18),
+                      tooltip: Platform.isMacOS
+                          ? 'Show in Finder'
+                          : 'Show in folder',
+                      visualDensity: VisualDensity.compact,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 4),
+                  ],
                   Text(
                     '${formatBytes(f.transferredBytes)} / ${formatBytes(f.totalBytes)}',
                     style: Theme.of(context).textTheme.bodySmall,
@@ -1044,7 +1271,7 @@ class _TransferTile extends StatelessWidget {
                 if (transfer.canCancel)
                   TextButton.icon(
                     onPressed: onCancel,
-                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                    icon: const AppIcon(AppIcons.delete, size: 18),
                     label: const Text('Cancel'),
                     style: TextButton.styleFrom(
                       foregroundColor: scheme.error,
@@ -1053,7 +1280,7 @@ class _TransferTile extends StatelessWidget {
                 if (transfer.canRetry)
                   FilledButton.tonalIcon(
                     onPressed: onRetry,
-                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    icon: const AppIcon(AppIcons.materialQrCode, size: 18),
                     label: const Text('Retry'),
                   ),
               ],
@@ -1072,10 +1299,57 @@ class _TransferTile extends StatelessWidget {
   }
 }
 
+/// The name of a file that arrived, as a link to the file itself.
+///
+/// A received file the user cannot reach from here is a file they have to go
+/// hunting for — and the name shown is not always the name on disk, so hunting
+/// is exactly what it takes. Clicking opens it; the tooltip says where it is.
+class _SavedFileName extends StatelessWidget {
+  const _SavedFileName({required this.fileName, required this.path});
+
+  final String fileName;
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Tooltip(
+        message: path,
+        waitDuration: const Duration(milliseconds: 400),
+        child: InkWell(
+          onTap: () => unawaited(FileLauncher.openFile(path)),
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Text(
+              fileName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                color: scheme.primary,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _TransferStatusChip extends StatelessWidget {
-  const _TransferStatusChip({required this.status});
+  const _TransferStatusChip({required this.status, this.isIncoming = false});
 
   final TransferStatus status;
+
+  /// Which end of the transfer this computer is on.
+  ///
+  /// Only [TransferStatus.prompting] reads differently from the two sides, but
+  /// it reads *backwards* from the wrong one, which is worse than vague.
+  final bool isIncoming;
 
   @override
   Widget build(BuildContext context) {
@@ -1087,8 +1361,12 @@ class _TransferStatusChip extends StatelessWidget {
     // measured about 2.7:1 on the light theme's surface, and every status drew
     // its text in the same hue as its own background.
     final (label, background, foreground) = switch (status) {
+      // Which way this is waiting depends on which end asked. On a transfer
+      // this computer is receiving, "Awaiting response" describes the phone —
+      // which is not what is happening, and left the user looking for
+      // something to do on the wrong device.
       TransferStatus.prompting => (
-          'Awaiting response',
+          isIncoming ? 'Waiting for you' : 'Awaiting response',
           scheme.tertiaryContainer,
           scheme.onTertiaryContainer,
         ),
@@ -1165,7 +1443,7 @@ class _IncomingTransferDialog extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   child: Row(
                     children: <Widget>[
-                      const Icon(Icons.insert_drive_file, size: 16),
+                      const AppIcon(AppIcons.materialFiles, size: 16),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
@@ -1358,8 +1636,8 @@ class PermissionRequestDialog extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Icon(
-                    Icons.warning_amber_rounded,
+                  AppIcon(
+                    AppIcons.materialSettings,
                     color: colorScheme.error,
                     size: 20,
                   ),
@@ -1395,12 +1673,20 @@ class PermissionRequestDialog extends StatelessWidget {
 }
 
 class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.status, this.screenCaptureReady = false});
+  const _StatusCard({
+    required this.status,
+    this.screenCaptureReady = false,
+    this.onPairPhone,
+  });
 
   final DesktopStatus status;
 
   /// Whether this machine can currently share its screen.
   final bool screenCaptureReady;
+
+  /// Opens the pairing code. Null until the service knows an address to put
+  /// in it — a code pointing nowhere is worse than no button.
+  final Future<void> Function()? onPairPhone;
 
   @override
   Widget build(BuildContext context) {
@@ -1415,15 +1701,14 @@ class _StatusCard extends StatelessWidget {
             Container(
               width: 58,
               height: 58,
+              alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: statusColor.withValues(alpha: 0.11),
                 borderRadius: BorderRadius.circular(18),
               ),
-              child: Icon(
-                status.isRunning
-                    ? Icons.wifi_tethering_rounded
-                    : Icons.wifi_off_rounded,
-                size: 28,
+              child: AppIcon(
+                AppIcons.airdrop,
+                size: 24,
                 color: statusColor,
               ),
             ),
@@ -1479,8 +1764,8 @@ class _StatusCard extends StatelessWidget {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
-                        Icon(
-                          Icons.screen_share_outlined,
+                        AppIcon(
+                          AppIcons.materialMonitorPlay,
                           size: 16,
                           color: Theme.of(context).colorScheme.primary,
                         ),
@@ -1499,33 +1784,54 @@ class _StatusCard extends StatelessWidget {
                 ],
               ),
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: statusColor.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Container(
-                    width: 7,
-                    height: 7,
-                    decoration: BoxDecoration(
-                      color: statusColor,
-                      shape: BoxShape.circle,
-                    ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(999),
                   ),
-                  const SizedBox(width: 7),
-                  Text(
-                    status.isRunning ? 'Online' : 'Offline',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
                           color: statusColor,
-                          fontWeight: FontWeight.w700,
+                          shape: BoxShape.circle,
                         ),
+                      ),
+                      const SizedBox(width: 7),
+                      Text(
+                        status.isRunning ? 'Online' : 'Offline',
+                        style:
+                            Theme.of(context).textTheme.labelMedium?.copyWith(
+                                  color: statusColor,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Setting up a phone is the one thing a new user comes to this
+                // window to do, so it is a button on the status card rather
+                // than an entry in a menu. It sits beside the address the code
+                // encodes, which is also the answer to "which of these is it
+                // going to tell my phone?".
+                if (onPairPhone != null) ...<Widget>[
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: onPairPhone,
+                    icon: const AppIcon(AppIcons.qrCode, size: 18),
+                    label: const Text('Pair a phone'),
                   ),
                 ],
-              ),
+              ],
             ),
           ],
         ),
@@ -1563,7 +1869,8 @@ class _ScreenSharingBanner extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Row(
           children: <Widget>[
-            Icon(Icons.screen_share, color: scheme.onErrorContainer),
+            AppIcon(AppIcons.materialMonitorPlay,
+                color: scheme.onErrorContainer),
             const SizedBox(width: 16),
             Expanded(
               // Announced as its own live region: a screen-reader user gets no
@@ -1619,12 +1926,12 @@ class _PermissionBanner extends StatelessWidget {
       _BannerSeverity.blocking => (
           scheme.errorContainer,
           scheme.onErrorContainer,
-          Icons.warning_amber_rounded,
+          AppIcons.materialWarning,
         ),
       _BannerSeverity.advisory => (
           scheme.secondaryContainer,
           scheme.onSecondaryContainer,
-          Icons.info_outline,
+          AppIcons.materialInfo,
         ),
     };
 
@@ -1634,7 +1941,7 @@ class _PermissionBanner extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Row(
           children: <Widget>[
-            Icon(icon, color: foreground),
+            AppIcon(icon, color: foreground),
             const SizedBox(width: 16),
             Expanded(
               child: Text(
@@ -1660,17 +1967,25 @@ class _PermissionBanner extends StatelessWidget {
 class _DeviceTile extends StatelessWidget {
   const _DeviceTile({
     required this.device,
+    required this.remembered,
     required this.onRevoke,
     required this.onTierChanged,
     required this.onRename,
     required this.onClipboardSyncChanged,
+    required this.onRememberChanged,
   });
 
   final ConnectedDevice device;
+
+  /// Whether both ends agreed this device may connect without being asked
+  /// about — see `RememberConnection`.
+  final bool remembered;
+
   final VoidCallback onRevoke;
   final ValueChanged<PermissionTier> onTierChanged;
   final VoidCallback onRename;
   final ValueChanged<bool> onClipboardSyncChanged;
+  final ValueChanged<bool> onRememberChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1688,10 +2003,10 @@ class _DeviceTile extends StatelessWidget {
                 Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(14),
           ),
-          child: Icon(
+          child: AppIcon(
             device.awaitingPairing
-                ? Icons.hourglass_top_rounded
-                : Icons.smartphone_rounded,
+                ? AppIcons.qrCode
+                : AppIcons.materialMonitorSmartphone,
             color: Theme.of(context).colorScheme.primary,
           ),
         ),
@@ -1719,9 +2034,28 @@ class _DeviceTile extends StatelessWidget {
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.edit_rounded),
+              icon: AppIcon(
+                AppIcons.edit,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
               tooltip: 'Rename this device',
               onPressed: onRename,
+            ),
+            // The way out of an agreement. Switching it off does not un-pair
+            // the device; it goes back to being asked about, which is where it
+            // was before anyone agreed to anything.
+            IconButton(
+              icon: AppIcon(
+                remembered ? AppIcons.materialPinFilled : AppIcons.pin,
+                color: remembered
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              tooltip: remembered
+                  ? 'Remembered — connects without being asked. '
+                      'Click to start asking again.'
+                  : 'Not remembered. Click to let it connect without asking.',
+              onPressed: () => onRememberChanged(!remembered),
             ),
             DropdownButton<PermissionTier>(
               value: device.tier,
@@ -1736,7 +2070,7 @@ class _DeviceTile extends StatelessWidget {
               ],
             ),
             IconButton(
-              icon: const Icon(Icons.delete_outline_rounded),
+              icon: const AppIcon(AppIcons.delete),
               tooltip: 'Forget this device',
               onPressed: onRevoke,
               color: Theme.of(context).colorScheme.error,
@@ -1849,17 +2183,24 @@ class PairingDialog extends StatelessWidget {
             Text('$peerName wants to control this computer.'),
             const SizedBox(height: 20),
             // Grouped for the eye and announced digit by digit — see
-            // [PairingCodeDisplay]. The entire security of this flow rests on
-            // the user actually comparing both screens, which means the code
-            // has to arrive in a comparable form through whichever sense they
-            // are using.
+            // [PairingCodeDisplay]. The security of the *numeric* flow rests
+            // on the user actually comparing both screens, which means the
+            // code has to arrive in a comparable form through whichever sense
+            // they are using.
+            //
+            // A phone that scanned the code has already settled the question
+            // more strongly than these digits can — it verified the handshake
+            // against a key it read optically — and shows no digits at all.
+            // This computer cannot tell the two cases apart from here, so it
+            // shows the digits either way and the copy below names both.
             Center(
               child: PairingCodeDisplay(digits: shortAuthenticationString),
             ),
             const SizedBox(height: 20),
             Text(
-              'Only approve if your phone is showing exactly these six '
-              'digits. Different numbers mean something is intercepting the '
+              'Approve only if your phone is showing exactly these six '
+              'digits, or if you just scanned the code on this screen with '
+              'it. Different numbers mean something is intercepting the '
               'connection.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
@@ -1888,19 +2229,155 @@ class PairingDialog extends StatelessWidget {
       );
 }
 
+/// Asks whether to let a device this computer already trusts connect now.
+///
+/// Public and taking plain values, for the same reason [PairingDialog] is: a
+/// dialog that can only be reached through a live `ServerSession` is a dialog
+/// no test can assert on, and what this one says is the point of it.
+///
+/// Deliberately without six digits. The handshake has already verified the
+/// device against the key stored when it paired, so there is nothing here for
+/// the user to compare — and putting a code on screen anyway would teach people
+/// that approving unverifiable digits is normal, which is the habit the pairing
+/// screen depends on them not having.
+class ConnectionRequestDialog extends StatelessWidget {
+  const ConnectionRequestDialog({required this.peerName, super.key});
+
+  /// The name this computer stored when the device paired, never one the
+  /// device sent with the request.
+  final String peerName;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Allow this device to connect?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('$peerName is asking to connect to this computer.'),
+            const SizedBox(height: 12),
+            Text(
+              'You paired with it before, so its identity has already been '
+              'checked. This is only about now: allow it if the device is in '
+              'your hands, and turn it away if it is not.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Remote Link will not ask about this device again until you '
+              'quit the app.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          // Refusing holds the initial focus, exactly as it does when pairing.
+          // This dialog also appears unprompted, and a Return pressed at the
+          // wrong moment must not be what lets a device in.
+          TextButton(
+            autofocus: true,
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Don\'t allow'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Allow'),
+          ),
+        ],
+      );
+}
+
+/// Asks whether this computer should stop asking about a device.
+///
+/// Both ends see their own copy of this, and a device is only remembered when
+/// both say yes — see `RememberConnection`. The copy says so, because "you
+/// won't be asked again" is a promise this dialog cannot keep on its own, and
+/// a user who finds themselves asked again next time would be right to think
+/// the switch did nothing.
+class RememberDeviceDialog extends StatelessWidget {
+  const RememberDeviceDialog({required this.peerName, super.key});
+
+  final String peerName;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Remember this device?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              '$peerName is connected. Remote Link can let it straight in next '
+              'time, with nothing to scan and nobody to ask.',
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '$peerName is being asked the same thing. Both devices have to '
+              'agree, and either one can change its mind later in Devices.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          // Unlike the connection prompt, "no" does not hold the focus. This
+          // dialog cannot let anyone in — the device is already connected — so
+          // the risk a default answer carries is a convenience, not access.
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Keep asking'),
+          ),
+          FilledButton(
+            autofocus: true,
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Remember'),
+          ),
+        ],
+      );
+}
+
+/// A button an empty state can offer as the way out of being empty.
+@immutable
+class _EmptyStateAction {
+  const _EmptyStateAction({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String label;
+  final AppIconData icon;
+  final Future<void> Function() onPressed;
+}
+
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.message});
+  const _EmptyState({required this.message, this.action});
 
   final String message;
+
+  /// Offered underneath the message, when there is something to do about it.
+  final _EmptyStateAction? action;
 
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 32),
         child: Center(
-          child: Text(
-            message,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              if (action case final action?) ...<Widget>[
+                const SizedBox(height: 16),
+                FilledButton.tonalIcon(
+                  onPressed: action.onPressed,
+                  icon: AppIcon(action.icon, size: 18),
+                  label: Text(action.label),
+                ),
+              ],
+            ],
           ),
         ),
       );
@@ -1965,7 +2442,7 @@ class _StartupError extends StatelessWidget {
                 // Activity Monitor as the only remaining option.
                 FilledButton.icon(
                   onPressed: () => exit(0),
-                  icon: const Icon(Icons.close),
+                  icon: const AppIcon(AppIcons.materialClose),
                   label: const Text('Close this window'),
                 ),
               ],
@@ -1981,7 +2458,7 @@ class _StartupError extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            const Icon(Icons.error_outline, size: 48),
+            const AppIcon(AppIcons.materialError, size: 48),
             const SizedBox(height: 16),
             Text(
               '$kProductName could not start',

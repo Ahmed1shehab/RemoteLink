@@ -102,7 +102,7 @@ void main() {
     await _pumpPanel(tester, history: history);
 
     // Pin the second row — the older of the two.
-    await tester.tap(find.byIcon(Icons.push_pin_outlined).last);
+    await tester.tap(find.byTooltip('Pin').last);
     await tester.pump();
     await tester.pump();
 
@@ -113,10 +113,15 @@ void main() {
           .pinned,
       isTrue,
     );
-    expect(find.byIcon(Icons.push_pin), findsOneWidget);
+    expect(find.byTooltip('Unpin'), findsOneWidget);
 
-    // Remove the first row.
-    await tester.tap(find.byIcon(Icons.delete_outline_rounded).first);
+    // Pinning hoists the row, so the pinned entry is now the one on top.
+    final pinnedFirst =
+        tester.widgetList<ListTile>(find.byType(ListTile)).toList();
+    expect((pinnedFirst.first.title! as Text).data, equals('worth keeping'));
+
+    // Remove the unpinned row, which the hoist has left at the bottom.
+    await tester.tap(find.byTooltip('Remove from history').last);
     await tester.pump();
     await tester.pump();
 

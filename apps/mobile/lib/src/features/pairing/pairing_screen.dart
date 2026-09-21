@@ -6,6 +6,7 @@ import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/app_icons.dart';
 import '../../app/providers.dart';
 import '../control/control_screen.dart';
 import 'pairing_code.dart';
@@ -26,6 +27,7 @@ class PairingScreen extends ConsumerStatefulWidget {
     required this.deviceName,
     required this.address,
     this.platform = PlatformKind.unknown,
+    this.viaScannedCode = false,
     super.key,
   });
 
@@ -39,6 +41,22 @@ class PairingScreen extends ConsumerStatefulWidget {
 
   final PlatformKind platform;
 
+  /// Whether the computer's key came off a scanned code rather than the
+  /// network.
+  ///
+  /// It changes what this screen is for. With a scanned key the handshake was
+  /// already told which key to accept, so it either authenticated against the
+  /// key the camera read or it threw — there is nothing left for the user to
+  /// compare, and showing six digits anyway would be asking them to re-check a
+  /// question that has already been answered more strongly than they can
+  /// answer it.
+  ///
+  /// It also changes what a failure means. A mismatch here is not "try again";
+  /// it is the computer at that address presenting a different identity than
+  /// the code did, which is the exact event this flow exists to catch. So the
+  /// failure is terminal and offers no way onward — see [_ScannedKeyMismatch].
+  final bool viaScannedCode;
+
   @override
   ConsumerState<PairingScreen> createState() => _PairingScreenState();
 }
@@ -46,6 +64,13 @@ class PairingScreen extends ConsumerStatefulWidget {
 class _PairingScreenState extends ConsumerState<PairingScreen> {
   String? _code;
   bool _confirming = false;
+
+  /// Set when a scanned key did not match the key the computer proved.
+  ///
+  /// Distinct from a plain connection failure, because the two mean opposite
+  /// things: a failure is "could not reach it", this is "reached something,
+  /// and it was not the computer on the code".
+  bool _keyMismatch = false;
 
   @override
   void initState() {
@@ -55,6 +80,29 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
 
   Future<void> _watchSession() async {
     final client = await ref.read(clientProvider.future);
+
+    if (widget.viaScannedCode) {
+      // `waitUntilConnected` rather than the stream, because this path needs
+      // the *error*. A key mismatch is raised inside the reconnect supervisor,
+      // which swallows it into a failed state; only the waiter is handed the
+      // `SecurityError` itself, and telling a mismatch apart from an
+      // unreachable address is the whole point here.
+      try {
+        await client.waitUntilConnected();
+      } on SecurityError {
+        if (mounted) setState(() => _keyMismatch = true);
+        return;
+      } on Object {
+        // Everything else is an ordinary connection failure, which the
+        // `ClientState.failed` branch of `build` already covers.
+        return;
+      }
+      if (!mounted) return;
+
+      // Nothing to confirm: the camera did the confirming.
+      await _confirm();
+      return;
+    }
 
     // The session already in hand comes first, and `sessions` is only awaited
     // when there is none. `sessions` is a broadcast stream, so it replays
@@ -103,6 +151,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
       trustStore,
       await ref.read(identityStoreProvider.future),
     );
+    ref.invalidate(trustedPeersProvider);
 
     // Unblocks the session, and it is not a formality.
     //
@@ -142,10 +191,32 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            if (state == ClientState.failed)
+            // Checked ahead of the generic failure: a mismatch also leaves the
+            // client failed, and the generic copy — "its identity did not
+            // match what this phone had stored" — would quietly reframe an
+            // impersonated computer as a stale pairing.
+            if (_keyMismatch)
+              _ScannedKeyMismatch(deviceName: widget.deviceName)
+            else if (state == ClientState.failed)
               const _PairingFailed()
+            else if (widget.viaScannedCode)
+              const Column(
+                // Sized to its contents, so the enclosing column's centring
+                // actually places it mid-screen: a max-height child fills the
+                // body and leaves the spinner pinned under the app bar.
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  CircularProgressIndicator(),
+                  SizedBox(height: 24),
+                  Text('Checking the code…'),
+                ],
+              )
             else if (_code == null)
               const Column(
+                // Sized to its contents, so the enclosing column's centring
+                // actually places it mid-screen: a max-height child fills the
+                // body and leaves the spinner pinned under the app bar.
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   CircularProgressIndicator(),
                   SizedBox(height: 24),
@@ -185,6 +256,54 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
   }
 }
 
+/// The computer at that address is not the computer on the code.
+///
+/// No "continue anyway", no fallback to comparing digits, and that absence is
+/// the feature. Scanning exists precisely so that a substituted key is caught
+/// before any trust is written; offering a softer route afterwards would hand
+/// the attacker the dialog they were hoping for, and a user who has just been
+/// told something is wrong is exactly the user who taps past it.
+class _ScannedKeyMismatch extends StatelessWidget {
+  const _ScannedKeyMismatch({required this.deviceName});
+
+  final String deviceName;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          ExcludeSemantics(
+            child: AppIcon(
+              AppIcons.settings,
+              size: 56,
+              color: Theme.of(context).colorScheme.error,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'This is not the computer on the code',
+            style: Theme.of(context).textTheme.titleMedium,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Something answered at that address with a different identity '
+            'than the code showed. Remote Link did not pair with it and did '
+            'not send it anything.\n\nOn a network you trust this should '
+            'never happen. Show the code again on $deviceName and scan the '
+            'new one.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 32),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+        ],
+      );
+}
+
 class _PairingFailed extends StatelessWidget {
   const _PairingFailed();
 
@@ -193,8 +312,8 @@ class _PairingFailed extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           ExcludeSemantics(
-            child: Icon(
-              Icons.gpp_bad_outlined,
+            child: AppIcon(
+              AppIcons.settings,
               size: 56,
               color: Theme.of(context).colorScheme.error,
             ),

@@ -23,6 +23,21 @@ enum ClientState {
   /// Connected; waiting for the user to complete pairing.
   pairing,
 
+  /// Connected to a peer that already trusts this device, and held at its
+  /// door while someone there decides whether to let this connection in.
+  ///
+  /// Distinct from [pairing], which is about trust that does not exist yet and
+  /// puts six digits on both screens. This one is about a device that is
+  /// already trusted asking to come in now, and there is nothing for the user
+  /// of *this* device to do but wait — so the two cannot share a screen, a
+  /// notification, or a status chip.
+  ///
+  /// Nothing sent in this state reaches the peer: a held session drops every
+  /// message outside the handshake and trust subsystems. Treating it as
+  /// connected is therefore not a white lie but the specific bug that makes an
+  /// app look alive and do nothing.
+  awaitingApproval,
+
   /// Connected and usable.
   connected,
 
@@ -109,6 +124,9 @@ final class RemoteLinkClient {
 
   ClientState _state = ClientState.idle;
   ProtocolErrorCode? _failureCode;
+  Object? _terminalFailure;
+  ConnectionAnswer? _refusal;
+  String? _heldBy;
   int _connectionAttemptCount = 0;
   int _attempt = 0;
   bool _stopRequested = false;
@@ -123,7 +141,38 @@ final class RemoteLinkClient {
   /// peer. Cleared when [connect] starts a new connection lifecycle.
   ProtocolErrorCode? get failureCode => _failureCode;
 
+  /// The error that ended this connection for good, retained after the fact.
+  ///
+  /// Kept because the state enum throws away the one distinction that matters
+  /// to a caller reacting to a failure: `ClientState.failed` is the same value
+  /// whether the address was unreachable or the server presented a key that
+  /// was not the expected one. Only [waitUntilConnected] used to see the
+  /// difference, and only if it happened to be parked at the moment the
+  /// supervisor gave up — so a screen built one frame too late got a generic
+  /// "could not connect" for an impersonated server. Held here, the answer
+  /// survives the race.
+  ///
+  /// Cleared when [connect] starts a new connection lifecycle.
+  Object? get terminalFailure => _terminalFailure;
+
   ConnectionTarget? get target => _target;
+
+  /// Why the peer turned this connection away, or null if it did not.
+  ///
+  /// Kept beside [terminalFailure] rather than folded into it because a refusal
+  /// is not a fault. "Could not connect" is the wrong sentence for a computer
+  /// that was reached, authenticated, and then said no — the user's next step
+  /// is to go and press Allow on it, not to check their Wi-Fi.
+  ///
+  /// Cleared when [connect] starts a new connection lifecycle.
+  ConnectionAnswer? get refusal => _refusal;
+
+  /// What the peer holding this connection calls itself, while it holds it.
+  ///
+  /// Sanitised on arrival, because it is a peer-supplied string that goes
+  /// straight onto a screen. Null unless the state is
+  /// [ClientState.awaitingApproval].
+  String? get heldBy => _heldBy;
 
   /// Number of socket connection attempts made during this client's lifetime.
   @visibleForTesting
@@ -166,6 +215,9 @@ final class RemoteLinkClient {
     await disconnect();
     _stopRequested = false;
     _failureCode = null;
+    _terminalFailure = null;
+    _refusal = null;
+    _heldBy = null;
     _target = target;
     _attempt = 0;
     unawaited(_runSupervisor());
@@ -235,12 +287,15 @@ final class RemoteLinkClient {
       return Future<Session>.value(existing);
     }
     if (_state == ClientState.failed) {
+      // The recorded cause first, so a caller that arrived after the failure
+      // learns the same thing as one that was already waiting for it.
       return Future<Session>.error(
-        const TransportError(
-          'connect_failed',
-          'the client stopped for a reason retrying cannot fix',
-          retryable: false,
-        ),
+        _terminalFailure ??
+            const TransportError(
+              'connect_failed',
+              'the client stopped for a reason retrying cannot fix',
+              retryable: false,
+            ),
       );
     }
 
@@ -307,12 +362,14 @@ final class RemoteLinkClient {
         // Cryptographic failures are not transient. Retrying a key mismatch
         // just burns battery and hides a real problem from the user.
         _log.error('connection failed permanently', error: e);
+        _terminalFailure = e;
         _setState(ClientState.failed);
         _failWaiters(e);
         return;
       } on TransportError catch (e) {
         if (!e.retryable) {
           _log.error('connection failed permanently', error: e);
+          _terminalFailure = e;
           _setState(ClientState.failed);
           return;
         }
@@ -355,17 +412,23 @@ final class RemoteLinkClient {
         // screen is built to receive it. Every UI that asked "what tier am I?"
         // therefore got null and kept it forever.
         if (message case PermissionGrant(:final tier)) _grantedTier = tier;
+        if (message case ConnectionRequest(:final deviceName)) {
+          _onHeld(deviceName);
+        }
+        if (message case ConnectionDecision(:final answer)) {
+          _onDecision(answer, session);
+        }
         if (message case ErrorMessage(:final code) when !code.isRetryable) {
           _failureCode = code;
           _stopRequested = true;
-          _setState(ClientState.failed);
-          _failWaiters(
-            TransportError(
-              'protocol_${code.name}',
-              'peer reported a terminal protocol error',
-              retryable: false,
-            ),
+          final failure = TransportError(
+            'protocol_${code.name}',
+            'peer reported a terminal protocol error',
+            retryable: false,
           );
+          _terminalFailure = failure;
+          _setState(ClientState.failed);
+          _failWaiters(failure);
           unawaited(session.close(reason: CloseReason.protocolError));
         }
         if (!_messages.isClosed) _messages.add(message);
@@ -399,7 +462,12 @@ final class RemoteLinkClient {
     // reconnecting. The close reason is what distinguishes "the user quit" from
     // "the Wi-Fi dropped".
     final reason = session.closeReason;
-    if (reason != null && !reason.shouldReconnect) {
+    // A refusal has already decided both questions — no reconnect, and a state
+    // that says why — and the close that follows it must not overwrite that
+    // with the generic answer. The peer closes a refused session with
+    // `userRequested`, which would otherwise be filed as "the user quit" and
+    // leave the phone sitting at idle with nothing to explain the empty screen.
+    if (_refusal == null && reason != null && !reason.shouldReconnect) {
       _stopRequested = true;
       // Every screen reads `state`, not `session`. Leaving it on `connected`
       // once the supervisor has given up is what turns a dead link into a
@@ -413,6 +481,52 @@ final class RemoteLinkClient {
     }
 
     await _detachSession();
+  }
+
+  /// The peer is holding this connection while someone there decides.
+  void _onHeld(String peerName) {
+    _heldBy = sanitiseDeviceName(peerName) ?? _target?.displayName;
+    _log.info(
+      'held at the door',
+      fields: <String, Object?>{'peer': _heldBy},
+    );
+    _setState(ClientState.awaitingApproval);
+  }
+
+  /// The answer to a held connection.
+  ///
+  /// A refusal is terminal on purpose. The supervisor's whole job is to dial
+  /// back in after a link drops, and a declined connection looks exactly like a
+  /// dropped one from down here — so without this the phone would re-dial every
+  /// couple of seconds and put the question back on the other screen, over and
+  /// over, until somebody tapped Allow to make it stop. That is not a retry,
+  /// it is a way to wear a person down into approving something.
+  void _onDecision(ConnectionAnswer answer, Session session) {
+    if (answer == ConnectionAnswer.allowed) {
+      _heldBy = null;
+      _refusal = null;
+      if (_state == ClientState.awaitingApproval) {
+        _setState(ClientState.connected);
+      }
+      return;
+    }
+
+    _heldBy = null;
+    _refusal = answer;
+    _stopRequested = true;
+    final failure = TransportError(
+      'connection_${answer.name}',
+      'the peer did not let this connection in',
+      retryable: false,
+    );
+    _terminalFailure = failure;
+    _setState(ClientState.failed);
+    _failWaiters(failure);
+    _log.info(
+      'connection refused by the peer',
+      fields: <String, Object?>{'answer': answer.name},
+    );
+    unawaited(session.close(reason: CloseReason.userRequested));
   }
 
   Future<void> _detachSession() async {

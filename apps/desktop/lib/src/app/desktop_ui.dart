@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'app_icons.dart';
 
 import 'brand.dart';
 import 'motion.dart';
@@ -12,7 +13,7 @@ class DesktopNavDestination {
     required this.label,
   });
 
-  final IconData icon;
+  final AppIconData icon;
   final String label;
 }
 
@@ -176,9 +177,9 @@ class _DesktopNavButton extends StatelessWidget {
               ),
               child: Row(
                 children: <Widget>[
-                  Icon(
+                  AppIcon(
                     destination.icon,
-                    size: 20,
+                    size: 16,
                     color: selected ? scheme.primary : scheme.onSurfaceVariant,
                   ),
                   const SizedBox(width: 11),
@@ -239,12 +240,12 @@ class DesktopCompactHeader extends StatelessWidget {
           const Spacer(),
           IconButton(
             onPressed: onDiagnostics,
-            icon: const Icon(Icons.monitor_heart_outlined),
+            icon: const AppIcon(AppIcons.analytics),
             tooltip: 'Diagnostics',
           ),
           IconButton(
             onPressed: onSettings,
-            icon: const Icon(Icons.settings_outlined),
+            icon: const AppIcon(AppIcons.materialSettings, color: Colors.white),
             tooltip: 'Settings',
           ),
         ],
@@ -294,7 +295,7 @@ class DesktopEmptyState extends StatelessWidget {
     super.key,
   });
 
-  final IconData icon;
+  final AppIconData icon;
   final String title;
   final String message;
 
@@ -313,7 +314,7 @@ class DesktopEmptyState extends StatelessWidget {
                 color: scheme.primary.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: Icon(icon, color: scheme.primary),
+              child: AppIcon(icon, color: scheme.primary),
             ),
             const SizedBox(width: 16),
             Expanded(
