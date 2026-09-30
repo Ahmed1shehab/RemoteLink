@@ -315,13 +315,49 @@ void main() {
     });
   });
 
+  group('buildCapabilities media advertising', () {
+    test('Windows transport and volume do not claim track metadata', () {
+      final capabilities = buildCapabilities(
+        inputAvailable: true,
+        clipboardAvailable: true,
+        mediaControlAvailable: true,
+        mediaMetadataAvailable: false,
+      );
+      expect(capabilities.has(Capabilities.mediaControl), isTrue);
+      expect(capabilities.has(Capabilities.mediaMetadata), isFalse);
+    });
+
+    test('macOS keeps both media capabilities', () {
+      final capabilities = buildCapabilities(
+        inputAvailable: true,
+        clipboardAvailable: true,
+        mediaControlAvailable: true,
+        mediaMetadataAvailable: true,
+      );
+      expect(capabilities.has(Capabilities.mediaControl), isTrue);
+      expect(capabilities.has(Capabilities.mediaMetadata), isTrue);
+    });
+
+    test('metadata is never claimed without media control', () {
+      final capabilities = buildCapabilities(
+        inputAvailable: true,
+        clipboardAvailable: true,
+        mediaControlAvailable: false,
+        mediaMetadataAvailable: true,
+      );
+      expect(capabilities.has(Capabilities.mediaControl), isFalse);
+      expect(capabilities.has(Capabilities.mediaMetadata), isFalse);
+    });
+  });
+
   group('buildCapabilities gesture advertising', () {
     test('advertises Capabilities.gestures only when gesturesAvailable is true',
         () {
       final capsWithoutGestures = buildCapabilities(
         inputAvailable: true,
         clipboardAvailable: true,
-        mediaAvailable: true,
+        mediaControlAvailable: true,
+        mediaMetadataAvailable: true,
         gesturesAvailable: false,
       );
       expect(capsWithoutGestures.has(Capabilities.gestures), isFalse);
@@ -329,7 +365,8 @@ void main() {
       final capsWithGestures = buildCapabilities(
         inputAvailable: true,
         clipboardAvailable: true,
-        mediaAvailable: true,
+        mediaControlAvailable: true,
+        mediaMetadataAvailable: true,
         gesturesAvailable: true,
       );
       expect(capsWithGestures.has(Capabilities.gestures), isTrue);
@@ -350,7 +387,8 @@ void main() {
       final capsWithoutBrightness = buildCapabilities(
         inputAvailable: true,
         clipboardAvailable: true,
-        mediaAvailable: true,
+        mediaControlAvailable: true,
+        mediaMetadataAvailable: true,
         brightnessAvailable: false,
       );
       expect(capsWithoutBrightness.has(Capabilities.brightness), isFalse);
@@ -358,7 +396,8 @@ void main() {
       final capsWithBrightness = buildCapabilities(
         inputAvailable: true,
         clipboardAvailable: true,
-        mediaAvailable: true,
+        mediaControlAvailable: true,
+        mediaMetadataAvailable: true,
         brightnessAvailable: true,
       );
       expect(capsWithBrightness.has(Capabilities.brightness), isTrue);
@@ -377,7 +416,8 @@ void main() {
       final capsWithoutCapture = buildCapabilities(
         inputAvailable: true,
         clipboardAvailable: true,
-        mediaAvailable: true,
+        mediaControlAvailable: true,
+        mediaMetadataAvailable: true,
         screenCaptureAvailable: false,
       );
       expect(capsWithoutCapture.has(Capabilities.screenCapture), isFalse);
@@ -392,7 +432,8 @@ void main() {
       final capsWithCapture = buildCapabilities(
         inputAvailable: true,
         clipboardAvailable: true,
-        mediaAvailable: true,
+        mediaControlAvailable: true,
+        mediaMetadataAvailable: true,
         screenCaptureAvailable: true,
       );
       expect(

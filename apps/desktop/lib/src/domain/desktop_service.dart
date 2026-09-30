@@ -42,7 +42,8 @@ const bool kScreenSharingShipped = false;
 Capabilities buildCapabilities({
   required bool inputAvailable,
   required bool clipboardAvailable,
-  required bool mediaAvailable,
+  required bool mediaControlAvailable,
+  required bool mediaMetadataAvailable,
   bool gesturesAvailable = false,
   bool brightnessAvailable = false,
   bool screenCaptureAvailable = false,
@@ -68,13 +69,13 @@ Capabilities buildCapabilities({
   if (clipboardAvailable) {
     capabilities = capabilities.plus(Capabilities.clipboardText);
   }
-  if (mediaAvailable) {
-    // Advertised only when a real backend exists, so a Windows build — where
-    // the WinRT media session is not yet bound — does not offer a media tab
-    // whose buttons would do nothing.
-    capabilities = capabilities
-        .plus(Capabilities.mediaControl)
-        .plus(Capabilities.mediaMetadata);
+  if (mediaControlAvailable) {
+    // The media tab needs transport and volume, not track details. Windows can
+    // provide those through media keys and Core Audio without WinRT metadata.
+    capabilities = capabilities.plus(Capabilities.mediaControl);
+  }
+  if (mediaControlAvailable && mediaMetadataAvailable) {
+    capabilities = capabilities.plus(Capabilities.mediaMetadata);
   }
   if (gesturesAvailable) {
     // Advertised only when native synthetic gestures exist (macOS). Windows
@@ -538,7 +539,9 @@ final class DesktopService {
   Capabilities get currentCapabilities => buildCapabilities(
         inputAvailable: _input.isAvailable,
         clipboardAvailable: _clipboardBackend.isAvailable,
-        mediaAvailable: _media.isAvailable,
+        mediaControlAvailable: _media.isAvailable,
+        mediaMetadataAvailable:
+            _media.isAvailable && _media is MacosMediaBackend,
         gesturesAvailable: _input.isAvailable && _input is MacosInputBackend,
         brightnessAvailable: _brightness.isAvailable,
         screenCaptureAvailable: _screenCapture.isAvailable,
