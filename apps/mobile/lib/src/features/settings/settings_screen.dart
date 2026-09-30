@@ -596,6 +596,8 @@ class _PairedComputerTile extends ConsumerWidget {
     );
     if (newName == null || !context.mounted) return;
 
+    // This is a local alias for the computer, not this phone's display name.
+    // The desktop would interpret DeviceRename as a rename of the phone.
     final trustStore = await ref.read(trustStoreProvider.future);
     await trustStore.upsert(peer.copyWith(name: newName));
     await persistTrustStore(
@@ -603,18 +605,6 @@ class _PairedComputerTile extends ConsumerWidget {
       await ref.read(identityStoreProvider.future),
     );
     ref.invalidate(trustedPeersProvider);
-
-    final client = ref.read(clientProvider).valueOrNull;
-    if (client != null && client.isConnected) {
-      if (client.session?.peerId == peer.id ||
-          client.target?.deviceId == peer.id) {
-        try {
-          await client.session?.send(DeviceRename(newName));
-        } on TransportError {
-          // Ignore if teardown.
-        }
-      }
-    }
   }
 
   Future<void> _confirmForgetComputer(

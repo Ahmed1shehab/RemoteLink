@@ -1011,6 +1011,8 @@ survives a reconnect.
 
 ### RL-204 — Device rename
 
+**Status — DONE.** Each device announces only its own validated display name; receivers persist the sender's name, while aliases for other devices stay local.
+
 **Priority** P2 · **Size** S
 
 **Spec.** `DeviceRename` decodes and is dropped. Handle it by updating the
@@ -1027,6 +1029,8 @@ escapes are all rejected.
 ---
 
 ### RL-205 — Permission elevation flow
+
+**Status — DONE.** The desktop approval dialog now denies after a visible 60-second countdown and offers permanent or 30-minute temporary grants through the existing expiry service.
 
 **Priority** P2 · **Size** M
 

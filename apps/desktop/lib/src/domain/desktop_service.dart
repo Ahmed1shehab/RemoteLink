@@ -321,7 +321,7 @@ final class DesktopService {
 
   final DeviceIdentity identity;
   final TrustStore trustStore;
-  final String deviceName;
+  String deviceName;
   final String appVersion;
   final int servicePort;
 
@@ -1582,6 +1582,26 @@ final class DesktopService {
     if (sanitised == null) return false;
 
     await _renamePeer(peerId, sanitised);
+    return true;
+  }
+
+  /// Announces this computer's own display name to established phone sessions.
+  ///
+  /// A peer alias belongs only to the device that stores it. The name on the
+  /// wire always describes the sender, so changing our name updates future
+  /// handshakes and beacons before notifying phones already connected.
+  Future<bool> announceOwnName(String rawName) async {
+    final sanitised = sanitiseDeviceName(rawName);
+    if (sanitised == null) return false;
+    deviceName = sanitised;
+    for (final device in _devices.values.toList()) {
+      if (!device.serverSession.session.isEstablished) continue;
+      try {
+        await device.serverSession.session.send(DeviceRename(sanitised));
+      } on TransportError {
+        // A closing session does not prevent other phones receiving the name.
+      }
+    }
     return true;
   }
 
