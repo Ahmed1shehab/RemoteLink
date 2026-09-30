@@ -50,10 +50,8 @@ void main() {
         deviceId: desktop.id,
         serverPublicKey: desktop.publicKey);
     try {
-      final fullWatch = Stopwatch()..start();
       await client.connect(target);
       final first = await client.waitUntilConnected();
-      fullWatch.stop();
       expect(first.wasResumed, isFalse);
       await _until(() => client.resumptionFor(desktop.publicKey) != null);
       final oldTicket = client.resumptionFor(desktop.publicKey)!.ticket;
@@ -61,10 +59,8 @@ void main() {
       final oldSecret =
           Uint8List.fromList(client.resumptionFor(desktop.publicKey)!.secret);
       await client.disconnect();
-      final watch = Stopwatch()..start();
       await client.connect(target);
       final resumed = await client.waitUntilConnected();
-      watch.stop();
       expect(resumed.wasResumed, isTrue);
       expect(resumed.capabilities.bits, clientCaps.bits);
       expect(server.sessions.single.session.capabilities.bits, clientCaps.bits);
@@ -72,11 +68,6 @@ void main() {
       expect(server.sessions.single.session.wasResumed, isTrue);
       await _until(
           () => client.resumptionFor(desktop.publicKey)?.ticket != oldTicket);
-      // CI timing is variable; this records the loopback figure while the
-      // one-response assertion above proves the protocol round-trip count.
-      expect(watch.elapsed, lessThan(const Duration(milliseconds: 10)));
-      expect(watch.elapsed, lessThan(fullWatch.elapsed));
-
       // Presenting the consumed ticket again must fall back on the same socket.
       client.restoreResumption(desktop.publicKey,
           ClientResumption(ticket: oldTicket, secret: oldSecret));

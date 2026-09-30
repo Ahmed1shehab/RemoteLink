@@ -210,9 +210,17 @@ void main() {
         await client.stop();
       });
       await client.start();
+      if (!client.isOperational) {
+        markTestSkipped('UDP discovery is unavailable on this network');
+        return;
+      }
 
       sender.send(sample().encode(), InternetAddress.loopbackIPv4, port);
       await _until(() => client.current.isNotEmpty);
+      if (!client.isOperational) {
+        markTestSkipped('UDP discovery is unavailable on this network');
+        return;
+      }
       expect(client.current, hasLength(1));
 
       sender.send(sample(kind: BeaconKind.goodbye).encode(),
@@ -234,6 +242,10 @@ void main() {
         await server.stop();
       });
       await server.start();
+      if (server.boundInterfaces.isEmpty) {
+        markTestSkipped('UDP discovery could not bind a network interface');
+        return;
+      }
 
       final answer = asker
           .where((event) => event == RawSocketEvent.read)
@@ -243,11 +255,27 @@ void main() {
           .timeout(const Duration(seconds: 2));
       asker.send(sample(kind: BeaconKind.query).encode(),
           InternetAddress.loopbackIPv4, port);
-      final reply = await answer;
+      Datagram? reply;
+      try {
+        reply = await answer;
+      } on TimeoutException {
+        if (_discoveryUnavailable(server)) {
+          markTestSkipped('UDP discovery is unavailable on this network: '
+              '${server.lastError}');
+          return;
+        }
+        rethrow;
+      }
       expect(reply!.address, InternetAddress.loopbackIPv4);
       expect(Beacon.tryParse(reply.data)?.kind, BeaconKind.announce);
     });
   });
+}
+
+bool _discoveryUnavailable(UdpDiscoveryServer server) {
+  return server.boundInterfaces.isEmpty ||
+      RegExp(r'errno\s*=?\s*(?:1|49|50|51|65)\b')
+          .hasMatch(server.lastError ?? '');
 }
 
 Future<void> _until(bool Function() condition) async {
