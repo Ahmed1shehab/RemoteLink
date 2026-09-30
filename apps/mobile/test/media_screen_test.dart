@@ -211,6 +211,12 @@ void main() {
     expect(find.byIcon(Icons.brightness_low), findsNothing);
     expect(find.byIcon(Icons.brightness_high), findsNothing);
     expect(find.byType(Slider), findsOneWidget); // Only Volume
+    expect(find.text('Media controls'), findsOneWidget);
+    expect(
+        find.textContaining('Track details are unavailable'), findsOneWidget);
+    expect(find.byIcon(Icons.skip_previous_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.skip_next_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
   });
 
   group('the transport button', () {

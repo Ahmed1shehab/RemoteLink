@@ -101,10 +101,11 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
     final capabilities =
         ref.watch(clientProvider).valueOrNull?.session?.capabilities;
 
-    // The desktop only advertises media control when it has a working backend,
-    // so this is not defensive noise — a Windows build genuinely cannot do this
-    // yet, and showing dead buttons would be worse than saying so.
+    // A host can provide transport and volume without track metadata. The
+    // Windows backend is one such host, so the controls stay visible.
     final supported = capabilities?.has(Capabilities.mediaControl) ?? connected;
+    final metadataSupported =
+        capabilities?.has(Capabilities.mediaMetadata) ?? true;
     final brightnessSupported =
         capabilities?.has(Capabilities.brightness) ?? false;
 
@@ -120,7 +121,7 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
       children: <Widget>[
-        _NowPlaying(state: state),
+        _NowPlaying(state: state, metadataSupported: metadataSupported),
         const SizedBox(height: 24),
         _TransportRow(
           isPlaying: _requestedIsPlaying ?? state?.isPlaying ?? false,
@@ -292,9 +293,10 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
 }
 
 class _NowPlaying extends StatelessWidget {
-  const _NowPlaying({required this.state});
+  const _NowPlaying({required this.state, required this.metadataSupported});
 
   final MediaState? state;
+  final bool metadataSupported;
 
   @override
   Widget build(BuildContext context) {
@@ -378,7 +380,11 @@ class _NowPlaying extends StatelessWidget {
         AnimatedSwitcher(
           duration: context.motion(const Duration(milliseconds: 220)),
           child: Text(
-            hasTrack ? title : 'Nothing playing',
+            hasTrack
+                ? title
+                : metadataSupported
+                    ? 'Nothing playing'
+                    : 'Media controls',
             key: ValueKey<String>(title),
             style: Theme.of(context).textTheme.titleLarge,
             textAlign: TextAlign.center,
@@ -406,11 +412,11 @@ class _NowPlaying extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(
-              // Only shown when genuinely nothing is detected, which now means
-              // no audio is playing at all — not merely that the source was
-              // unrecognised.
-              'Play something and it will appear here. Controls work with '
-              'any app, including browsers.',
+              metadataSupported
+                  ? 'Play something and it will appear here. Controls work '
+                      'with any app, including browsers.'
+                  : 'Track details are unavailable on this computer. '
+                      'Playback and volume controls still work.',
               style: Theme.of(context).textTheme.bodySmall,
               textAlign: TextAlign.center,
             ),

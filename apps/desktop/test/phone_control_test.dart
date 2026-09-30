@@ -26,7 +26,8 @@ void main() {
       final everything = buildCapabilities(
         inputAvailable: true,
         clipboardAvailable: true,
-        mediaAvailable: true,
+        mediaControlAvailable: true,
+        mediaMetadataAvailable: true,
         gesturesAvailable: true,
         brightnessAvailable: true,
         screenCaptureAvailable: true,

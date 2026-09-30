@@ -31,6 +31,7 @@ import 'src/system_info_backend.dart';
 import 'src/windows/win32_brightness.dart';
 import 'src/windows/win32_clipboard.dart';
 import 'src/windows/win32_input.dart';
+import 'src/windows/win32_media.dart';
 import 'src/windows/win32_network_adapters.dart';
 import 'src/windows/win32_system_info.dart';
 
@@ -54,6 +55,7 @@ export 'src/system_info_backend.dart';
 export 'src/windows/win32_brightness.dart';
 export 'src/windows/win32_clipboard.dart';
 export 'src/windows/win32_input.dart';
+export 'src/windows/win32_media.dart';
 export 'src/windows/win32_network_adapters.dart';
 export 'src/windows/win32_system_info.dart';
 
@@ -125,14 +127,12 @@ abstract final class NativeBackends {
 
   /// Builds the media backend, or an unsupported stub.
   ///
-  /// Windows has an equivalent in `GlobalSystemMediaTransportControls`, which
-  /// is a WinRT interface rather than a flat C export and therefore needs more
-  /// than `DynamicLibrary.lookupFunction`. Until that is written, Windows gets
-  /// the stub and the desktop simply does not advertise media control — which
-  /// is why capability negotiation exists.
+  /// Windows uses hardware media keys and Core Audio for transport and volume.
+  /// Its WinRT metadata integration is separate and is not advertised yet.
   static MediaBackend createMedia() {
     final log = Log.scoped('native.factory');
     try {
+      if (Platform.isWindows) return WindowsMediaBackend();
       if (Platform.isMacOS) return MacosMediaBackend();
       return const UnsupportedMediaBackend();
     } on ArgumentError catch (e) {
