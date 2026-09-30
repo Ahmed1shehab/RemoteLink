@@ -20,6 +20,30 @@ enum TransferStatus {
   failed,
 }
 
+/// Stable reason shown by the transfer UI in the current locale.
+enum TransferFailure {
+  timedOut,
+  hashMismatch,
+  noSpace,
+  noSpaceOnPeer,
+  chunkRefused,
+  cancelledByPeer,
+  cancelledByYou,
+  declinedByPeer,
+  declinedByYou,
+  connectionLost,
+  deviceDisconnected,
+  ioError,
+  receiverUnavailable,
+  storageUnavailable,
+  couldNotComplete,
+  couldNotAccept,
+  retryFailed,
+  exportCancelled,
+  exportPermissionDenied,
+  exportFailed,
+}
+
 /// Progress details for one file in a transfer.
 @immutable
 final class TransferFileProgress {
@@ -86,7 +110,7 @@ final class TransferRecord {
     this.eta,
     required this.createdAt,
     this.completedAt,
-    this.errorMessage,
+    this.failure,
   });
 
   final String transferId;
@@ -101,7 +125,7 @@ final class TransferRecord {
   final Duration? eta;
   final DateTime createdAt;
   final DateTime? completedAt;
-  final String? errorMessage;
+  final TransferFailure? failure;
 
   double get progress =>
       totalBytes > 0 ? (transferredBytes / totalBytes).clamp(0.0, 1.0) : 0.0;
@@ -126,9 +150,9 @@ final class TransferRecord {
     double? speedBytesPerSecond,
     Duration? eta,
     DateTime? completedAt,
-    String? errorMessage,
+    TransferFailure? failure,
     bool clearCompletedAt = false,
-    bool clearErrorMessage = false,
+    bool clearFailure = false,
     bool clearEta = false,
   }) =>
       TransferRecord(
@@ -144,8 +168,7 @@ final class TransferRecord {
         eta: clearEta ? null : eta ?? this.eta,
         createdAt: createdAt,
         completedAt: clearCompletedAt ? null : completedAt ?? this.completedAt,
-        errorMessage:
-            clearErrorMessage ? null : errorMessage ?? this.errorMessage,
+        failure: clearFailure ? null : failure ?? this.failure,
       );
 }
 
@@ -272,10 +295,6 @@ final class TransferSpeedTracker {
 /// list can reopen recent arrivals, but that is a convenience on top of a real
 /// destination, not the destination itself — this app is still not a folder,
 /// and saying otherwise would leave people looking for one.
-const String kIncomingDestinationExplanation =
-    'Photos and videos are saved to your Photos library. Anything else opens '
-    'the share sheet so you can choose where it goes. Recent arrivals stay '
-    'openable from this list.';
 
 String formatBytes(int bytes) {
   if (bytes < 1024) return '$bytes B';

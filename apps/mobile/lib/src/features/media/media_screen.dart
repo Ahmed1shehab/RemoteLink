@@ -7,6 +7,7 @@ import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/app_icons.dart';
 import '../../app/haptics.dart';
+import '../../app/l10n.dart';
 import '../../app/modern_ui.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
@@ -119,23 +120,27 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
     final scheme = Theme.of(context).colorScheme;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+      padding: const EdgeInsetsDirectional.fromSTEB(20, 12, 20, 32),
       children: <Widget>[
         _NowPlaying(state: state, metadataSupported: metadataSupported),
         const SizedBox(height: 24),
-        _TransportRow(
-          isPlaying: _requestedIsPlaying ?? state?.isPlaying ?? false,
-          enabled: connected,
-          onPrevious: () => _send(
-            const MediaCommand(action: MediaAction.previous),
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: _TransportRow(
+            isPlaying: _requestedIsPlaying ?? state?.isPlaying ?? false,
+            enabled: connected,
+            onPrevious: () => _send(
+              const MediaCommand(action: MediaAction.previous),
+            ),
+            onPlayPause: () {
+              _requestPlaying(
+                isPlaying: !(_requestedIsPlaying ?? state?.isPlaying ?? false),
+              );
+              unawaited(
+                  _send(const MediaCommand(action: MediaAction.playPause)));
+            },
+            onNext: () => _send(const MediaCommand(action: MediaAction.next)),
           ),
-          onPlayPause: () {
-            _requestPlaying(
-              isPlaying: !(_requestedIsPlaying ?? state?.isPlaying ?? false),
-            );
-            unawaited(_send(const MediaCommand(action: MediaAction.playPause)));
-          },
-          onNext: () => _send(const MediaCommand(action: MediaAction.next)),
         ),
         const SizedBox(height: 26),
         AppSectionCard(
@@ -151,7 +156,9 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
                       borderRadius: BorderRadius.circular(13),
                     ),
                     child: IconButton(
-                      tooltip: (state?.isMuted ?? false) ? 'Unmute' : 'Mute',
+                      tooltip: (state?.isMuted ?? false)
+                          ? context.l10n.unmute
+                          : context.l10n.mute,
                       icon: Icon(
                         (state?.isMuted ?? false)
                             ? Icons.volume_off
@@ -172,7 +179,7 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Volume',
+                      context.l10n.volume,
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                   ),
@@ -194,7 +201,7 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
                       value: volume.clamp(0.0, 1.0),
                       label: '${(volume * 100).round()}%',
                       semanticFormatterCallback: (value) =>
-                          'Volume ${(value * 100).round()} percent',
+                          context.l10n.volumePercent((value * 100).round()),
                       onChanged: connected
                           ? (value) => setState(() => _dragging = value)
                           : null,
@@ -235,7 +242,7 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Display',
+                        context.l10n.display,
                         style: Theme.of(context).textTheme.titleSmall,
                       ),
                     ),
@@ -256,8 +263,8 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
                       child: Slider(
                         value: brightness.clamp(0.0, 1.0),
                         label: '${(brightness * 100).round()}%',
-                        semanticFormatterCallback: (value) =>
-                            'Screen brightness ${(value * 100).round()} percent',
+                        semanticFormatterCallback: (value) => context.l10n
+                            .screenBrightnessPercent((value * 100).round()),
                         onChanged: connected
                             ? (value) =>
                                 setState(() => _brightnessDragging = value)
@@ -330,9 +337,9 @@ class _NowPlaying extends StatelessWidget {
           child: Stack(
             alignment: Alignment.center,
             children: <Widget>[
-              Positioned(
+              PositionedDirectional(
                 top: 20,
-                right: 18,
+                end: 18,
                 child: Container(
                   width: 74,
                   height: 74,
@@ -350,9 +357,9 @@ class _NowPlaying extends StatelessWidget {
                 ),
               ),
               if (state?.sourceApplication != null)
-                Positioned(
-                  left: 16,
-                  right: 16,
+                PositionedDirectional(
+                  start: 16,
+                  end: 16,
                   bottom: 15,
                   child: Container(
                     padding:
@@ -383,8 +390,8 @@ class _NowPlaying extends StatelessWidget {
             hasTrack
                 ? title
                 : metadataSupported
-                    ? 'Nothing playing'
-                    : 'Media controls',
+                    ? context.l10n.nothingPlaying
+                    : context.l10n.mediaControls,
             key: ValueKey<String>(title),
             style: Theme.of(context).textTheme.titleLarge,
             textAlign: TextAlign.center,
@@ -413,10 +420,8 @@ class _NowPlaying extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(
               metadataSupported
-                  ? 'Play something and it will appear here. Controls work '
-                      'with any app, including browsers.'
-                  : 'Track details are unavailable on this computer. '
-                      'Playback and volume controls still work.',
+                  ? context.l10n.playSomethingHint
+                  : context.l10n.trackDetailsUnavailable,
               style: Theme.of(context).textTheme.bodySmall,
               textAlign: TextAlign.center,
             ),
@@ -451,7 +456,7 @@ class _TransportRow extends StatelessWidget {
         IconButton.filledTonal(
           constraints: const BoxConstraints.tightFor(width: 56, height: 56),
           iconSize: 28,
-          tooltip: 'Previous track',
+          tooltip: context.l10n.previousTrack,
           onPressed: enabled ? onPrevious : null,
           icon: const Icon(Icons.skip_previous_rounded),
         ),
@@ -470,7 +475,7 @@ class _TransportRow extends StatelessWidget {
           child: IconButton.filled(
             constraints: const BoxConstraints.tightFor(width: 76, height: 76),
             iconSize: 40,
-            tooltip: isPlaying ? 'Pause' : 'Play',
+            tooltip: isPlaying ? context.l10n.pause : context.l10n.play,
             onPressed: enabled ? onPlayPause : null,
             icon: Icon(
               isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
@@ -481,7 +486,7 @@ class _TransportRow extends StatelessWidget {
         IconButton.filledTonal(
           constraints: const BoxConstraints.tightFor(width: 56, height: 56),
           iconSize: 28,
-          tooltip: 'Next track',
+          tooltip: context.l10n.nextTrack,
           onPressed: enabled ? onNext : null,
           icon: const Icon(Icons.skip_next_rounded),
         ),
@@ -505,13 +510,12 @@ class _Unsupported extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               Text(
-                'Media control isn’t available',
+                context.l10n.mediaControlUnavailable,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
               Text(
-                'This computer didn’t offer media control. It is implemented '
-                'on macOS; Windows support is still to come.',
+                context.l10n.mediaControlUnavailableExplanation,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall,
               ),

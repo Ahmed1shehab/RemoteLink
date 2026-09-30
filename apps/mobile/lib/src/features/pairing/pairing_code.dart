@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:rl_core/rl_core.dart';
 
+import '../../app/l10n.dart';
+
 /// The six pairing digits, shown to the eye and to a screen reader.
 ///
 /// ## Why this is a widget and not a `Text`
@@ -54,27 +56,30 @@ class PairingCodeDisplay extends StatelessWidget {
       // Keeps the per-digit nodes below rather than merging them into this one,
       // which is what makes stepping through the code possible.
       explicitChildNodes: true,
-      label: 'Security code: ${spokenDigits(digits)}',
+      label: context.l10n.securityCodeSpoken(spokenDigits(digits)),
       child: FittedBox(
         // Scales down only. At an ordinary text size nothing happens; at 200%
         // the code shrinks to fit instead of overflowing. Clipping is not an
         // option here in a way it is nowhere else in the app — half a code
         // compares equal to a different half a code.
         fit: BoxFit.scaleDown,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            for (var i = 0; i < digits.length; i++) ...<Widget>[
-              if (i > 0 && i % groupSize == 0) const SizedBox(width: 20),
-              Semantics(
-                label: spokenDigitPosition(digits, i),
-                // Replaces the bare character, which a reader would otherwise
-                // announce alongside the position.
-                excludeSemantics: true,
-                child: Text(digits[i], style: style),
-              ),
+        child: Directionality(
+          textDirection: TextDirection.ltr,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              for (var i = 0; i < digits.length; i++) ...<Widget>[
+                if (i > 0 && i % groupSize == 0) const SizedBox(width: 20),
+                Semantics(
+                  label: spokenDigitPosition(digits, i),
+                  // Replaces the bare character, which a reader would otherwise
+                  // announce alongside the position.
+                  excludeSemantics: true,
+                  child: Text(digits[i], style: style),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

@@ -186,14 +186,14 @@ final List<Override> desktopHomeOverrides = <Override>[
     (ref) => Stream<List<ConnectedDevice>>.value(const <ConnectedDevice>[]),
   ),
   inputAvailabilityProvider.overrideWith(
-    (ref) => Stream<({bool available, String? reason})>.value(
+    (ref) => Stream<({bool available, BackendFailure? reason})>.value(
       (available: true, reason: null),
     ),
   ),
   // Available, so the advisory banner stays out of the way of tests that are
   // about something else. The banner has its own test.
   screenCaptureAvailabilityProvider.overrideWith(
-    (ref) => Stream<({bool available, String? reason})>.value(
+    (ref) => Stream<({bool available, BackendFailure? reason})>.value(
       (available: true, reason: null),
     ),
   ),

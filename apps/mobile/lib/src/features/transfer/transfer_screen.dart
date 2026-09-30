@@ -7,6 +7,7 @@ import 'package:rl_core/rl_core.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../app/app_icons.dart';
+import '../../app/l10n.dart';
 import '../../app/modern_ui.dart';
 import '../../app/theme.dart';
 import '../host/host_providers.dart';
@@ -14,6 +15,7 @@ import 'file_name_text.dart';
 import 'file_picker.dart';
 import 'image_preview.dart';
 import 'transfer_controller.dart';
+import 'transfer_failure_l10n.dart';
 import 'transfer_model.dart';
 
 /// Sending and receiving, on the phone.
@@ -114,15 +116,15 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
           ),
         ),
         const SizedBox(height: 28),
-        const AppSectionTitle(
-          title: 'Transfers',
+        AppSectionTitle(
+          title: context.l10n.transfersTitle,
         ),
         const SizedBox(height: 12),
         if (transferState.transfers.isEmpty)
-          const AppEmptyState(
+          AppEmptyState(
             icon: AppIcons.materialSwapVert,
-            title: 'No transfers yet',
-            message: 'Anything you send or receive will stay visible here.',
+            title: context.l10n.noTransfersYet,
+            message: context.l10n.transfersEmptyExplanation,
           )
         else
           for (final transfer in transferState.transfers)
@@ -178,7 +180,8 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
       // A picker can fail for reasons the user can act on — a permission
       // refused, no photos app on the device — so this is shown rather than
       // swallowed. A cancel is not an error: it returns an empty list.
-      setState(() => _statusError = 'Could not open the picker: $e');
+      setState(
+          () => _statusError = context.l10n.pickerOpenFailed(e.toString()));
     } finally {
       if (mounted) setState(() => _isPicking = false);
     }
@@ -190,7 +193,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     setState(() => _picked.removeAt(index));
     showBottomUndoSnackBar(
       context,
-      message: 'Deleted from selection',
+      message: context.l10n.deletedFromSelection,
       onUndo: () {
         if (!mounted) return;
         final restoreAt = index > _picked.length ? _picked.length : index;
@@ -207,7 +210,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
 
     try {
       if (_picked.isEmpty) {
-        setState(() => _statusError = 'Choose something to send first.');
+        setState(() => _statusError = context.l10n.chooseSomethingToSend);
         return;
       }
 
@@ -220,10 +223,14 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
         setState(() {
           _picked.removeWhere((p) => missing.contains(p));
           _statusError = missing.length == 1
-              ? '${missing.first.displayName} is no longer available. '
-                  'Choose it again.'
-              : '${missing.length} files are no longer available. '
-                  'Choose them again.';
+              ? context.l10n.filesNoLongerAvailable(
+                  1,
+                  missing.first.displayName,
+                )
+              : context.l10n.filesNoLongerAvailable(
+                  missing.length,
+                  '',
+                );
         });
         return;
       }
@@ -246,14 +253,12 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            count == 1
-                ? 'Offered 1 item to ${target.name}.'
-                : 'Offered $count items to ${target.name}.',
+            context.l10n.offeredItems(count, target.name),
           ),
         ),
       );
     } catch (e) {
-      setState(() => _statusError = 'Send failed: $e');
+      setState(() => _statusError = context.l10n.sendFailed(e.toString()));
     }
   }
 
@@ -266,7 +271,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not retry: $error')),
+        SnackBar(content: Text(context.l10n.couldNotRetry(error.toString()))),
       );
     }
   }
@@ -279,7 +284,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     if (removed == null || !mounted) return;
     showBottomUndoSnackBar(
       context,
-      message: 'Transfer deleted',
+      message: context.l10n.transferDeleted,
       onUndo: () => controller.restoreTransfer(removed),
     );
   }
@@ -301,11 +306,13 @@ class _SendHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
+    final l10n = context.l10n;
 
     final subtitle = switch (target) {
-      null => 'No device connected',
-      final PeerLink link when choices > 1 => 'to ${link.name}, of $choices',
-      final PeerLink link => 'to ${link.name}',
+      null => l10n.sendToSubtitleNoDevice,
+      final PeerLink link when choices > 1 =>
+        l10n.sendToSubtitleMultiple(link.name, choices),
+      final PeerLink link => l10n.sendToSubtitleSingle(link.name),
     };
 
     return Row(
@@ -324,7 +331,7 @@ class _SendHeader extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Text('Send', style: text.titleMedium),
+              Text(l10n.tabSend, style: text.titleMedium),
               Text(
                 subtitle,
                 maxLines: 1,
@@ -350,6 +357,7 @@ class _NothingToSendTo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final l10n = context.l10n;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -361,13 +369,12 @@ class _NothingToSendTo extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
-            'Nowhere to send yet',
+            l10n.nowhereToSendYet,
             style: Theme.of(context).textTheme.titleSmall,
           ),
           const SizedBox(height: 6),
           Text(
-            'Connect to a computer, or open Remote Link on another phone on '
-            'the same Wi-Fi and it will appear here.',
+            l10n.nowhereToSendExplanation,
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
@@ -466,7 +473,7 @@ class _SourceButtons extends StatelessWidget {
                 // clip read the two buttons, saw neither offered video, and
                 // went to Files, where the camera roll is not.
                 : const AppIcon(AppIcons.gallery),
-            label: Text(hasPicked ? 'Add media' : 'Media'),
+            label: Text(hasPicked ? context.l10n.addMedia : context.l10n.media),
           ),
         ),
         const SizedBox(width: 10),
@@ -475,7 +482,7 @@ class _SourceButtons extends StatelessWidget {
             style: style,
             onPressed: isPicking ? null : () => unawaited(onPickFiles()),
             icon: const AppIcon(AppIcons.clipboard),
-            label: Text(hasPicked ? 'Add files' : 'Files'),
+            label: Text(hasPicked ? context.l10n.addFiles : context.l10n.files),
           ),
         ),
       ],
@@ -498,6 +505,7 @@ class _PickedList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final l10n = context.l10n;
     final total = picked.fold<int>(0, (sum, p) => sum + _lengthOrZero(p.file));
 
     return Column(
@@ -507,20 +515,18 @@ class _PickedList extends StatelessWidget {
           children: <Widget>[
             Expanded(
               child: Text(
-                picked.length == 1
-                    ? '1 item · ${formatBytes(total)}'
-                    : '${picked.length} items · ${formatBytes(total)}',
+                l10n.pickedFilesCount(picked.length, formatBytes(total)),
                 style: Theme.of(context).textTheme.labelLarge,
               ),
             ),
-            TextButton(onPressed: onClear, child: const Text('Clear')),
+            TextButton(onPressed: onClear, child: Text(l10n.clear)),
           ],
         ),
         const SizedBox(height: 4),
         for (final file in picked)
           Container(
             margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+            padding: const EdgeInsetsDirectional.fromSTEB(10, 8, 4, 8),
             decoration: BoxDecoration(
               color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
               borderRadius: BorderRadius.circular(16),
@@ -550,7 +556,7 @@ class _PickedList extends StatelessWidget {
                 ),
                 IconButton(
                   icon: const AppIcon(AppIcons.delete, size: 21),
-                  tooltip: 'Remove ${file.displayName}',
+                  tooltip: l10n.removeFileTooltip(file.displayName),
                   onPressed: () => onRemove(file),
                   color: scheme.error,
                 ),
@@ -586,7 +592,7 @@ class _SendProblem extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+      padding: const EdgeInsetsDirectional.fromSTEB(12, 10, 4, 10),
       decoration: BoxDecoration(
         color: scheme.errorContainer.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(14),
@@ -611,7 +617,7 @@ class _SendProblem extends StatelessWidget {
           ),
           IconButton(
             icon: const AppIcon(AppIcons.settings, size: 18),
-            tooltip: 'Dismiss',
+            tooltip: context.l10n.dismiss,
             onPressed: onDismiss,
             color: scheme.onErrorContainer,
           ),
@@ -641,9 +647,10 @@ class _SendButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final blocked = switch ((target, count)) {
-      (null, _) => 'Connect to a device to send.',
-      (_, 0) => 'Choose media or files above.',
+      (null, _) => l10n.connectToDeviceToSend,
+      (_, 0) => l10n.chooseMediaOrFilesAbove,
       _ => null,
     };
 
@@ -655,7 +662,7 @@ class _SendButton extends StatelessWidget {
             minimumSize: const Size.fromHeight(52),
           ),
           onPressed: blocked == null ? onSend : null,
-          child: const Text('Send'),
+          child: Text(l10n.tabSend),
         ),
         if (blocked != null) ...<Widget>[
           const SizedBox(height: 8),
@@ -707,7 +714,7 @@ class _PickedThumbnail extends StatelessWidget {
 
     return Semantics(
       button: true,
-      label: 'Preview ${file.displayName}',
+      label: context.l10n.previewFile(file.displayName),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () => unawaited(
@@ -739,6 +746,7 @@ class _TransferCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final l10n = context.l10n;
     final isIncoming = transfer.direction == TransferDirection.incoming;
 
     return AppSectionCard(
@@ -770,13 +778,16 @@ class _TransferCard extends StatelessWidget {
                   children: <Widget>[
                     Text(
                       isIncoming
-                          ? 'From ${transfer.peerName}'
-                          : 'To ${transfer.peerName}',
+                          ? l10n.transferFromPeer(transfer.peerName)
+                          : l10n.transferToPeer(transfer.peerName),
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '${transfer.files.length} ${transfer.files.length == 1 ? 'item' : 'items'} · ${formatBytes(transfer.totalBytes)}',
+                      l10n.transferFileItemCount(
+                        transfer.files.length,
+                        formatBytes(transfer.totalBytes),
+                      ),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
@@ -788,7 +799,7 @@ class _TransferCard extends StatelessWidget {
                 IconButton(
                   onPressed: onDelete,
                   icon: const AppIcon(AppIcons.delete, size: 21),
-                  tooltip: 'Delete transfer',
+                  tooltip: l10n.deleteTransfer,
                   color: scheme.error,
                 ),
               ],
@@ -819,7 +830,7 @@ class _TransferCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  '·  ETA: ${formatEta(transfer.eta)}',
+                  '·  ${l10n.transferEta(formatEta(transfer.eta))}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -828,21 +839,22 @@ class _TransferCard extends StatelessWidget {
                 IconButton(
                   onPressed: onCancel,
                   icon: const AppIcon(AppIcons.settings, size: 20),
-                  tooltip: 'Cancel',
+                  tooltip: l10n.cancel,
                   color: scheme.error,
                 ),
               if (transfer.canRetry)
                 FilledButton.icon(
                   onPressed: onRetry,
                   icon: const AppIcon(AppIcons.settings, size: 18),
-                  label: const Text('Retry'),
+                  label: Text(l10n.retry),
                 ),
             ],
           ),
-          if (transfer.errorMessage != null) ...<Widget>[
+          if (transfer.failure != null) ...<Widget>[
             const SizedBox(height: 4),
             Text(
-              transfer.errorMessage!,
+              describeTransferFailure(
+                  l10n, transfer.failure!, transfer.peerName),
               style: TextStyle(color: scheme.error, fontSize: 12),
             ),
           ],
@@ -887,8 +899,8 @@ class _TransferFileRow extends StatelessWidget {
     if (!await handle.exists()) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('This file is no longer stored on your phone.'),
+        SnackBar(
+          content: Text(context.l10n.fileNoLongerStored),
         ),
       );
       return;
@@ -937,7 +949,9 @@ class _TransferFileRow extends StatelessWidget {
 
     return Semantics(
       button: true,
-      label: '${_isImage ? 'Open' : 'Share'} ${file.fileName}',
+      label: _isImage
+          ? context.l10n.openFile(file.fileName)
+          : context.l10n.shareFile(file.fileName),
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
         onTap: () => unawaited(_open(context)),
@@ -977,6 +991,7 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final l10n = context.l10n;
     final success = successColors(scheme);
 
     // Container/on-container pairs rather than one colour drawn at 15% alpha
@@ -989,37 +1004,37 @@ class _StatusChip extends StatelessWidget {
       // this phone is receiving, "Awaiting response" describes the computer,
       // which is not what is happening.
       TransferStatus.prompting => (
-          isIncoming ? 'Waiting for you' : 'Awaiting response',
+          isIncoming ? l10n.statusWaitingForYou : l10n.statusAwaitingResponse,
           scheme.tertiaryContainer,
           scheme.onTertiaryContainer,
         ),
       TransferStatus.offered => (
-          'Offered',
+          l10n.statusOffered,
           scheme.tertiaryContainer,
           scheme.onTertiaryContainer,
         ),
       TransferStatus.inProgress => (
-          'Transferring',
+          l10n.statusTransferring,
           scheme.primaryContainer,
           scheme.onPrimaryContainer,
         ),
       TransferStatus.completed => (
-          'Completed',
+          l10n.statusCompleted,
           success.container,
           success.onContainer,
         ),
       TransferStatus.cancelled => (
-          'Cancelled',
+          l10n.statusCancelled,
           scheme.surfaceContainerHighest,
           scheme.onSurfaceVariant,
         ),
       TransferStatus.declined => (
-          'Declined',
+          l10n.statusDeclined,
           scheme.errorContainer,
           scheme.onErrorContainer,
         ),
       TransferStatus.failed => (
-          'Failed',
+          l10n.statusFailed,
           scheme.errorContainer,
           scheme.onErrorContainer,
         ),

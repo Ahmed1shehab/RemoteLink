@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/l10n.dart';
 import '../../app/providers.dart';
 import 'auto_connect.dart';
 
@@ -85,11 +86,11 @@ void _announceRefusal(WidgetRef ref, GlobalKey<NavigatorState> navigator) {
   final context = navigator.currentContext;
   if (context == null) return;
 
-  final name = client?.target?.displayName ?? 'That device';
+  final l10n = context.l10n;
+  final name = client?.target?.displayName ?? l10n.platformComputer;
   final message = switch (refusal) {
-    ConnectionAnswer.declined => '$name did not allow the connection.',
-    ConnectionAnswer.timedOut =>
-      'Nobody answered on $name, so the connection was not allowed.',
+    ConnectionAnswer.declined => l10n.connectionDeclined(name),
+    ConnectionAnswer.timedOut => l10n.connectionTimedOut(name),
     ConnectionAnswer.allowed => null,
   };
   if (message == null) return;
@@ -118,7 +119,7 @@ void _announceRefusal(WidgetRef ref, GlobalKey<NavigatorState> navigator) {
         // finding the device in the list again.
         action: refusal == ConnectionAnswer.timedOut && target != null
             ? SnackBarAction(
-                label: 'Try again',
+                label: l10n.tryAgain,
                 onPressed: () async {
                   final client = await ref.read(clientProvider.future);
                   await client.connect(target);
@@ -149,22 +150,23 @@ class WaitingForApprovalDialog extends ConsumerWidget {
       Navigator.of(context).pop();
     });
 
+    final l10n = context.l10n;
     final name = ref.watch(clientProvider).valueOrNull?.heldBy ??
         ref.watch(clientProvider).valueOrNull?.target?.displayName ??
-        'that device';
+        l10n.platformComputer;
 
     return AlertDialog(
-      title: const Text('Waiting to be let in'),
+      title: Text(l10n.waitingToBeLetInTitle),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           const Center(child: CircularProgressIndicator()),
           const SizedBox(height: 24),
-          Text('$name is asking whether to allow this connection.'),
+          Text(l10n.waitingToBeLetInMessage(name)),
           const SizedBox(height: 8),
           Text(
-            'Go to it and tap Allow. Nothing is sent until someone does.',
+            l10n.waitingToBeLetInInstructions,
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
@@ -178,7 +180,7 @@ class WaitingForApprovalDialog extends ConsumerWidget {
             final client = await ref.read(clientProvider.future);
             await client.disconnect();
           },
-          child: const Text('Stop waiting'),
+          child: Text(l10n.stopWaiting),
         ),
       ],
     );

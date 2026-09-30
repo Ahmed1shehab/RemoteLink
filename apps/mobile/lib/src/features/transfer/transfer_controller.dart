@@ -14,6 +14,7 @@ import 'package:rl_transport/rl_transport.dart';
 import '../../app/providers.dart';
 import '../host/host_providers.dart';
 import '../host/phone_host_service.dart';
+import 'file_exporter.dart';
 import 'file_picker.dart';
 import 'mobile_transfer_store.dart';
 import 'transfer_model.dart';
@@ -145,7 +146,8 @@ class MobileTransferController extends StateNotifier<TransferState> {
         for (final peerId in _hostPeerIds.difference(connected)) {
           for (final transfer in state.transfers) {
             if (transfer.peerId.value == peerId && transfer.isActive) {
-              _failTransfer(transfer.transferId, 'Connection lost');
+              _failTransfer(
+                  transfer.transferId, TransferFailure.connectionLost);
             }
           }
           final receiver = _receivers.remove(peerId);
@@ -186,7 +188,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
       if (clientPeer != null) {
         for (final transfer in state.transfers) {
           if (transfer.peerId == clientPeer && transfer.isActive) {
-            _failTransfer(transfer.transferId, 'Connection lost');
+            _failTransfer(transfer.transferId, TransferFailure.connectionLost);
           }
         }
       }
@@ -230,7 +232,17 @@ class MobileTransferController extends StateNotifier<TransferState> {
       };
       if (transferId == null) return;
       _log.warn('Incoming file transfer failed: $error');
-      _failTransfer(transferId, 'I/O error during transfer');
+      _failTransfer(
+          transferId,
+          switch (error) {
+            ExportError(reason: ExportFailure.cancelled) =>
+              TransferFailure.exportCancelled,
+            ExportError(reason: ExportFailure.permissionDenied) =>
+              TransferFailure.exportPermissionDenied,
+            ExportError(reason: ExportFailure.failed) =>
+              TransferFailure.exportFailed,
+            _ => TransferFailure.ioError,
+          });
       if (session.isEstablished) {
         try {
           await session.send(FileAbort(
@@ -352,7 +364,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
     }
     final session = _sessionFor(request.peerId);
     if (session == null) {
-      _failTransfer(request.transferId, 'Connection lost');
+      _failTransfer(request.transferId, TransferFailure.connectionLost);
       return;
     }
 
@@ -362,7 +374,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
     final store = _store;
     if (store == null) {
-      _failTransfer(request.transferId, 'Storage unavailable');
+      _failTransfer(request.transferId, TransferFailure.storageUnavailable);
       await session.send(FileAbort(
         transferId: request.transferId,
         reason: FileAbortReason.ioError,
@@ -407,8 +419,9 @@ class MobileTransferController extends StateNotifier<TransferState> {
                 status: decision.abort == null
                     ? TransferStatus.inProgress
                     : TransferStatus.failed,
-                errorMessage:
-                    decision.abort == null ? null : 'Could not accept transfer',
+                failure: decision.abort == null
+                    ? null
+                    : TransferFailure.couldNotAccept,
                 completedAt: decision.abort == null ? null : DateTime.now(),
               )
             : t,
@@ -421,7 +434,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
       );
     } catch (e) {
       _log.error('Failed to accept offer: $e');
-      _failTransfer(request.transferId, e.toString());
+      _failTransfer(request.transferId, TransferFailure.couldNotAccept);
       if (session.isEstablished) {
         try {
           await session.send(FileAbort(
@@ -442,7 +455,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
       (t) => t.isActive
           ? t.copyWith(
               status: TransferStatus.declined,
-              errorMessage: 'Declined by you',
+              failure: TransferFailure.declinedByYou,
               completedAt: DateTime.now(),
             )
           : t,
@@ -472,7 +485,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
     if (current == null || !current.isActive) return;
     final receiver = _receivers[peerId.value];
     if (receiver == null) {
-      _failTransfer(chunk.transferId, 'Receiver unavailable');
+      _failTransfer(chunk.transferId, TransferFailure.receiverUnavailable);
       await session.send(
         FileAbort(
           transferId: chunk.transferId,
@@ -489,7 +502,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
     );
 
     if (result == ChunkDisposition.refused) {
-      _failTransfer(chunk.transferId, 'File chunk refused');
+      _failTransfer(chunk.transferId, TransferFailure.chunkRefused);
       await session.send(
         FileAbort(
           transferId: chunk.transferId,
@@ -501,7 +514,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
     }
 
     if (result == ChunkDisposition.corrupt) {
-      _failTransfer(chunk.transferId, 'File integrity hash mismatch');
+      _failTransfer(chunk.transferId, TransferFailure.hashMismatch);
       await session.send(
         FileAbort(
           transferId: chunk.transferId,
@@ -599,7 +612,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
     }
     final receiver = _receivers[peerId.value];
     if (receiver == null) {
-      _failTransfer(complete.transferId, 'Receiver unavailable');
+      _failTransfer(complete.transferId, TransferFailure.receiverUnavailable);
       await session.send(FileAbort(
         transferId: complete.transferId,
         fileId: complete.fileId,
@@ -616,7 +629,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
     if (result == CompletionDisposition.hashMismatch ||
         result == CompletionDisposition.incomplete ||
         result == CompletionDisposition.refused) {
-      _failTransfer(complete.transferId, 'File could not be completed');
+      _failTransfer(complete.transferId, TransferFailure.couldNotComplete);
       await session.send(
         FileAbort(
           transferId: complete.transferId,
@@ -697,13 +710,13 @@ class MobileTransferController extends StateNotifier<TransferState> {
       completer.completeError(StateError('Transfer aborted by remote peer'));
     }
 
-    final reasonStr = switch (abort.reason) {
-      FileAbortReason.declined => 'Transfer declined by peer',
-      FileAbortReason.cancelled => 'Cancelled by ${record.peerName}',
-      FileAbortReason.hashMismatch => 'File integrity hash mismatch',
-      FileAbortReason.tooLarge => 'Not enough storage space on peer',
-      FileAbortReason.timeout => 'Transfer timed out',
-      FileAbortReason.ioError => 'I/O error during transfer',
+    final failure = switch (abort.reason) {
+      FileAbortReason.declined => TransferFailure.declinedByPeer,
+      FileAbortReason.cancelled => TransferFailure.cancelledByPeer,
+      FileAbortReason.hashMismatch => TransferFailure.hashMismatch,
+      FileAbortReason.tooLarge => TransferFailure.noSpaceOnPeer,
+      FileAbortReason.timeout => TransferFailure.timedOut,
+      FileAbortReason.ioError => TransferFailure.ioError,
     };
 
     final isDeclined = abort.reason == FileAbortReason.declined;
@@ -716,7 +729,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
             : abort.reason == FileAbortReason.cancelled
                 ? TransferStatus.cancelled
                 : TransferStatus.failed,
-        errorMessage: reasonStr,
+        failure: failure,
         completedAt: DateTime.now(),
       ),
     );
@@ -868,7 +881,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
           sendCompleter.completeError(e);
         }
         _log.warn('Outgoing transfer failed: $e');
-        _failTransfer(accept.transferId, e.toString());
+        _failTransfer(accept.transferId, TransferFailure.ioError);
         if (active && session.isEstablished) {
           try {
             await session.send(FileAbort(
@@ -1062,7 +1075,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
         transferId,
         (t) => t.copyWith(
           status: TransferStatus.cancelled,
-          errorMessage: 'Cancelled by you',
+          failure: TransferFailure.cancelledByYou,
           completedAt: DateTime.now(),
         ),
       ),
@@ -1129,7 +1142,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
         speedBytesPerSecond: 0,
         clearEta: true,
         clearCompletedAt: true,
-        clearErrorMessage: true,
+        clearFailure: true,
       ),
     );
     state = state.copyWith(transfers: updated);
@@ -1137,7 +1150,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
     try {
       await session.send(offer);
     } catch (error) {
-      _failTransfer(transferId, 'Retry failed: $error');
+      _failTransfer(transferId, TransferFailure.retryFailed);
       rethrow;
     }
   }
@@ -1183,13 +1196,13 @@ class MobileTransferController extends StateNotifier<TransferState> {
           .map((t) => t.transferId == transferId ? updater(t) : t)
           .toList();
 
-  void _failTransfer(String transferId, String message) {
+  void _failTransfer(String transferId, TransferFailure failure) {
     final updated = _updateTransfer(
       transferId,
       (t) => t.isActive
           ? t.copyWith(
               status: TransferStatus.failed,
-              errorMessage: message,
+              failure: failure,
               completedAt: DateTime.now(),
             )
           : t,

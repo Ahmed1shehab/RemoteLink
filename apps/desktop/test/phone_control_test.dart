@@ -61,9 +61,7 @@ void main() {
       expect(reason, isNotNull);
       // Not a bare "not supported". The user asked for this feature and the
       // honest answer names both halves of why it is missing.
-      expect(reason, contains('iPhone'));
-      expect(reason, contains('Android'));
-      expect(reason, contains('viewer'));
+      expect(reason, PhoneControlBlock.capabilityMissing);
     });
 
     test('drops to the tier reason once both ends could take part', () async {
@@ -82,7 +80,7 @@ void main() {
             name: 'Pixel 8 Pro',
           ),
         ),
-        contains('read-only'),
+        PhoneControlBlock.readOnly,
       );
     });
 
@@ -201,7 +199,7 @@ void main() {
         tester.view.resetDevicePixelRatio();
       });
 
-      const reason = 'Controlling a phone from this computer is not available.';
+      const reason = PhoneControlBlock.capabilityMissing;
       await tester.pumpWidget(
         ProviderScope(
           overrides: <Override>[
@@ -228,7 +226,7 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      expect(find.text(reason), findsOneWidget);
+      expect(find.textContaining('Controlling a phone'), findsOneWidget);
     });
 
     testWidgets('says nothing when there is nothing to explain',

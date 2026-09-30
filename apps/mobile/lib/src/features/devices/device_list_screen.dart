@@ -10,6 +10,7 @@ import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/app_icons.dart';
 import '../../app/brand.dart';
+import '../../app/l10n.dart';
 import '../../app/providers.dart';
 import '../control/control_screen.dart';
 import '../host/host_providers.dart';
@@ -168,6 +169,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     final entries = _merge(
       discovered,
       paired,
+      connectedDeviceFallback: context.l10n.connectedDeviceFallback,
       connectedPeers: connectedPeers,
       connectedIds: connectedIds,
     );
@@ -185,18 +187,18 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
         // leading slot is empty, and it is the only place in the phone app that
         // says which app you are in once the launch screen has gone.
         leading: const Padding(
-          padding: EdgeInsets.only(left: 12),
+          padding: EdgeInsetsDirectional.only(start: 12),
           child: Center(child: BrandMark(size: 28)),
         ),
         // "Devices", not "Computers". The list has never been only computers
         // since a phone could advertise itself, and a heading that says
         // otherwise is the app telling the user the phone they can see in the
         // list is not really there.
-        title: const Text('Devices'),
+        title: Text(context.l10n.devicesTitle),
         actions: <Widget>[
           IconButton(
             icon: const AppIcon(AppIcons.filter),
-            tooltip: 'Search again',
+            tooltip: context.l10n.searchAgain,
             onPressed: () async {
               _beginSearchWindow();
               final backend = await ref.read(discoveryProvider.future);
@@ -208,7 +210,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
               AppIcons.settings,
               color: scheme.onSurfaceVariant,
             ),
-            tooltip: 'Settings',
+            tooltip: context.l10n.settings,
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
                 builder: (_) => const SettingsScreen(),
@@ -224,7 +226,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _scanCode(context),
         icon: const AppIcon(AppIcons.qrCode),
-        label: const Text('Scan code'),
+        label: Text(context.l10n.scanCode),
       ),
       body: entries.isEmpty
           ? _Searching(
@@ -284,6 +286,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
   static List<_Entry> _merge(
     List<DiscoveredDevice> discovered,
     List<TrustedPeer> paired, {
+    required String connectedDeviceFallback,
     List<PeerLink> connectedPeers = const <PeerLink>[],
     Set<DeviceId> connectedIds = const <DeviceId>{},
   }) {
@@ -315,7 +318,9 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
         _Entry(
           id: peer.id,
           name: effectiveName,
-          host: disc?.address ?? storedPeer?.lastAddress ?? 'Connected device',
+          host: disc?.address ??
+              storedPeer?.lastAddress ??
+              connectedDeviceFallback,
           port: disc?.port ??
               (peer.isHandheld ? kPhoneHostPort : kDefaultServicePort),
           isPaired: storedPeer != null,
@@ -477,20 +482,18 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Switch computers?'),
+        title: Text(context.l10n.switchComputersTitle),
         content: Text(
-          'This phone talks to one computer at a time, so connecting to $name '
-          'will disconnect the one you are on. Anything still transferring '
-          'will stop.',
+          context.l10n.switchComputersMessage(name),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Stay'),
+            child: Text(context.l10n.stay),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Switch to $name'),
+            child: Text(context.l10n.switchToComputer(name)),
           ),
         ],
       ),
@@ -642,7 +645,7 @@ class _ConnectedSubtitle extends StatelessWidget {
         ),
         const SizedBox(width: 7),
         Text(
-          'Connected',
+          context.l10n.deviceConnectedSubtitle,
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: scheme.primary,
                 fontWeight: FontWeight.w700,
@@ -650,7 +653,7 @@ class _ConnectedSubtitle extends StatelessWidget {
         ),
         Flexible(
           child: Text(
-            ' · tap for the controls',
+            context.l10n.tapForControls,
             style: Theme.of(context).textTheme.bodySmall,
             overflow: TextOverflow.ellipsis,
           ),
@@ -711,10 +714,10 @@ class _DeviceTile extends StatelessWidget {
             // children into one node, so this is announced ahead of the name:
             // "Mac, Ahmed's iMac, Paired".
             semanticLabel: switch (entry.platform) {
-              PlatformKind.macos => 'Mac',
-              PlatformKind.windows => 'Windows PC',
-              PlatformKind.linux => 'Linux computer',
-              _ => 'Computer',
+              PlatformKind.macos => context.l10n.platformMac,
+              PlatformKind.windows => context.l10n.platformWindows,
+              PlatformKind.linux => context.l10n.platformLinux,
+              _ => context.l10n.platformComputer,
             },
             size: 28,
             color: scheme.onSurfaceVariant,
@@ -730,26 +733,27 @@ class _DeviceTile extends StatelessWidget {
             ? const _ConnectedSubtitle()
             : Text(
                 wasRevoked
-                    ? 'This computer removed your access'
+                    ? context.l10n.deviceAccessRevoked
                     : switch ((entry.isPaired, entry.isLive)) {
                         _ when entry.host == null =>
-                          'Paired · tap to scan its code',
-                        (true, true) => 'Paired · ${entry.host}',
+                          context.l10n.pairedTapToScan,
+                        (true, true) =>
+                          context.l10n.pairedWithAddress(entry.host!),
                         (true, false) =>
-                          'Paired · not seen right now · ${entry.host}',
-                        (false, true) => 'Tap to pair · ${entry.host}',
+                          context.l10n.pairedNotSeen(entry.host!),
+                        (false, true) => context.l10n.tapToPair(entry.host!),
                         (false, false) => entry.host!,
                       },
               ),
         trailing: wasRevoked
             ? TextButton(
                 onPressed: onPairAgain,
-                child: const Text('Pair again'),
+                child: Text(context.l10n.pairAgain),
               )
             : isConnected
                 ? TextButton(
                     onPressed: onDisconnect,
-                    child: const Text('Disconnect'),
+                    child: Text(context.l10n.disconnect),
                   )
                 : entry.isPaired
                     ? Row(
@@ -761,7 +765,7 @@ class _DeviceTile extends StatelessWidget {
                                 AppIcons.edit,
                                 color: scheme.onSurfaceVariant,
                               ),
-                              tooltip: 'Rename computer',
+                              tooltip: context.l10n.renameComputer,
                               onPressed: onRename,
                             ),
                           // Both of these repeat what the subtitle already says —
@@ -799,7 +803,7 @@ class _RenameComputerDialog extends StatefulWidget {
 class _RenameComputerDialogState extends State<_RenameComputerDialog> {
   late final TextEditingController _controller =
       TextEditingController(text: widget.initialName);
-  String? _error;
+  bool _hasError = false;
 
   @override
   void dispose() {
@@ -812,8 +816,7 @@ class _RenameComputerDialogState extends State<_RenameComputerDialog> {
     final sanitised = sanitiseDeviceName(raw);
     if (sanitised == null) {
       setState(() {
-        _error =
-            'Invalid name: 1–64 characters, no control codes or line breaks.';
+        _hasError = true;
       });
       return;
     }
@@ -822,7 +825,7 @@ class _RenameComputerDialogState extends State<_RenameComputerDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Rename computer'),
+        title: Text(context.l10n.renameComputer),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -831,8 +834,8 @@ class _RenameComputerDialogState extends State<_RenameComputerDialog> {
               controller: _controller,
               autofocus: true,
               decoration: InputDecoration(
-                labelText: 'Computer name',
-                errorText: _error,
+                labelText: context.l10n.computerName,
+                errorText: _hasError ? context.l10n.invalidComputerName : null,
                 border: const OutlineInputBorder(),
               ),
               onSubmitted: (_) => _submit(),
@@ -842,11 +845,11 @@ class _RenameComputerDialogState extends State<_RenameComputerDialog> {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: _submit,
-            child: const Text('Save'),
+            child: Text(context.l10n.save),
           ),
         ],
       );
@@ -874,14 +877,16 @@ class _Reconnecting extends StatelessWidget {
                 const CircularProgressIndicator(),
                 const SizedBox(height: 24),
                 Text(
-                  name == null ? 'Reconnecting' : 'Reconnecting to $name',
+                  name == null
+                      ? context.l10n.reconnecting
+                      : context.l10n.reconnectingTo(name!),
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 24),
                 TextButton(
                   onPressed: onCancel,
-                  child: const Text('Choose a different computer'),
+                  child: Text(context.l10n.chooseDifferentComputer),
                 ),
               ],
             ),
@@ -946,9 +951,9 @@ class _Searching extends StatelessWidget {
         const SizedBox(height: 24),
         Text(
           switch ((discoveryWorks, stillLooking)) {
-            (false, _) => 'This device can\u2019t search automatically',
-            (true, true) => 'Looking for computers',
-            (true, false) => 'No computers found',
+            (false, _) => context.l10n.deviceCantSearch,
+            (true, true) => context.l10n.lookingForComputers,
+            (true, false) => context.l10n.noComputersFound,
           },
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.titleMedium,
@@ -956,23 +961,12 @@ class _Searching extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           switch ((discoveryWorks, stillLooking)) {
-            (false, _) => 'iPhones need a special Apple permission to search '
-                'the local network, and some Wi-Fi networks block it '
-                'entirely.\n\nScan the code your computer shows instead — it '
-                'carries the address, so searching is not needed. Everything '
-                'else works exactly the same.',
-            (true, true) => 'Make sure Remote Link is running on your computer '
-                'and both devices are on the same Wi-Fi network.',
+            (false, _) => context.l10n.deviceCantSearchExplanation,
+            (true, true) => context.l10n.lookingForComputersExplanation,
             // Said plainly, because after this long the honest answer is that
             // searching is not going to work here and the user needs the other
             // route. Leaving the spinner up implies waiting will help.
-            (true, false) =>
-              'Check that Remote Link is running on your computer and that both '
-                  'devices are on the same Wi-Fi.\n\nSome networks — guest '
-                  'Wi-Fi in particular — block the traffic that finds '
-                  'computers automatically. If yours does, click '
-                  '\u201cPair a phone\u201d on the computer and scan the code '
-                  'it shows. It is remembered afterwards.',
+            (true, false) => context.l10n.noComputersFoundExplanation,
           },
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodySmall,
@@ -983,7 +977,7 @@ class _Searching extends StatelessWidget {
             child: FilledButton.icon(
               onPressed: onScanCode,
               icon: const AppIcon(AppIcons.qrCode),
-              label: const Text('Scan code'),
+              label: Text(context.l10n.scanCode),
             ),
           ),
           const SizedBox(height: 8),
@@ -991,7 +985,7 @@ class _Searching extends StatelessWidget {
             child: TextButton.icon(
               onPressed: onSearchAgain,
               icon: const AppIcon(AppIcons.settings),
-              label: const Text('Search again'),
+              label: Text(context.l10n.searchAgain),
             ),
           ),
         ],

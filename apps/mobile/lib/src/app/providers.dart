@@ -16,6 +16,7 @@ import 'package:rl_transport/rl_transport.dart';
 
 import '../features/devices/bonjour_discovery.dart';
 import '../features/input/pointer_controller.dart';
+import 'l10n.dart';
 
 /// What this phone can do, advertised during the handshake.
 /// What this phone advertises in its hello.
@@ -581,8 +582,10 @@ final class DeviceNameNotifier extends StateNotifier<String> {
       if (host.isNotEmpty) return host;
     } catch (_) {}
     if (Platform.isIOS) return 'iPhone';
-    if (Platform.isAndroid) return 'Android Phone';
-    return 'Phone';
+    if (Platform.isAndroid) {
+      return currentAppLocalizations().defaultAndroidPhoneName;
+    }
+    return currentAppLocalizations().defaultPhoneName;
   }
 
   Future<void> _load() async {
@@ -602,7 +605,7 @@ final class DeviceNameNotifier extends StateNotifier<String> {
   Future<String?> setDeviceName(String newName) async {
     final sanitised = sanitiseDeviceName(newName);
     if (sanitised == null) {
-      return 'Invalid name: 1–64 characters, no control codes or line breaks.';
+      return currentAppLocalizations().invalidComputerName;
     }
 
     state = sanitised;

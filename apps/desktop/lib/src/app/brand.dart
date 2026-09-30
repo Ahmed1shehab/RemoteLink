@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'l10n.dart';
 
 /// The product's name, spelled one way, in one place.
 ///
@@ -74,7 +75,7 @@ class BrandSplash extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              message ?? 'Starting the service…',
+              message ?? context.l10n.startingService,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),

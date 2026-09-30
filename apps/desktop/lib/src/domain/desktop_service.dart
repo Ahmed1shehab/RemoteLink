@@ -111,17 +111,26 @@ Capabilities buildCapabilities({
 /// A reason rather than a boolean because the user asked for this feature and
 /// deserves to know why it is greyed out. "Not available" with no explanation
 /// reads as a bug, and on an iPhone this is not a bug and will not be fixed.
-String? phoneControlBlockedReason(ConnectedDevice device) {
-  if (!device.serverSession.handshake.capabilities.has(
-    Capabilities.phoneControl,
-  )) {
-    return 'Controlling a phone from this computer is not available. iPhones '
-        'offer no way to allow it at all, Android needs a service this build '
-        'does not include, and there is no viewer here yet.';
+enum BackendFailure {
+  accessibilityPermission,
+  screenRecordingPermission,
+  inputUnsupported,
+  inputLibrariesUnavailable,
+  backendDisposed,
+  clipboardUnsupported,
+  clipboardUnavailable,
+  mediaUnsupported,
+  mediaUnavailable
+}
+
+enum PhoneControlBlock { capabilityMissing, readOnly }
+
+PhoneControlBlock? phoneControlBlockedReason(ConnectedDevice device) {
+  if (!device.serverSession.handshake.capabilities
+      .has(Capabilities.phoneControl)) {
+    return PhoneControlBlock.capabilityMissing;
   }
-  if (!device.tier.canViewScreen) {
-    return 'Raise this device above read-only to control it.';
-  }
+  if (!device.tier.canViewScreen) return PhoneControlBlock.readOnly;
   return null;
 }
 
@@ -515,23 +524,37 @@ final class DesktopService {
 
   bool get inputAvailable => _input.isAvailable;
 
-  String? get inputUnavailableReason => _input.unavailableReason;
+  BackendFailure? get inputUnavailableReason {
+    if (_input.isAvailable) return null;
+    final reason = _input.unavailableReason ?? '';
+    if (reason.startsWith('Remote Link needs Accessibility permission')) {
+      return BackendFailure.accessibilityPermission;
+    }
+    if (reason.startsWith('input injection is not implemented')) {
+      return BackendFailure.inputUnsupported;
+    }
+    if (reason == 'native input libraries could not be loaded') {
+      return BackendFailure.inputLibrariesUnavailable;
+    }
+    return BackendFailure.backendDisposed;
+  }
 
   bool get clipboardAvailable => _clipboardBackend.isAvailable;
 
-  String? get clipboardUnavailableReason => _clipboardBackend.isAvailable
-      ? null
-      : (_clipboardBackend is UnsupportedClipboardBackend
-          ? 'Clipboard sync is not supported on ${NativeBackends.currentPlatform.name}'
-          : 'Clipboard backend unavailable');
+  BackendFailure? get clipboardUnavailableReason =>
+      _clipboardBackend.isAvailable
+          ? null
+          : (_clipboardBackend is UnsupportedClipboardBackend
+              ? BackendFailure.clipboardUnsupported
+              : BackendFailure.clipboardUnavailable);
 
   bool get mediaAvailable => _media.isAvailable;
 
-  String? get mediaUnavailableReason => _media.isAvailable
+  BackendFailure? get mediaUnavailableReason => _media.isAvailable
       ? null
       : (_media is UnsupportedMediaBackend
-          ? 'Media control is not supported on ${NativeBackends.currentPlatform.name}'
-          : 'Media backend unavailable');
+          ? BackendFailure.mediaUnsupported
+          : BackendFailure.mediaUnavailable);
 
   bool get brightnessAvailable => _brightness.isAvailable;
 
@@ -539,8 +562,14 @@ final class DesktopService {
 
   bool get screenCaptureAvailable => _screenCapture.isAvailable;
 
-  String? get screenCaptureUnavailableReason =>
-      _screenCapture.unavailableReason;
+  BackendFailure? get screenCaptureUnavailableReason {
+    if (_screenCapture.isAvailable) return null;
+    final reason = _screenCapture.unavailableReason ?? '';
+    if (reason.startsWith('Remote Link needs Screen Recording permission')) {
+      return BackendFailure.screenRecordingPermission;
+    }
+    return BackendFailure.backendDisposed;
+  }
 
   int get commandAppliedCount => _dispatcher.appliedCount;
 
@@ -1336,7 +1365,7 @@ final class DesktopService {
         _finishTransfer(
           record.transferId,
           TransferStatus.failed,
-          errorMessage: 'Connection lost',
+          failure: TransferFailure.connectionLost,
         );
         final sender = _activeSendCompleters.remove(record.transferId);
         if (sender != null && !sender.isCompleted) {
@@ -1628,26 +1657,25 @@ final class DesktopService {
   void _finishTransfer(
     String transferId,
     TransferStatus status, {
-    String? errorMessage,
+    TransferFailure? failure,
   }) {
     final record = _transfers[transferId];
     if (record == null || !record.isActive) return;
     _transfers[transferId] = record.copyWith(
       status: status,
-      errorMessage: errorMessage,
+      failure: failure,
       completedAt: DateTime.now(),
     );
     _publishTransfers();
   }
 
-  String _abortMessage(FileAbortReason reason, String peerName) =>
-      switch (reason) {
-        FileAbortReason.cancelled => 'Cancelled by $peerName',
-        FileAbortReason.declined => 'Declined by $peerName',
-        FileAbortReason.ioError => 'I/O error during transfer',
-        FileAbortReason.hashMismatch => 'File integrity hash mismatch',
-        FileAbortReason.tooLarge => 'Not enough storage space',
-        FileAbortReason.timeout => 'Transfer timed out',
+  TransferFailure _abortMessage(FileAbortReason reason) => switch (reason) {
+        FileAbortReason.cancelled => TransferFailure.cancelledByPeer,
+        FileAbortReason.declined => TransferFailure.declinedByPeer,
+        FileAbortReason.ioError => TransferFailure.ioError,
+        FileAbortReason.hashMismatch => TransferFailure.hashMismatch,
+        FileAbortReason.tooLarge => TransferFailure.noSpace,
+        FileAbortReason.timeout => TransferFailure.timedOut,
       };
 
   /// Cleanup can wait behind a disk write and must not block the UI update.
@@ -1851,7 +1879,7 @@ final class DesktopService {
                 if (rec != null && rec.isActive) {
                   _transfers[message.transferId] = rec.copyWith(
                     status: TransferStatus.failed,
-                    errorMessage: e.toString(),
+                    failure: TransferFailure.ioError,
                     completedAt: DateTime.now(),
                   );
                   _publishTransfers();
@@ -1877,7 +1905,7 @@ final class DesktopService {
           if (_transfers[message.transferId]?.isActive != true) return;
           if (receiver == null) {
             _finishTransfer(message.transferId, TransferStatus.failed,
-                errorMessage: 'Receiver unavailable');
+                failure: TransferFailure.receiverUnavailable);
             await device.serverSession.session.send(FileAbort(
               transferId: message.transferId,
               reason: FileAbortReason.ioError,
@@ -1892,7 +1920,7 @@ final class DesktopService {
             _finishTransfer(
               message.transferId,
               TransferStatus.failed,
-              errorMessage: 'File chunk refused',
+              failure: TransferFailure.chunkRefused,
             );
             await device.serverSession.session.send(
               FileAbort(
@@ -1907,7 +1935,7 @@ final class DesktopService {
             _finishTransfer(
               message.transferId,
               TransferStatus.failed,
-              errorMessage: 'File integrity hash mismatch',
+              failure: TransferFailure.hashMismatch,
             );
             await device.serverSession.session.send(
               FileAbort(
@@ -1990,7 +2018,7 @@ final class DesktopService {
           }
           if (receiver == null) {
             _finishTransfer(message.transferId, TransferStatus.failed,
-                errorMessage: 'Receiver unavailable');
+                failure: TransferFailure.receiverUnavailable);
             await device.serverSession.session.send(FileAbort(
               transferId: message.transferId,
               reason: FileAbortReason.ioError,
@@ -2004,9 +2032,9 @@ final class DesktopService {
             _finishTransfer(
               message.transferId,
               TransferStatus.failed,
-              errorMessage: result == CompletionDisposition.hashMismatch
-                  ? 'File integrity hash mismatch'
-                  : 'File could not be completed',
+              failure: result == CompletionDisposition.hashMismatch
+                  ? TransferFailure.hashMismatch
+                  : TransferFailure.couldNotComplete,
             );
             await device.serverSession.session.send(
               FileAbort(
@@ -2066,7 +2094,6 @@ final class DesktopService {
           }
 
         case FileAbort():
-          final record = _transfers[message.transferId];
           _finishTransfer(
             message.transferId,
             message.reason == FileAbortReason.declined
@@ -2074,10 +2101,7 @@ final class DesktopService {
                 : message.reason == FileAbortReason.cancelled
                     ? TransferStatus.cancelled
                     : TransferStatus.failed,
-            errorMessage: _abortMessage(
-              message.reason,
-              record?.peerName ?? device.name,
-            ),
+            failure: _abortMessage(message.reason),
           );
           final completer = _activeSendCompleters.remove(message.transferId);
           if (completer != null && !completer.isCompleted) {
@@ -2114,7 +2138,7 @@ final class DesktopService {
         _finishTransfer(
           transferId,
           TransferStatus.failed,
-          errorMessage: 'I/O error during transfer',
+          failure: TransferFailure.ioError,
         );
       }
       if (transferId != null && device.serverSession.session.isEstablished) {
@@ -2139,7 +2163,7 @@ final class DesktopService {
       if (record != null) {
         _transfers[request.transferId] = record.copyWith(
           status: TransferStatus.failed,
-          errorMessage: 'Device disconnected',
+          failure: TransferFailure.deviceDisconnected,
           completedAt: DateTime.now(),
         );
         _publishTransfers();
@@ -2166,22 +2190,22 @@ final class DesktopService {
           status: decision.abort == null
               ? TransferStatus.inProgress
               : TransferStatus.failed,
-          errorMessage: decision.abort == null
+          failure: decision.abort == null
               ? null
-              : _abortMessage(decision.abort!.reason, device.name),
+              : _abortMessage(decision.abort!.reason),
         );
         _publishTransfers();
       }
     } on Object {
       _finishTransfer(request.transferId, TransferStatus.failed,
-          errorMessage: 'Could not accept transfer');
+          failure: TransferFailure.couldNotAccept);
     }
   }
 
   /// Declines a pending incoming file transfer.
   Future<void> declineIncomingTransfer(PendingIncomingTransfer request) async {
     _finishTransfer(request.transferId, TransferStatus.declined,
-        errorMessage: 'Declined by you');
+        failure: TransferFailure.declinedByYou);
     final device = _devices[request.peerId.value];
     if (device != null && device.serverSession.session.isEstablished) {
       try {
@@ -2344,7 +2368,7 @@ final class DesktopService {
       _finishTransfer(
         transferId,
         TransferStatus.cancelled,
-        errorMessage: 'Cancelled by you',
+        failure: TransferFailure.cancelledByYou,
       );
       final device = _devices[record.peerId.value];
       final completer = _activeSendCompleters.remove(transferId);
@@ -2407,7 +2431,7 @@ final class DesktopService {
 
     _transfers[transferId] = record.copyWith(
       status: TransferStatus.offered,
-      clearErrorMessage: true,
+      clearFailure: true,
     );
     _publishTransfers();
 

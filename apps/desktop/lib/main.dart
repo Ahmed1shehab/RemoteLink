@@ -9,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'src/app/brand.dart';
 import 'src/app/crash_capture.dart';
+import 'src/app/l10n.dart';
 import 'src/app/providers.dart';
 import 'src/app/theme.dart';
 import 'src/domain/auto_start.dart';
@@ -119,6 +120,8 @@ class RemoteLinkDesktopApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: remoteLinkTheme(Brightness.light),
         darkTheme: remoteLinkTheme(Brightness.dark),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: const _TrayHost(child: HomeScreen()),
       );
 }
@@ -175,6 +178,15 @@ class _TrayHostState extends ConsumerState<_TrayHost> with WindowListener {
     unawaited(_tray.initialise(connectedCount: 0));
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    unawaited(_tray.rebuild(
+      connectedCount: _lastCount == -1 ? 0 : _lastCount,
+      l10n: context.l10n,
+    ));
+  }
+
   /// The red button hides rather than quits — that is what makes this a
   /// service. Without this handler `setPreventClose(true)` leaves a button that
   /// simply does nothing when clicked.
@@ -200,7 +212,10 @@ class _TrayHostState extends ConsumerState<_TrayHost> with WindowListener {
     // visible flicker in the menu bar.
     if (count != _lastCount) {
       _lastCount = count;
-      unawaited(_tray.rebuild(connectedCount: count));
+      unawaited(_tray.rebuild(
+        connectedCount: count,
+        l10n: context.l10n,
+      ));
     }
 
     return widget.child;
@@ -229,7 +244,11 @@ class TrayController with TrayListener {
 
   bool _pairingEnabled = true;
 
-  Future<void> initialise({required int connectedCount}) async {
+  Future<void> initialise({
+    required int connectedCount,
+    AppLocalizations? l10n,
+  }) async {
+    final loc = l10n ?? currentAppLocalizations();
     await trayManager.setIcon(
       Platform.isWindows ? 'assets/tray/icon.ico' : 'assets/tray/icon.png',
       // macOS renders template images in the menu bar's own colour, so the
@@ -237,31 +256,32 @@ class TrayController with TrayListener {
       isTemplate: Platform.isMacOS,
     );
     await trayManager.setToolTip(kProductName);
-    await rebuild(connectedCount: connectedCount);
+    await rebuild(connectedCount: connectedCount, l10n: loc);
     trayManager.addListener(this);
   }
 
   /// Rebuilds the menu so it reflects live state.
-  Future<void> rebuild({required int connectedCount}) async {
+  Future<void> rebuild({
+    required int connectedCount,
+    AppLocalizations? l10n,
+  }) async {
+    final loc = l10n ?? currentAppLocalizations();
     await trayManager.setContextMenu(
       Menu(
         items: <MenuItem>[
           MenuItem(
-            label: connectedCount == 0
-                ? 'No devices connected'
-                : '$connectedCount device${connectedCount == 1 ? '' : 's'} '
-                    'connected',
+            label: loc.connectedStatusLabel(connectedCount),
             disabled: true,
           ),
           MenuItem.separator(),
-          MenuItem(key: _keyShow, label: 'Open $kProductName'),
+          MenuItem(key: _keyShow, label: loc.openProduct(kProductName)),
           MenuItem.checkbox(
             key: _keyPairing,
-            label: 'Allow new devices to pair',
+            label: loc.allowNewDevicesToPair,
             checked: _pairingEnabled,
           ),
           MenuItem.separator(),
-          MenuItem(key: _keyQuit, label: 'Quit $kProductName'),
+          MenuItem(key: _keyQuit, label: loc.quitProduct(kProductName)),
         ],
       ),
     );

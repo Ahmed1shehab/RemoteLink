@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_icons.dart';
+import '../../app/l10n.dart';
 import '../../app/motion.dart';
 import '../pairing/pairing_code.dart';
 import '../transfer/transfer_controller.dart';
@@ -250,7 +251,7 @@ class _PairingPrompt extends StatelessWidget {
 
     return _PromptFrame(
       icon: AppIcons.settings,
-      title: 'A device wants to connect',
+      title: context.l10n.incomingDevicePrompt,
       // The device id, not a name it sent. A name is the one thing an unpaired
       // stranger controls completely, and rendering "Ahmed's iPhone" above a
       // code the user is about to approve is precisely the confusion the code
@@ -267,14 +268,13 @@ class _PairingPrompt extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         Text(
-          'Connect only if the other device is showing these same six digits. '
-          'If they differ, something else is answering — decline and try again.',
+          context.l10n.pairingPromptHelp,
           textAlign: TextAlign.center,
           style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
         ),
       ],
-      declineLabel: 'Not now',
-      acceptLabel: 'Codes match',
+      declineLabel: context.l10n.notNow,
+      acceptLabel: context.l10n.codesMatch,
     );
   }
 }
@@ -297,26 +297,24 @@ class _ConnectionPrompt extends StatelessWidget {
 
     return _PromptFrame(
       icon: AppIcons.settings,
-      title: 'Allow this device to connect?',
+      title: context.l10n.allowDeviceToConnectTitle,
       // The stored name, which is the one the user chose when they paired.
       subtitle: request.peerName,
       body: <Widget>[
         Text(
-          'You have paired with it before, so its identity is already '
-          'checked. This is only about now — allow it if the device is in '
-          'your hands, and turn it away if it is not.',
+          context.l10n.allowDeviceToConnectHelp,
           textAlign: TextAlign.center,
           style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 10),
         Text(
-          'You will not be asked about it again until Remote Link restarts.',
+          context.l10n.allowDeviceToConnectRestartHelp,
           textAlign: TextAlign.center,
           style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
         ),
       ],
-      declineLabel: 'Not now',
-      acceptLabel: 'Allow',
+      declineLabel: context.l10n.notNow,
+      acceptLabel: context.l10n.allowButton,
     );
   }
 }
@@ -334,25 +332,23 @@ class _RememberPrompt extends StatelessWidget {
 
     return _PromptFrame(
       icon: AppIcons.settings,
-      title: 'Remember this connection?',
+      title: context.l10n.rememberConnectionTitle,
       subtitle: request.peerName,
       body: <Widget>[
         Text(
-          'Remote Link can let ${request.peerName} straight in next time — '
-          'no code to scan, and nobody asked to allow it.',
+          context.l10n.rememberDevicePromptHelp(request.peerName),
           textAlign: TextAlign.center,
           style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 10),
         Text(
-          '${request.peerName} is being asked the same thing. Both devices '
-          'have to agree, and either one can change its mind later.',
+          context.l10n.rememberDevicePromptBothAgree(request.peerName),
           textAlign: TextAlign.center,
           style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
         ),
       ],
-      declineLabel: 'Not now',
-      acceptLabel: 'Remember',
+      declineLabel: context.l10n.notNow,
+      acceptLabel: context.l10n.remember,
     );
   }
 }
@@ -372,14 +368,14 @@ class _IncomingPrompt extends StatelessWidget {
 
     return _PromptFrame(
       icon: AppIcons.receive,
-      title: count == 1 ? 'Incoming file' : 'Incoming files',
+      title: context.l10n.incomingFileTitle(count),
       subtitle: '${request.peerName} · ${formatBytes(request.totalBytes)}',
       body: <Widget>[
         // Named, not counted. "3 files" is not enough to decide with, and the
         // decision is the whole reason this sheet exists.
         for (final file in files.take(4))
           Padding(
-            padding: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsetsDirectional.only(bottom: 6),
             child: Row(
               children: <Widget>[
                 AppIcon(
@@ -411,18 +407,18 @@ class _IncomingPrompt extends StatelessWidget {
           ),
         if (count > 4)
           Text(
-            'and ${count - 4} more',
+            context.l10n.incomingMoreFiles(count - 4),
             style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
           ),
         const SizedBox(height: 12),
         Text(
-          kIncomingDestinationExplanation,
+          context.l10n.incomingDestinationExplanation,
           textAlign: TextAlign.center,
           style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
         ),
       ],
-      declineLabel: 'Decline',
-      acceptLabel: 'Accept',
+      declineLabel: context.l10n.declineButton,
+      acceptLabel: context.l10n.accept,
     );
   }
 }
@@ -460,7 +456,7 @@ class _PromptFrame extends StatelessWidget {
       // pushing the buttons past the bottom edge — which is the one part of
       // this that must always be reachable.
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
+        padding: const EdgeInsetsDirectional.fromSTEB(24, 4, 24, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[

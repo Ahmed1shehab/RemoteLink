@@ -8,6 +8,7 @@ import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/app_icons.dart';
+import '../../app/l10n.dart';
 import '../../app/providers.dart';
 import '../input/pointer_controller.dart';
 import 'remote_cursor.dart';
@@ -196,7 +197,7 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
     if (!connected || !supported) {
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Screen Stream'),
+          title: Text(context.l10n.screenStreamTitle),
         ),
         body: const _UnsupportedScreenViewer(),
       );
@@ -236,15 +237,15 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
                 gesturesAvailable: gesturesAvailable,
               )
             else
-              const Center(
+              Center(
                 child: Text(
-                  'Waiting for screen frames…',
-                  style: TextStyle(color: Colors.white70),
+                  context.l10n.waitingForScreenFrames,
+                  style: const TextStyle(color: Colors.white70),
                 ),
               ),
             SafeArea(
               child: Align(
-                alignment: Alignment.topRight,
+                alignment: AlignmentDirectional.topEnd,
                 child: Padding(
                   padding: const EdgeInsets.all(8),
                   child: DecoratedBox(
@@ -269,7 +270,7 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
                         IconButton(
                           icon: const AppIcon(AppIcons.monitorPlay,
                               color: Colors.white),
-                          tooltip: 'Stop Streaming',
+                          tooltip: context.l10n.stopStream,
                           onPressed: () => _stopStream(pop: true),
                         ),
                       ],
@@ -286,7 +287,7 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('Screen Stream'),
+        title: Text(context.l10n.screenStreamTitle),
         actions: <Widget>[
           if (frame != null)
             Padding(
@@ -303,7 +304,9 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
           IconButton(
             icon: AppIcon(
                 _isStreaming ? AppIcons.monitorPlay : AppIcons.monitorPlay),
-            tooltip: _isStreaming ? 'Stop Streaming' : 'Start Streaming',
+            tooltip: _isStreaming
+                ? context.l10n.stopStream
+                : context.l10n.startStream,
             onPressed: () {
               if (_isStreaming) {
                 _stopStream();
@@ -328,20 +331,20 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
                 pointerSettings: pointerSettings,
                 gesturesAvailable: gesturesAvailable,
               )
-            : const Column(
+            : Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  ExcludeSemantics(
+                  const ExcludeSemantics(
                     child: AppIcon(
                       AppIcons.monitorPlay,
                       size: 48,
                       color: Colors.white54,
                     ),
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   Text(
-                    'Waiting for screen frames...',
-                    style: TextStyle(color: Colors.white70),
+                    context.l10n.waitingForScreenFrames,
+                    style: const TextStyle(color: Colors.white70),
                   ),
                 ],
               ),
@@ -350,14 +353,14 @@ class _ScreenViewerScreenState extends ConsumerState<ScreenViewerScreen> {
           ? FloatingActionButton.extended(
               onPressed: () => _stopStream(pop: true),
               icon: const AppIcon(AppIcons.monitorPlay),
-              label: const Text('Stop Sharing'),
+              label: Text(context.l10n.stopSharing),
               backgroundColor: Theme.of(context).colorScheme.error,
               foregroundColor: Theme.of(context).colorScheme.onError,
             )
           : FloatingActionButton.extended(
               onPressed: _startStream,
               icon: const AppIcon(AppIcons.monitorPlay),
-              label: const Text('Start Stream'),
+              label: Text(context.l10n.startStream),
             ),
     );
   }
@@ -579,13 +582,12 @@ class _UnsupportedScreenViewer extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               Text(
-                'Screen sharing isn’t available',
+                context.l10n.screenSharingUnavailableTitle,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
               Text(
-                'This computer cannot share its screen. Screen capture is '
-                'supported on macOS when Screen Recording permission is granted.',
+                context.l10n.screenSharingUnavailableDesc,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall,
               ),
