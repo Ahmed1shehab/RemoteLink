@@ -1,5 +1,6 @@
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
+import 'package:rl_protocol/rl_protocol.dart';
 import 'package:test/test.dart';
 
 /// The rate limiter is the only thing standing between a six-digit SAS and an
@@ -141,5 +142,32 @@ void main() {
           kMaxPairingAttempts * (60 / 15); // attempts x lockouts per hour
       expect(guessesPerHour, 12);
     });
+  });
+
+  test('coordinator locks out only the peer whose SAS failed', () async {
+    final clock = FakeClock();
+    final coordinator = PairingCoordinator(
+      identity: await DeviceIdentity.generate(),
+      clock: clock,
+    );
+    addTearDown(coordinator.dispose);
+    const hostile = DeviceId('hostile-phone');
+    const ownPhone = DeviceId('own-phone');
+
+    for (var attempt = 1; attempt <= kMaxPairingAttempts; attempt++) {
+      final rejection = coordinator.reject(
+        peerId: hostile,
+        reason: PairRejectReason.verificationFailed,
+      );
+      expect(rejection.attemptsRemaining, kMaxPairingAttempts - attempt);
+    }
+    expect(coordinator.checkRateLimit(hostile)?.reason,
+        PairRejectReason.rateLimited);
+    expect(coordinator.checkRateLimit(ownPhone), isNull);
+
+    clock.advance(kPairingLockout - const Duration(seconds: 1));
+    expect(coordinator.checkRateLimit(hostile), isNotNull);
+    clock.advance(const Duration(seconds: 2));
+    expect(coordinator.checkRateLimit(hostile), isNull);
   });
 }

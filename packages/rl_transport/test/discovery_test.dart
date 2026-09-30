@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:rl_core/rl_core.dart';
@@ -103,6 +105,12 @@ void main() {
       }
     });
 
+    test('an oversized advertised name is rejected', () {
+      // The length field is unauthenticated. Bounding the decoded string keeps
+      // one hostile beacon from allocating an arbitrarily large device name.
+      expect(Beacon.tryParse(sample(name: 'x' * 129).encode()), isNull);
+    });
+
     test('random noise carrying a valid magic does not throw', () {
       for (var seed = 0; seed < 256; seed++) {
         final noise = Uint8List(64);
@@ -186,4 +194,65 @@ void main() {
       );
     });
   });
+
+  group('UDP discovery listener', () {
+    test('goodbye removes an announced device without waiting for expiry',
+        () async {
+      final reserved =
+          await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final port = reserved.port;
+      reserved.close();
+      final client = UdpDiscoveryClient(clock: FakeClock(), port: port);
+      final sender =
+          await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        sender.close();
+        await client.stop();
+      });
+      await client.start();
+
+      sender.send(sample().encode(), InternetAddress.loopbackIPv4, port);
+      await _until(() => client.current.isNotEmpty);
+      expect(client.current, hasLength(1));
+
+      sender.send(sample(kind: BeaconKind.goodbye).encode(),
+          InternetAddress.loopbackIPv4, port);
+      await _until(() => client.current.isEmpty);
+      expect(client.current, isEmpty);
+    });
+
+    test('query reply is unicast to the querying socket', () async {
+      final reserved =
+          await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final port = reserved.port;
+      reserved.close();
+      final server = UdpDiscoveryServer(describe: sample, port: port);
+      final asker =
+          await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        asker.close();
+        await server.stop();
+      });
+      await server.start();
+
+      final answer = asker
+          .where((event) => event == RawSocketEvent.read)
+          .map((_) => asker.receive())
+          .where((datagram) => datagram != null)
+          .first
+          .timeout(const Duration(seconds: 2));
+      asker.send(sample(kind: BeaconKind.query).encode(),
+          InternetAddress.loopbackIPv4, port);
+      final reply = await answer;
+      expect(reply!.address, InternetAddress.loopbackIPv4);
+      expect(Beacon.tryParse(reply.data)?.kind, BeaconKind.announce);
+    });
+  });
+}
+
+Future<void> _until(bool Function() condition) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 2));
+  while (!condition() && DateTime.now().isBefore(deadline)) {
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
 }

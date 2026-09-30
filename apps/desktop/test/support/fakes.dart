@@ -6,6 +6,7 @@ import 'package:remotelink_desktop/src/domain/command_dispatcher.dart';
 import 'package:remotelink_desktop/src/domain/desktop_service.dart';
 import 'package:remotelink_desktop/src/domain/transfer_model.dart';
 import 'package:rl_core/rl_core.dart';
+import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_native/rl_native.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
@@ -138,6 +139,26 @@ final class FakeFileLauncher implements FileLauncherService {
 }
 
 final fakeFileLauncher = FakeFileLauncher();
+
+/// An inert service for tests that pump the real app shell.
+///
+/// The root widget owns the tray and may read the service when a menu action
+/// fires. Supplying every backend here ensures that even an incidental read
+/// cannot construct a native backend or bind a socket in a widget test.
+Future<DesktopService> createFakeDesktopService() async => DesktopService(
+      identity: await DeviceIdentity.generate(),
+      trustStore: InMemoryTrustStore(),
+      deviceName: 'Test computer',
+      appVersion: 'test',
+      clock: FakeClock(),
+      input: const UnsupportedInputBackend('test'),
+      clipboardBackend: const UnsupportedClipboardBackend(),
+      media: const UnsupportedMediaBackend(),
+      brightness: const UnsupportedBrightnessBackend('test'),
+      systemInfo: const UnsupportedSystemInfoBackend('test'),
+      networkAdapters: const UnsupportedNetworkAdapterBackend('test'),
+      screenCapture: const UnsupportedScreenCaptureBackend('test'),
+    );
 
 /// Safe provider state for rendering the desktop home screen in widget tests.
 ///

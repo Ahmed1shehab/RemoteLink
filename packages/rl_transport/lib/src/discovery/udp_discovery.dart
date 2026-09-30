@@ -418,7 +418,8 @@ final class UdpDiscoveryServer {
     // Reply directly to the asker rather than to the group. A phone that just
     // opened the app gets an answer in one round trip, and the other twenty
     // devices on the network are not woken up to ignore it.
-    _sendTo(socket, datagram.address, BeaconKind.announce);
+    _sendTo(socket, datagram.address, BeaconKind.announce,
+        targetPort: datagram.port);
   }
 
   /// Sends one announcement on every bound socket.
@@ -456,7 +457,8 @@ final class UdpDiscoveryServer {
   }
 
   void _sendTo(
-      RawDatagramSocket socket, InternetAddress target, BeaconKind kind) {
+      RawDatagramSocket socket, InternetAddress target, BeaconKind kind,
+      {int? targetPort}) {
     if (_unavailableSockets.contains(socket)) return;
 
     try {
@@ -475,7 +477,7 @@ final class UdpDiscoveryServer {
               acceptsNewPairings: beacon.acceptsNewPairings,
               activeSessions: beacon.activeSessions,
             ).encode();
-      socket.send(payload, target, port);
+      socket.send(payload, target, targetPort ?? port);
     } on SocketException catch (e) {
       _noteSocketFailure(socket, e, StackTrace.current);
     }
