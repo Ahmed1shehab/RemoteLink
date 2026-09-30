@@ -162,7 +162,7 @@ void main() {
       await connect();
 
       expect(service.calls, contains('start'));
-      expect(service.titles.last, 'Connected to Work Mac');
+      expect(service.titles.last, contains('Work Mac'));
     });
 
     test('stops when the user disconnects', () async {

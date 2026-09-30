@@ -4,9 +4,11 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:rl_core/rl_core.dart';
 
 import '../app/app_icons.dart';
 import '../app/brand.dart';
+import '../app/l10n.dart';
 import '../app/providers.dart';
 import '../domain/file_launcher.dart';
 import 'diagnostics_screen.dart';
@@ -22,7 +24,7 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(title: Text(context.l10n.settingsTitle)),
       body: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
@@ -61,21 +63,23 @@ class _AboutHeader extends StatelessWidget {
       children: <Widget>[
         const BrandMark(size: 64),
         const SizedBox(width: 16),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              kProductName,
-              style: theme.textTheme.headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            Text(
-              'Version $kAppVersion',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                kProductName,
+                style: theme.textTheme.headlineSmall
+                    ?.copyWith(fontWeight: FontWeight.w600),
               ),
-            ),
-          ],
+              Text(
+                context.l10n.versionLabel(kAppVersion),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -90,17 +94,15 @@ class _StartupSection extends ConsumerWidget {
     final startAtLogin = ref.watch(startAtLoginProvider);
 
     return _Section(
-      title: 'Startup',
+      title: context.l10n.startupSectionTitle,
       children: <Widget>[
         SwitchListTile(
           value: startAtLogin,
-          title: const Text('Start when I log in'),
+          title: Text(context.l10n.startAtLoginTitle),
           subtitle: Text(
             startAtLogin
-                ? 'Starts hidden, so your phone can reach this computer '
-                    'without anyone opening a window first.'
-                : "Your phone will not find this computer until you open "
-                    '$kProductName yourself.',
+                ? context.l10n.startAtLoginSubtitleOn
+                : context.l10n.startAtLoginSubtitleOff,
           ),
           secondary: const AppIcon(AppIcons.materialMonitorPlay),
           onChanged: (value) =>
@@ -120,22 +122,19 @@ class _ConnectionsSection extends ConsumerWidget {
     final asks = ref.watch(askBeforeConnectingProvider);
 
     return _Section(
-      title: 'Connections',
+      title: context.l10n.connectionsSectionTitle,
       children: <Widget>[
         SwitchListTile(
           value: asks,
-          title: const Text('Ask before a paired device connects'),
+          title: Text(context.l10n.askBeforeConnectingTitle),
           // Both halves say what actually happens, because the cost of each
           // answer is real and the user is choosing between them rather than
           // between "safe" and "unsafe". Off is a legitimate choice for a
           // computer nobody else can reach.
           subtitle: Text(
             asks
-                ? 'A device you have paired with waits until you allow it. '
-                    'Asked once per device each time $kProductName starts, so '
-                    'a dropped Wi-Fi connection does not ask again.'
-                : 'Any device you have paired with connects straight away, '
-                    'whoever is holding it.',
+                ? context.l10n.askBeforeConnectingSubtitleOn
+                : context.l10n.askBeforeConnectingSubtitleOff,
           ),
           secondary: const AppIcon(AppIcons.materialSettings),
           onChanged: (value) => ref
@@ -160,18 +159,17 @@ class _WindowSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final where = Platform.isMacOS
-        ? 'the menu bar at the top of the screen'
-        : 'the notification area beside the clock';
+        ? context.l10n.menuBarLocationMac
+        : context.l10n.notificationAreaLocationOther;
 
     return _Section(
-      title: 'Closing the window',
+      title: context.l10n.windowSectionTitle,
       children: <Widget>[
         ListTile(
           leading: const Icon(Icons.close_fullscreen_outlined),
-          title: const Text('Closing this window keeps the service running'),
+          title: Text(context.l10n.closingWindowKeepsServiceTitle),
           subtitle: Text(
-            'Your paired phones stay connected, and transfers in progress '
-            'finish. Reopen or quit $kProductName from its icon in $where.',
+            context.l10n.closingWindowKeepsServiceSubtitle(where),
           ),
         ),
       ],
@@ -193,16 +191,16 @@ class _SavingSection extends ConsumerWidget {
     final directory = ref.watch(downloadDirectoryProvider);
 
     return _Section(
-      title: 'Saving received files',
+      title: context.l10n.savingSectionTitle,
       children: <Widget>[
         ListTile(
           leading: const AppIcon(AppIcons.materialFiles),
-          title: const Text('Folder'),
+          title: Text(context.l10n.folderLabel),
           subtitle: Text(
             switch (directory) {
               AsyncData<Directory>(:final value) => value.path,
-              AsyncError() => 'Could not work out where to save files.',
-              _ => 'Checking…',
+              AsyncError() => context.l10n.saveFolderError,
+              _ => context.l10n.saveFolderChecking,
             },
           ),
           // Tapping the row opens it. Showing someone a path and making them
@@ -218,12 +216,12 @@ class _SavingSection extends ConsumerWidget {
             children: <Widget>[
               TextButton(
                 onPressed: () => unawaited(_reset(ref)),
-                child: const Text('Use Downloads'),
+                child: Text(context.l10n.useDownloadsButton),
               ),
               const SizedBox(width: 8),
               FilledButton.tonal(
-                onPressed: () => unawaited(_choose(ref)),
-                child: const Text('Change…'),
+                onPressed: () => unawaited(_choose(context, ref)),
+                child: Text(context.l10n.changeFolderButton),
               ),
             ],
           ),
@@ -232,9 +230,9 @@ class _SavingSection extends ConsumerWidget {
     );
   }
 
-  Future<void> _choose(WidgetRef ref) async {
+  Future<void> _choose(BuildContext context, WidgetRef ref) async {
     final path = await getDirectoryPath(
-      confirmButtonText: 'Save files here',
+      confirmButtonText: context.l10n.saveFilesHerePrompt,
     );
     if (path == null) return;
     await ref.read(downloadDirectoryControllerProvider).choose(Directory(path));
@@ -252,15 +250,15 @@ class _ThisComputerSection extends ConsumerWidget {
     final name = ref.watch(deviceNameProvider);
 
     return _Section(
-      title: 'This computer',
+      title: context.l10n.thisComputerSectionTitle,
       children: <Widget>[
         ListTile(
           leading: const AppIcon(AppIcons.materialMonitorSmartphone),
-          title: const Text('Name'),
-          subtitle: Text('$name — this is what your phone shows in its list.'),
+          title: Text(context.l10n.computerNameLabel),
+          subtitle: Text(context.l10n.computerNameSubtitle(name)),
           trailing: TextButton(
             onPressed: () => _rename(context, ref, name),
-            child: const Text('Rename'),
+            child: Text(context.l10n.renameButton),
           ),
         ),
       ],
@@ -274,7 +272,11 @@ class _ThisComputerSection extends ConsumerWidget {
       builder: (context) => _RenameComputerDialog(current: current),
     );
     if (chosen == null) return;
-    ref.read(deviceNameProvider.notifier).state = chosen;
+    final sanitised = sanitiseDeviceName(chosen);
+    if (sanitised == null) return;
+    ref.read(deviceNameProvider.notifier).state = sanitised;
+    final service = ref.read(desktopServiceProvider).valueOrNull;
+    if (service != null) await service.announceOwnName(sanitised);
   }
 }
 
@@ -299,19 +301,23 @@ class _RenameComputerDialogState extends State<_RenameComputerDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Rename this computer'),
+        title: Text(context.l10n.renameComputerDialogTitle),
         content: TextField(
           controller: _controller,
           autofocus: true,
-          decoration: const InputDecoration(labelText: 'Name'),
+          decoration:
+              InputDecoration(labelText: context.l10n.computerNameLabel),
           onSubmitted: (_) => _submit(),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancelButton),
           ),
-          FilledButton(onPressed: _submit, child: const Text('Save')),
+          FilledButton(
+            onPressed: _submit,
+            child: Text(context.l10n.saveButton),
+          ),
         ],
       );
 
@@ -329,15 +335,12 @@ class _SupportSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => _Section(
-        title: 'Support',
+        title: context.l10n.supportSectionTitle,
         children: <Widget>[
           ListTile(
             leading: const AppIcon(AppIcons.analytics),
-            title: const Text('Diagnostics'),
-            subtitle: const Text(
-              'Connection counters, permissions, and a log you can copy into '
-              'a bug report.',
-            ),
+            title: Text(context.l10n.diagnosticsTitle),
+            subtitle: Text(context.l10n.diagnosticsSubtitle),
             trailing: const AppIcon(AppIcons.materialChevronRight),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
@@ -362,7 +365,7 @@ class _Section extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          padding: const EdgeInsetsDirectional.only(start: 4, bottom: 8),
           child: Text(
             title.toUpperCase(),
             style: theme.textTheme.labelSmall?.copyWith(

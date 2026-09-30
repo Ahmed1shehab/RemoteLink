@@ -11,6 +11,7 @@ import 'package:remotelink_desktop/src/domain/transfer_model.dart';
 import 'package:remotelink_desktop/src/ui/home_screen.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
+import 'package:rl_native/rl_native.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
@@ -101,6 +102,195 @@ void main() {
       expect(record(TransferDirection.outgoing).canRetry, isTrue);
       expect(record(TransferDirection.incoming).canRetry, isFalse);
     });
+
+    test('terminal rows can be removed and retry clears the old error', () {
+      final record = TransferRecord(
+        transferId: 'failed-1',
+        peerId: const DeviceId('phone-1'),
+        peerName: 'Pixel 8 Pro',
+        direction: TransferDirection.outgoing,
+        status: TransferStatus.failed,
+        files: const <TransferFileProgress>[],
+        totalBytes: 0,
+        transferredBytes: 0,
+        createdAt: DateTime(2026),
+        failure: TransferFailure.connectionLost,
+      );
+      expect(record.canRemove, isTrue);
+      expect(
+          record
+              .copyWith(status: TransferStatus.offered, clearFailure: true)
+              .failure,
+          isNull);
+      expect(record.copyWith(status: TransferStatus.inProgress).canRemove,
+          isFalse);
+    });
+  });
+
+  test('abort, disk failure and disconnect end rows; terminal rows remove',
+      () async {
+    final pair = await _createRealServerClientPair();
+    final store = _BlockingTransferStore();
+    final service = DesktopService(
+      identity: await DeviceIdentity.generate(),
+      trustStore: pair.trustStore,
+      deviceName: 'Test Computer',
+      appVersion: '0.1.0',
+      clock: SystemClock(),
+      incomingTransferStore: store,
+      input: const UnsupportedInputBackend('test'),
+      clipboardBackend: const UnsupportedClipboardBackend(),
+      media: const UnsupportedMediaBackend(),
+      brightness: const UnsupportedBrightnessBackend('test'),
+      systemInfo: const UnsupportedSystemInfoBackend('test'),
+      networkAdapters: const UnsupportedNetworkAdapterBackend('test'),
+      screenCapture: const UnsupportedScreenCaptureBackend('test'),
+    );
+    try {
+      await service.registerSessionForTesting(pair.session);
+      FileOffer offer(String id) => FileOffer(
+            transferId: id,
+            files: <OfferedFile>[
+              OfferedFile(
+                  fileId: 'photo',
+                  fileName: 'photo.jpg',
+                  size: 10,
+                  fileType: 'image/jpeg'),
+            ],
+          );
+
+      await service.handleMessageForTesting(pair.session, offer('cancelled'));
+      await Future<void>.delayed(Duration.zero);
+      expect(service.transfers.single.status, TransferStatus.prompting);
+      await service.handleMessageForTesting(
+        pair.session,
+        const FileAbort(
+          transferId: 'cancelled',
+          reason: FileAbortReason.cancelled,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(service.transfers.single.status, TransferStatus.cancelled);
+      expect(service.transfers.single.failure, TransferFailure.cancelledByPeer);
+      expect(service.removeTransfer('cancelled'), isTrue);
+      expect(service.transfers, isEmpty);
+
+      await service.handleMessageForTesting(pair.session, offer('local'));
+      await Future<void>.delayed(Duration.zero);
+      expect(service.removeTransfer('local'), isFalse);
+      await service.cancelTransfer('local');
+      expect(service.transfers.single.status, TransferStatus.cancelled);
+      expect(service.transfers.single.failure, TransferFailure.cancelledByYou);
+      expect(service.removeTransfer('local'), isTrue);
+
+      await service.handleMessageForTesting(pair.session, offer('blocked'));
+      await Future<void>.delayed(Duration.zero);
+      final pending = PendingIncomingTransfer(
+        transferId: 'blocked',
+        peerId: pair.session.peerId,
+        peerName: 'Pixel 8 Pro',
+        offer: offer('blocked'),
+        isFirstTransferFromDevice: false,
+        destinationPath: '',
+      );
+      final accepting = service.approveIncomingTransfer(pending);
+      await store.entered.future.timeout(const Duration(seconds: 2));
+      await service.handleMessageForTesting(
+          pair.session,
+          const FileAbort(
+            transferId: 'blocked',
+            reason: FileAbortReason.cancelled,
+          ));
+      await Future<void>.delayed(Duration.zero);
+      expect(service.transfers.single.status, TransferStatus.cancelled,
+          reason: 'queued storage cleanup must not hold the UI row open');
+      store.release.complete();
+      await accepting;
+      expect(service.removeTransfer('blocked'), isTrue);
+
+      final brokenOffer = offer('broken');
+      await service.handleMessageForTesting(pair.session, brokenOffer);
+      await Future<void>.delayed(Duration.zero);
+      final acceptance = pair.client.messages.firstWhere(
+        (message) => message is FileAccept && message.transferId == 'broken',
+      );
+      await service.approveIncomingTransfer(PendingIncomingTransfer(
+        transferId: 'broken',
+        peerId: pair.session.peerId,
+        peerName: 'Pixel 8 Pro',
+        offer: brokenOffer,
+        isFirstTransferFromDevice: false,
+        destinationPath: '',
+      ));
+      final accepted = await acceptance.timeout(const Duration(seconds: 2));
+      final remoteAbort = pair.client.messages.firstWhere(
+        (message) => message is FileAbort && message.transferId == 'broken',
+      );
+      await FileTransferSender(
+        exporterSecret: pair.session.session.exporterSecret,
+      ).sendAccepted(
+        offer: brokenOffer,
+        accept: accepted as FileAccept,
+        sources: <String, OutgoingFile>{
+          'photo': MemoryOutgoingFile(Uint8List(10)),
+        },
+        sendChunk: (chunk) =>
+            service.handleMessageForTesting(pair.session, chunk),
+        sendComplete: (_) async {},
+      );
+      expect(
+          (await remoteAbort.timeout(const Duration(seconds: 2)) as FileAbort)
+              .reason,
+          FileAbortReason.ioError);
+      expect(service.transfers.single.status, TransferStatus.failed);
+      expect(service.removeTransfer('broken'), isTrue);
+
+      final goodOffer = offer('good');
+      await service.handleMessageForTesting(pair.session, goodOffer);
+      await Future<void>.delayed(Duration.zero);
+      final goodAcceptance = pair.client.messages.firstWhere(
+        (message) => message is FileAccept && message.transferId == 'good',
+      );
+      await service.approveIncomingTransfer(PendingIncomingTransfer(
+        transferId: 'good',
+        peerId: pair.session.peerId,
+        peerName: 'Pixel 8 Pro',
+        offer: goodOffer,
+        isFirstTransferFromDevice: false,
+        destinationPath: '',
+      ));
+      final confirmation = pair.client.messages.firstWhere(
+        (message) => message is FileComplete && message.transferId == 'good',
+      );
+      await FileTransferSender(
+        exporterSecret: pair.session.session.exporterSecret,
+      ).sendAccepted(
+        offer: goodOffer,
+        accept: await goodAcceptance as FileAccept,
+        sources: <String, OutgoingFile>{
+          'photo': MemoryOutgoingFile(Uint8List(10)),
+        },
+        sendChunk: (chunk) =>
+            service.handleMessageForTesting(pair.session, chunk),
+        sendComplete: (complete) =>
+            service.handleMessageForTesting(pair.session, complete),
+      );
+      expect(await confirmation.timeout(const Duration(seconds: 2)),
+          isA<FileComplete>());
+      expect(service.transfers.single.status, TransferStatus.completed);
+      expect(service.removeTransfer('good'), isTrue);
+
+      await service.handleMessageForTesting(pair.session, offer('lost'));
+      await Future<void>.delayed(Duration.zero);
+      await service.endSessionForTesting(pair.session);
+      expect(service.transfers.single.status, TransferStatus.failed);
+      expect(service.transfers.single.failure, TransferFailure.connectionLost);
+      expect(service.removeTransfer('lost'), isTrue);
+    } finally {
+      await pair.client.disconnect();
+      await pair.server.stop();
+      await service.stop();
+    }
   });
 
   group('Desktop HomeScreen Widget Tests', () {
@@ -277,10 +467,10 @@ void main() {
           overrides: <Override>[
             ...desktopHomeOverrides,
             screenCaptureAvailabilityProvider.overrideWith(
-              (ref) => Stream<({bool available, String? reason})>.value(
+              (ref) => Stream<({bool available, BackendFailure? reason})>.value(
                 (
                   available: false,
-                  reason: 'Screen Recording permission is not granted',
+                  reason: BackendFailure.screenRecordingPermission,
                 ),
               ),
             ),
@@ -299,7 +489,7 @@ void main() {
       // flipping `kScreenSharingShipped` back on restores the assertion instead
       // of leaving a test that quietly proves nothing.
       expect(
-        find.text('Screen Recording permission is not granted'),
+        find.textContaining('Screen Recording permission'),
         kScreenSharingShipped ? findsOneWidget : findsNothing,
       );
       expect(
@@ -341,8 +531,11 @@ void main() {
           overrides: <Override>[
             ...desktopHomeOverrides,
             screenCaptureAvailabilityProvider.overrideWith(
-              (ref) => Stream<({bool available, String? reason})>.value(
-                (available: false, reason: 'Screen Recording is not granted'),
+              (ref) => Stream<({bool available, BackendFailure? reason})>.value(
+                (
+                  available: false,
+                  reason: BackendFailure.screenRecordingPermission
+                ),
               ),
             ),
           ],
@@ -355,7 +548,7 @@ void main() {
 
       expect(find.textContaining('start it from the phone'), findsNothing);
       expect(
-        find.text('Screen Recording is not granted'),
+        find.textContaining('Screen Recording permission'),
         kScreenSharingShipped ? findsOneWidget : findsNothing,
       );
     });
@@ -400,7 +593,7 @@ void main() {
         ],
         totalBytes: 1024 * 1024,
         transferredBytes: 512 * 1024,
-        errorMessage: 'Network timeout',
+        failure: TransferFailure.timedOut,
         createdAt: DateTime.now(),
       );
 
@@ -429,11 +622,12 @@ void main() {
       expect(find.text('·  5.0 MB/s'), findsOneWidget);
       expect(find.text('·  ETA: 5s'), findsOneWidget);
       expect(find.text('Cancel'), findsOneWidget);
+      expect(find.text('Remove'), findsOneWidget);
 
       expect(find.text('From Pixel 8 Pro'), findsOneWidget);
       expect(find.text('image.png'), findsOneWidget);
       expect(find.text('Failed'), findsOneWidget);
-      expect(find.text('Network timeout'), findsOneWidget);
+      expect(find.text('Transfer timed out'), findsOneWidget);
       // Not on an incoming transfer, and this assertion used to say the
       // opposite. Retrying re-sends the offer, and the offer belongs to
       // whichever side chose the files — so on a file arriving from the phone
@@ -553,11 +747,89 @@ void main() {
   });
 }
 
+/// Holds one acceptance open and makes another file fail during a chunk write.
+final class _BlockingTransferStore implements IncomingTransferStore {
+  final Completer<void> entered = Completer<void>();
+  final Completer<void> release = Completer<void>();
+
+  @override
+  Future<Map<String, IncomingFile>> prepare(FileOffer offer,
+      {required String namespace}) async {
+    if (offer.transferId == 'blocked') {
+      entered.complete();
+      await release.future;
+    }
+    if (offer.transferId == 'broken') {
+      return <String, IncomingFile>{
+        'photo': _ThrowingIncomingFile(offer.files.single),
+      };
+    }
+    if (offer.transferId == 'good') {
+      return <String, IncomingFile>{
+        'photo': _MemoryIncomingFile(offer.files.single),
+      };
+    }
+    return <String, IncomingFile>{};
+  }
+}
+
+final class _MemoryIncomingFile implements IncomingFile {
+  _MemoryIncomingFile(this.offer) : _bytes = Uint8List(offer.size);
+
+  @override
+  final OfferedFile offer;
+  final Uint8List _bytes;
+  final List<ReceivedRange> _ranges = <ReceivedRange>[];
+
+  @override
+  List<ReceivedRange> get receivedRanges => _ranges;
+
+  @override
+  Future<void> write(int offset, Uint8List bytes) async {
+    _bytes.setRange(offset, offset + bytes.length, bytes);
+    _ranges.add(ReceivedRange(offset, offset + bytes.length));
+  }
+
+  @override
+  Stream<List<int>> read() => Stream<List<int>>.value(_bytes);
+
+  @override
+  Future<void> commit() async {}
+
+  @override
+  Future<void> delete() async {}
+}
+
+final class _ThrowingIncomingFile implements IncomingFile {
+  _ThrowingIncomingFile(this.offer);
+
+  @override
+  final OfferedFile offer;
+
+  @override
+  List<ReceivedRange> get receivedRanges => const <ReceivedRange>[];
+
+  @override
+  Future<void> write(int offset, Uint8List bytes) async {
+    throw const FileSystemException('Disk write failed');
+  }
+
+  @override
+  Stream<List<int>> read() async* {}
+
+  @override
+  Future<void> commit() async {}
+
+  @override
+  Future<void> delete() async {}
+}
+
 Future<
     ({
       RemoteLinkServer server,
       RemoteLinkClient client,
-      ServerSession session
+      ServerSession session,
+      InMemoryTrustStore trustStore
     })> _createRealServerClientPair() async {
   final phoneIdentity = await DeviceIdentity.generate();
   final desktopIdentity = await DeviceIdentity.generate();
@@ -599,5 +871,10 @@ Future<
   );
 
   final session = await server.accepted.first;
-  return (server: server, client: client, session: session);
+  return (
+    server: server,
+    client: client,
+    session: session,
+    trustStore: desktopTrust
+  );
 }

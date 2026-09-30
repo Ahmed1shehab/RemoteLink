@@ -7,10 +7,14 @@ import 'package:flutter_svg/flutter_svg.dart';
 /// `AppIcons.files`, ...), while the artwork remains replaceable in one map.
 @immutable
 class AppIconData {
-  const AppIconData(this.asset) : materialIcon = null;
-  const AppIconData.material(this.materialIcon) : asset = null;
+  const AppIconData(this.asset, {this.matchTextDirection = false})
+      : materialIcon = null;
+  const AppIconData.material(this.materialIcon,
+      {this.matchTextDirection = false})
+      : asset = null;
   final String? asset;
   final IconData? materialIcon;
+  final bool matchTextDirection;
 }
 
 class AppIcons {
@@ -77,6 +81,8 @@ class AppIcons {
       AppIconData.material(Icons.arrow_downward_rounded);
   static const materialSwapVert = AppIconData.material(Icons.swap_vert_rounded);
   static const materialNearMe = AppIconData.material(Icons.near_me_rounded);
+  static const materialChevronRight =
+      AppIconData.material(Icons.chevron_right, matchTextDirection: true);
 }
 
 class AppIcon extends StatelessWidget {
@@ -86,12 +92,14 @@ class AppIcon extends StatelessWidget {
     this.size,
     this.color,
     this.semanticLabel,
+    this.matchTextDirection,
   });
 
   final AppIconData data;
   final double? size;
   final Color? color;
   final String? semanticLabel;
+  final bool? matchTextDirection;
 
   @override
   Widget build(BuildContext context) {
@@ -100,22 +108,28 @@ class AppIcon extends StatelessWidget {
     final resolvedColor = color ??
         iconTheme.color ??
         Theme.of(context).colorScheme.onSurfaceVariant;
+    final bool matchDirection = matchTextDirection ?? data.matchTextDirection;
+    final isRtl = Directionality.maybeOf(context) == TextDirection.rtl;
+    final Widget iconWidget;
     if (data.materialIcon != null) {
-      return Icon(
+      iconWidget = Icon(
         data.materialIcon,
         size: resolvedSize,
         color: resolvedColor,
         semanticLabel: semanticLabel,
       );
+    } else {
+      iconWidget = SvgPicture.asset(
+        data.asset!,
+        width: resolvedSize,
+        height: resolvedSize,
+        fit: BoxFit.contain,
+        colorFilter: ColorFilter.mode(resolvedColor, BlendMode.srcIn),
+        semanticsLabel: semanticLabel,
+      );
     }
-    final icon = SvgPicture.asset(
-      data.asset!,
-      width: resolvedSize,
-      height: resolvedSize,
-      fit: BoxFit.contain,
-      colorFilter: ColorFilter.mode(resolvedColor, BlendMode.srcIn),
-      semanticsLabel: semanticLabel,
-    );
-    return icon;
+    return (matchDirection && isRtl)
+        ? Transform.flip(flipX: true, child: iconWidget)
+        : iconWidget;
   }
 }

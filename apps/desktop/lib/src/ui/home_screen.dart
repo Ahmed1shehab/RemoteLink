@@ -12,6 +12,7 @@ import 'package:window_manager/window_manager.dart';
 import '../app/app_icons.dart';
 import '../app/brand.dart';
 import '../app/desktop_ui.dart';
+import '../app/l10n.dart';
 import '../app/motion.dart';
 import '../app/providers.dart';
 import '../app/theme.dart';
@@ -23,6 +24,7 @@ import 'diagnostics_screen.dart';
 import 'pairing_code.dart';
 import 'pairing_qr.dart';
 import 'settings_screen.dart';
+import 'transfer_failure_l10n.dart';
 
 /// The desktop's only window: status, connected devices, pairing, and file transfers.
 class HomeScreen extends ConsumerStatefulWidget {
@@ -110,6 +112,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ref.watch(rememberedPeersProvider).valueOrNull ?? const <String>{};
     final transfers =
         ref.watch(transfersProvider).valueOrNull ?? <TransferRecord>[];
+    final fileLauncher = ref.watch(fileLauncherProvider);
 
     // Tab order is pinned to the order the sections are read in, rather than
     // left to the default policy.
@@ -139,12 +142,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Text(
-                  'Workspace',
+                  context.l10n.workspaceTitle,
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Manage connections, permissions, and transfers from one place.',
+                  context.l10n.workspaceSubtitle,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
@@ -165,7 +168,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   FocusTraversalOrder(
                     order: const NumericFocusOrder(1),
                     child: _PermissionBanner(
-                      reason: input.reason!,
+                      reason:
+                          describeBackendFailure(context.l10n, input.reason!),
                       onOpenSettings: _openAccessibilitySettings,
                     ),
                   ),
@@ -185,9 +189,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   FocusTraversalOrder(
                     order: const NumericFocusOrder(1),
                     child: _PermissionBanner(
-                      reason: screenCapture.reason ??
-                          'Remote Link needs Screen Recording permission before it '
-                              'can share this screen.',
+                      reason: screenCapture.reason == null
+                          ? context.l10n.screenRecordingPermissionReason
+                          : describeBackendFailure(
+                              context.l10n, screenCapture.reason!),
                       onOpenSettings: _openScreenRecordingSettings,
                       severity: _BannerSeverity.advisory,
                     ),
@@ -218,30 +223,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 const SizedBox(height: 24),
                 DesktopSectionHeader(
                   key: _devicesKey,
-                  title: 'Connected devices',
+                  title: context.l10n.connectedDevicesSectionTitle,
                   subtitle: devices.valueOrNull?.isEmpty ?? true
-                      ? 'Phones connected to this computer appear here'
-                      : '${devices.valueOrNull!.length} connected',
+                      ? context.l10n.connectedDevicesCountSubtitle(0)
+                      : context.l10n.connectedDevicesCountSubtitle(
+                          devices.valueOrNull!.length,
+                        ),
                 ),
                 const SizedBox(height: 12),
                 FocusTraversalOrder(
                   order: const NumericFocusOrder(4),
                   child: devices.when(
-                    loading: () => const _EmptyState(
-                      message: 'Waiting for devices to connect…',
+                    loading: () => _EmptyState(
+                      message: context.l10n.waitingForDevicesMessage,
                     ),
-                    error: (error, _) => _EmptyState(message: 'Error: $error'),
+                    error: (error, _) => _EmptyState(
+                      message: context.l10n.errorMessage(error.toString()),
+                    ),
                     data: (list) => list.isEmpty
                         ? _EmptyState(
-                            message:
-                                'No devices connected. Open Remote Link on your '
-                                'phone — it should find this computer '
-                                'automatically, or you can show it a code to '
-                                'scan.',
+                            message: context.l10n.noDevicesConnectedPrompt,
                             action: status.localAddresses.isEmpty
                                 ? null
                                 : _EmptyStateAction(
-                                    label: 'Show pairing code',
+                                    label: context.l10n.showPairingCodeButton,
                                     icon: AppIcons.qrCode,
                                     onPressed: _showPairingQr,
                                   ),
@@ -276,7 +281,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     child: _TransfersSection(
                       transfers: transfers,
                       onCancel: _cancelTransfer,
+                      onRemove: _removeTransfer,
                       onRetry: _retryTransfer,
+                      onOpenFile: fileLauncher.openFile,
+                      onRevealFile: fileLauncher.revealFile,
                     ),
                   ),
                 ),
@@ -315,39 +323,40 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           children: <Widget>[
             DesktopSidebar(
               selectedIndex: _sidebarIndex,
-              destinations: const <DesktopNavDestination>[
+              destinations: <DesktopNavDestination>[
                 DesktopNavDestination(
                   icon: AppIcons.settings,
-                  label: 'Overview',
+                  label: context.l10n.navOverview,
                 ),
                 DesktopNavDestination(
                   icon: AppIcons.monitorSmartphone,
-                  label: 'Devices',
+                  label: context.l10n.navDevices,
                 ),
                 DesktopNavDestination(
                   icon: AppIcons.send,
-                  label: 'Send',
+                  label: context.l10n.navSend,
                 ),
                 DesktopNavDestination(
                   icon: AppIcons.receive,
-                  label: 'Activity',
+                  label: context.l10n.navActivity,
                 ),
                 DesktopNavDestination(
                   icon: AppIcons.clipboard,
-                  label: 'Clipboard',
+                  label: context.l10n.navClipboard,
                 ),
                 DesktopNavDestination(
                   icon: AppIcons.analytics,
-                  label: 'Diagnostics',
+                  label: context.l10n.tooltipDiagnostics,
                 ),
                 DesktopNavDestination(
                   icon: AppIcons.settings,
-                  label: 'Settings',
+                  label: context.l10n.tooltipSettings,
                 ),
               ],
               onSelected: _selectSidebarDestination,
-              statusLabel:
-                  status.isRunning ? 'Service online' : 'Service offline',
+              statusLabel: status.isRunning
+                  ? context.l10n.serviceOnline
+                  : context.l10n.serviceOffline,
               statusColor:
                   status.isRunning ? const Color(0xFF22A06B) : scheme.error,
             ),
@@ -394,9 +403,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _openSettings() {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => const SettingsScreen(),
-      ),
+      MaterialPageRoute<void>(builder: (context) => const SettingsScreen()),
     );
   }
 
@@ -424,9 +431,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _openDiagnostics() {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => const DiagnosticsScreen(),
-      ),
+      MaterialPageRoute<void>(builder: (context) => const DiagnosticsScreen()),
     );
   }
 
@@ -473,6 +478,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     await service.cancelTransfer(transferId);
   }
 
+  Future<void> _removeTransfer(String transferId) async {
+    final service = await ref.read(desktopServiceProvider.future);
+    service.removeTransfer(transferId);
+  }
+
   Future<void> _retryTransfer(String transferId) async {
     final service = await ref.read(desktopServiceProvider.future);
     try {
@@ -482,9 +492,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       // the phone went away, or the offer is no longer held — and a button
       // that appears to do nothing is the worst way to report it.
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not retry: ${e.message}')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(
+          SnackBar(content: Text(context.l10n.couldNotRetryError(e.message))));
     }
   }
 
@@ -499,9 +510,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final applied = await service.renameDevice(deviceId, newName);
     if (!applied && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Invalid device name. Names must be 1–64 characters with no control characters.',
+            context.l10n.invalidDeviceNameSnackBar,
           ),
         ),
       );
@@ -584,9 +595,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         final allowed = await showDialog<bool>(
           context: context,
           barrierDismissible: false,
-          builder: (context) => ConnectionRequestDialog(
-            peerName: next.peerName,
-          ),
+          builder: (context) =>
+              ConnectionRequestDialog(peerName: next.peerName),
         );
 
         if (!mounted) return;
@@ -634,7 +644,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ..showSnackBar(
             SnackBar(
               content: Text(
-                '${request.peerName} will be remembered once it agrees too.',
+                context.l10n.rememberDeviceAgreedSnackBar(
+                  request.peerName,
+                ),
               ),
             ),
           );
@@ -679,7 +691,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (_isPermissionRequestShowing) return;
     _isPermissionRequestShowing = true;
 
-    final approved = await showDialog<bool>(
+    final grantSeconds = await showDialog<int>(
       context: context,
       barrierDismissible: false,
       builder: (context) => PermissionRequestDialog(
@@ -696,8 +708,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final service = ref.read(desktopServiceProvider).valueOrNull;
     if (service == null) return;
 
-    if (approved ?? false) {
-      await service.approvePermissionRequest(request);
+    if (grantSeconds != null) {
+      await service.approvePermissionRequest(
+        request,
+        expiresInSeconds: grantSeconds == 0 ? null : grantSeconds,
+      );
     } else {
       await service.declinePermissionRequest(request);
     }
@@ -744,8 +759,9 @@ class _SendCardState extends ConsumerState<_SendCard> {
     // takes down this whole card, and with it the send controls, the transfer
     // list, and the clipboard panel below. Holding a stale id is the normal
     // course of events: devices come and go while this window stays open.
-    final selectedStillPresent =
-        availableDevices.any((d) => d.id.value == _selectedDeviceId);
+    final selectedStillPresent = availableDevices.any(
+      (d) => d.id.value == _selectedDeviceId,
+    );
     if (!selectedStillPresent) {
       _selectedDeviceId =
           availableDevices.isEmpty ? null : availableDevices.first.id.value;
@@ -774,11 +790,11 @@ class _SendCardState extends ConsumerState<_SendCard> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        'Send to device',
+                        context.l10n.sendToDeviceTitle,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       Text(
-                        'Share files, links, or notes with a connected phone',
+                        context.l10n.sendToDeviceSubtitle,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
@@ -789,23 +805,23 @@ class _SendCardState extends ConsumerState<_SendCard> {
             const SizedBox(height: 16),
             if (availableDevices.isEmpty)
               Text(
-                'Connect a device to send files or text.',
+                context.l10n.connectDeviceToSendPrompt,
                 style: Theme.of(context).textTheme.bodyMedium,
               )
             else ...<Widget>[
               DropdownButtonFormField<String>(
                 initialValue: _selectedDeviceId,
                 isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'Send to',
-                  prefixIcon: AppIcon(AppIcons.materialMonitorSmartphone),
+                decoration: InputDecoration(
+                  labelText: context.l10n.sendToLabel,
+                  prefixIcon: const AppIcon(AppIcons.materialMonitorSmartphone),
                 ),
                 items: <DropdownMenuItem<String>>[
                   for (final d in availableDevices)
                     DropdownMenuItem<String>(
                       value: d.id.value,
                       child: Text(
-                        '${d.name}${d.tier.canTransferFiles ? "" : " · transfers not permitted"}',
+                        '${d.name}${d.tier.canTransferFiles ? "" : context.l10n.transfersNotPermitted}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -815,16 +831,16 @@ class _SendCardState extends ConsumerState<_SendCard> {
               ),
               const SizedBox(height: 16),
               SegmentedButton<int>(
-                segments: const <ButtonSegment<int>>[
+                segments: <ButtonSegment<int>>[
                   ButtonSegment<int>(
                     value: 0,
-                    label: Text('File / Drag & Drop'),
-                    icon: AppIcon(AppIcons.materialFiles),
+                    label: Text(context.l10n.tabFileDragDrop),
+                    icon: const AppIcon(AppIcons.materialFiles),
                   ),
                   ButtonSegment<int>(
                     value: 1,
-                    label: Text('Text / URL'),
-                    icon: AppIcon(AppIcons.materialFiles),
+                    label: Text(context.l10n.tabTextUrl),
+                    icon: const AppIcon(AppIcons.materialFiles),
                   ),
                 ],
                 selected: <int>{_tab},
@@ -841,9 +857,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
                   onDragExited: (_) => setState(() => _isDraggingOver = false),
                   onDragDone: (details) => _addDropped(details.files),
                   child: AnimatedContainer(
-                    duration: context.motion(
-                      const Duration(milliseconds: 180),
-                    ),
+                    duration: context.motion(const Duration(milliseconds: 180)),
                     curve: Curves.easeOutCubic,
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -872,11 +886,11 @@ class _SendCardState extends ConsumerState<_SendCard> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Drag and drop files here to send',
-                          style:
-                              Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                          context.l10n.dragAndDropPrompt,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 12),
                         OutlinedButton.icon(
@@ -884,7 +898,9 @@ class _SendCardState extends ConsumerState<_SendCard> {
                               _isPicking ? null : () => unawaited(_pick()),
                           icon: const AppIcon(AppIcons.materialFiles),
                           label: Text(
-                            _picked.isEmpty ? 'Choose files' : 'Add more files',
+                            _picked.isEmpty
+                                ? context.l10n.chooseFilesButton
+                                : context.l10n.addMoreFilesButton,
                           ),
                         ),
                       ],
@@ -896,7 +912,12 @@ class _SendCardState extends ConsumerState<_SendCard> {
                   for (final file in _picked)
                     Container(
                       margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.fromLTRB(10, 7, 4, 7),
+                      padding: const EdgeInsetsDirectional.fromSTEB(
+                        10,
+                        7,
+                        4,
+                        7,
+                      ),
                       decoration: BoxDecoration(
                         color: scheme.surfaceContainerHighest.withValues(
                           alpha: 0.50,
@@ -923,16 +944,16 @@ class _SendCardState extends ConsumerState<_SendCard> {
                             child: Text(
                               file.uri.pathSegments.last,
                               overflow: TextOverflow.ellipsis,
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w500),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ),
                           IconButton(
-                            icon: const AppIcon(
-                              AppIcons.delete,
-                              size: 20,
+                            icon: const AppIcon(AppIcons.delete, size: 20),
+                            tooltip: context.l10n.removeFileTooltip(
+                              file.uri.pathSegments.last,
                             ),
-                            tooltip: 'Remove ${file.uri.pathSegments.last}',
                             onPressed: () =>
                                 setState(() => _picked.remove(file)),
                             color: scheme.error,
@@ -946,17 +967,17 @@ class _SendCardState extends ConsumerState<_SendCard> {
                   controller: _textController,
                   maxLines: 4,
                   onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(
-                    labelText: 'Text or URL snippet',
-                    hintText: 'Enter text to send directly to the phone…',
+                  decoration: InputDecoration(
+                    labelText: context.l10n.textSnippetLabel,
+                    hintText: context.l10n.textSnippetHint,
                   ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _snippetNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'File name (optional)',
-                    hintText: 'snippet.txt',
+                  decoration: InputDecoration(
+                    labelText: context.l10n.fileNameOptionalLabel,
+                    hintText: context.l10n.fileNameOptionalHint,
                   ),
                 ),
               ],
@@ -981,7 +1002,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
               ],
               const SizedBox(height: 16),
               Align(
-                alignment: Alignment.centerRight,
+                alignment: AlignmentDirectional.centerEnd,
                 child: FilledButton.icon(
                   onPressed: (_tab == 0
                               ? _picked.isNotEmpty
@@ -990,7 +1011,11 @@ class _SendCardState extends ConsumerState<_SendCard> {
                       ? () => _send(availableDevices)
                       : null,
                   icon: const AppIcon(AppIcons.materialSend),
-                  label: Text(_tab == 0 ? 'Send File' : 'Send Text'),
+                  label: Text(
+                    _tab == 0
+                        ? context.l10n.sendFileButton
+                        : context.l10n.sendTextButton,
+                  ),
                 ),
               ),
             ],
@@ -1020,7 +1045,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
       }
       _statusError = directories.isEmpty
           ? null
-          : 'Folders cannot be sent yet: ${directories.join(", ")}';
+          : context.l10n.foldersNotSupportedError(directories.join(", "));
     });
   }
 
@@ -1041,7 +1066,8 @@ class _SendCardState extends ConsumerState<_SendCard> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _statusError = 'Could not open the file dialog: $e');
+      setState(
+          () => _statusError = context.l10n.openFileDialogError(e.toString()));
     } finally {
       if (mounted) setState(() => _isPicking = false);
     }
@@ -1052,7 +1078,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
     final target =
         devices.where((d) => d.id.value == _selectedDeviceId).firstOrNull;
     if (target == null) {
-      setState(() => _statusError = 'Please select a target device');
+      setState(() => _statusError = context.l10n.selectTargetDeviceError);
       return;
     }
 
@@ -1061,7 +1087,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
     try {
       if (_tab == 0) {
         if (_picked.isEmpty) {
-          setState(() => _statusError = 'Choose at least one file to send');
+          setState(() => _statusError = context.l10n.chooseAtLeastOneFileError);
           return;
         }
         // Re-checked here rather than trusted from pick time: a file can be
@@ -1072,9 +1098,10 @@ class _SendCardState extends ConsumerState<_SendCard> {
         if (missing.isNotEmpty) {
           setState(() {
             _picked.removeWhere(missing.contains);
-            _statusError = missing.length == 1
-                ? '${missing.first.uri.pathSegments.last} is no longer there.'
-                : '${missing.length} files are no longer there.';
+            _statusError = context.l10n.filesNoLongerThere(
+              missing.length,
+              missing.first.uri.pathSegments.last,
+            );
           });
           return;
         }
@@ -1083,7 +1110,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
       } else {
         final text = _textController.text;
         if (text.trim().isEmpty) {
-          setState(() => _statusError = 'Please enter text to send');
+          setState(() => _statusError = context.l10n.enterTextToSendError);
           return;
         }
         await service.sendText(
@@ -1097,7 +1124,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
         _snippetNameController.clear();
       }
     } catch (e) {
-      setState(() => _statusError = 'Send failed: $e');
+      setState(() => _statusError = context.l10n.sendFailedError(e.toString()));
     }
   }
 }
@@ -1106,36 +1133,45 @@ class _TransfersSection extends StatelessWidget {
   const _TransfersSection({
     required this.transfers,
     required this.onCancel,
+    required this.onRemove,
     required this.onRetry,
+    this.onOpenFile = FileLauncher.openFile,
+    this.onRevealFile = FileLauncher.revealFile,
   });
 
   final List<TransferRecord> transfers;
   final ValueChanged<String> onCancel;
+  final ValueChanged<String> onRemove;
   final ValueChanged<String> onRetry;
+  final Future<bool> Function(String path) onOpenFile;
+  final Future<bool> Function(String path) onRevealFile;
 
   @override
   Widget build(BuildContext context) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           DesktopSectionHeader(
-            title: 'Transfers',
+            title: context.l10n.transfersTitle,
             subtitle: transfers.isEmpty
-                ? 'Completed and active transfers appear here'
-                : '${transfers.length} recent ${transfers.length == 1 ? "transfer" : "transfers"}',
+                ? context.l10n.transfersActiveSubtitle
+                : context.l10n.transfersRecentCount(transfers.length),
           ),
           const SizedBox(height: 12),
           if (transfers.isEmpty)
-            const DesktopEmptyState(
+            DesktopEmptyState(
               icon: AppIcons.materialReceive,
-              title: 'No transfers yet',
-              message: 'No active or recent transfers.',
+              title: context.l10n.noTransfersTitle,
+              message: context.l10n.noActiveOrRecentTransfers,
             )
           else
             for (final transfer in transfers)
               _TransferTile(
                 transfer: transfer,
                 onCancel: () => onCancel(transfer.transferId),
+                onRemove: () => onRemove(transfer.transferId),
                 onRetry: () => onRetry(transfer.transferId),
+                onOpenFile: onOpenFile,
+                onRevealFile: onRevealFile,
               ),
         ],
       );
@@ -1145,12 +1181,18 @@ class _TransferTile extends StatelessWidget {
   const _TransferTile({
     required this.transfer,
     required this.onCancel,
+    required this.onRemove,
     required this.onRetry,
+    this.onOpenFile = FileLauncher.openFile,
+    this.onRevealFile = FileLauncher.revealFile,
   });
 
   final TransferRecord transfer;
   final VoidCallback onCancel;
+  final VoidCallback onRemove;
   final VoidCallback onRetry;
+  final Future<bool> Function(String path) onOpenFile;
+  final Future<bool> Function(String path) onRevealFile;
 
   @override
   Widget build(BuildContext context) {
@@ -1188,8 +1230,8 @@ class _TransferTile extends StatelessWidget {
                 Expanded(
                   child: Text(
                     isIncoming
-                        ? 'From ${transfer.peerName}'
-                        : 'To ${transfer.peerName}',
+                        ? context.l10n.transferFromPeer(transfer.peerName)
+                        : context.l10n.transferToPeer(transfer.peerName),
                     style: Theme.of(context).textTheme.titleSmall,
                   ),
                 ),
@@ -1202,34 +1244,35 @@ class _TransferTile extends StatelessWidget {
             const SizedBox(height: 12),
             for (final f in transfer.files) ...<Widget>[
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Expanded(
                     child: switch (f.savedPath) {
-                      final String path => _SavedFileName(
+                      final String path => SavedFileInfo(
                           fileName: f.fileName,
                           path: path,
+                          onOpenFile: onOpenFile,
+                          onRevealFile: onRevealFile,
                         ),
-                      null => Text(
-                          f.fileName,
-                          style: const TextStyle(fontWeight: FontWeight.w500),
+                      null => Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 2,
+                          ),
+                          child: Text(
+                            f.fileName,
+                            style: const TextStyle(fontWeight: FontWeight.w500),
+                          ),
                         ),
                     },
                   ),
-                  if (f.savedPath case final String path) ...<Widget>[
-                    IconButton(
-                      onPressed: () => unawaited(FileLauncher.revealFile(path)),
-                      icon: const AppIcon(AppIcons.materialFiles, size: 18),
-                      tooltip: Platform.isMacOS
-                          ? 'Show in Finder'
-                          : 'Show in folder',
-                      visualDensity: VisualDensity.compact,
-                      color: scheme.onSurfaceVariant,
+                  const SizedBox(width: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      '${formatBytes(f.transferredBytes)} / ${formatBytes(f.totalBytes)}',
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    const SizedBox(width: 4),
-                  ],
-                  Text(
-                    '${formatBytes(f.transferredBytes)} / ${formatBytes(f.totalBytes)}',
-                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
               ),
@@ -1272,23 +1315,28 @@ class _TransferTile extends StatelessWidget {
                   TextButton.icon(
                     onPressed: onCancel,
                     icon: const AppIcon(AppIcons.delete, size: 18),
-                    label: const Text('Cancel'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: scheme.error,
-                    ),
+                    label: Text(context.l10n.cancelButton),
+                    style: TextButton.styleFrom(foregroundColor: scheme.error),
+                  ),
+                if (transfer.canRemove)
+                  TextButton.icon(
+                    onPressed: onRemove,
+                    icon: const AppIcon(AppIcons.delete, size: 18),
+                    label: Text(context.l10n.removeButton),
                   ),
                 if (transfer.canRetry)
                   FilledButton.tonalIcon(
                     onPressed: onRetry,
                     icon: const AppIcon(AppIcons.materialQrCode, size: 18),
-                    label: const Text('Retry'),
+                    label: Text(context.l10n.retryButton),
                   ),
               ],
             ),
-            if (transfer.errorMessage != null) ...<Widget>[
+            if (transfer.failure != null) ...<Widget>[
               const SizedBox(height: 4),
               Text(
-                transfer.errorMessage!,
+                describeTransferFailure(
+                    context.l10n, transfer.failure!, transfer.peerName),
                 style: TextStyle(color: scheme.error, fontSize: 12),
               ),
             ],
@@ -1299,43 +1347,247 @@ class _TransferTile extends StatelessWidget {
   }
 }
 
-/// The name of a file that arrived, as a link to the file itself.
+/// Shortens a long path by eliding middle directory segments when it exceeds
+/// [maxLength].
 ///
-/// A received file the user cannot reach from here is a file they have to go
-/// hunting for — and the name shown is not always the name on disk, so hunting
-/// is exactly what it takes. Clicking opens it; the tooltip says where it is.
-class _SavedFileName extends StatelessWidget {
-  const _SavedFileName({required this.fileName, required this.path});
+/// Long paths are awkward in card layouts, but chopping off the end loses the
+/// file name (which may have been renamed to avoid a collision), while chopping
+/// off the front loses where the file landed. Middle elision keeps both the root
+/// folder and the leaf directory/file visible while replacing intermediary
+/// nesting with `...`.
+@visibleForTesting
+String elideMiddlePath(String path, {int maxLength = 55}) {
+  if (path.length <= maxLength) return path;
+
+  final isWindows = path.contains(r'\');
+  final separator = isWindows ? r'\' : '/';
+  final parts = path.split(separator).where((s) => s.isNotEmpty).toList();
+
+  // If there are too few parts to preserve head and tail, perform character
+  // middle truncation.
+  if (parts.length <= 3) {
+    const ellipsis = '...';
+    final available = maxLength - ellipsis.length;
+    if (available <= 0) return path;
+    final headCount = (available / 2).ceil();
+    final tailCount = available - headCount;
+    return '${path.substring(0, headCount)}$ellipsis${path.substring(path.length - tailCount)}';
+  }
+
+  final prefix = path.startsWith(separator) ? separator : '';
+  final head = <String>[parts.first];
+  final tail = <String>[parts.last];
+  var headIndex = 1;
+  if ((parts.first == '~' || parts.first.endsWith(':')) && parts.length > 2) {
+    head.add(parts[1]);
+    headIndex = 2;
+  }
+  var tailIndex = parts.length - 2;
+
+  // Attempt to keep the immediate parent directory in the tail if it fits.
+  while (tailIndex > headIndex) {
+    final candidateTail = parts[tailIndex];
+    final projectedLength = prefix.length +
+        head.join(separator).length +
+        separator.length +
+        3 +
+        separator.length +
+        candidateTail.length +
+        separator.length +
+        tail.join(separator).length;
+    if (projectedLength <= maxLength) {
+      tail.insert(0, candidateTail);
+      tailIndex--;
+    } else {
+      break;
+    }
+  }
+
+  return '$prefix${head.join(separator)}$separator...$separator${tail.join(separator)}';
+}
+
+/// Formats a received file's saved path for display in the desktop UI.
+///
+/// On macOS and Linux, the user's home directory is replaced with `~` so the
+/// path is immediately recognizable and does not waste horizontal space on
+/// redundant `/Users/username` prefixes. On Windows, the real path (e.g.
+/// `C:\Users\me\...`) is preserved intact as paths with tilde are not standard
+/// Windows syntax.
+///
+/// If the resulting path is particularly long, middle directory segments are
+/// elided with [elideMiddlePath] so the folder part and file name remain legible
+/// within the card layout. The full, un-elided path is preserved in a tooltip.
+@visibleForTesting
+String formatDisplayPath(
+  String path, {
+  String? homeDir,
+  bool? isWindows,
+  int maxPathLength = 55,
+}) {
+  final windows = isWindows ?? Platform.isWindows;
+  String formatted;
+  if (windows) {
+    formatted = path;
+  } else {
+    final home = homeDir ?? Platform.environment['HOME'];
+    if (home != null && home.isNotEmpty) {
+      final normalizedHome =
+          home.endsWith('/') ? home.substring(0, home.length - 1) : home;
+      if (path == normalizedHome) {
+        formatted = '~';
+      } else if (path.startsWith('$normalizedHome/')) {
+        formatted = '~${path.substring(normalizedHome.length)}';
+      } else {
+        formatted = path;
+      }
+    } else {
+      formatted = path;
+    }
+  }
+
+  return elideMiddlePath(formatted, maxLength: maxPathLength);
+}
+
+/// The details of a received file, with direct links to open the file in its
+/// default application or reveal it in the operating system's file manager.
+///
+/// A received file the user cannot reach from the transfer card is a file they
+/// have to hunt for on disk — and because files that collide with existing ones
+/// are renamed on arrival, the name on disk is not always the name they sent.
+///
+/// The file name is a clickable link to open the file directly in whatever
+/// application owns its MIME type. Directly underneath, the full saved path is
+/// displayed as a secondary link that reveals the file in Finder (macOS),
+/// Explorer (Windows), or the desktop file manager (Linux) with the item selected.
+///
+/// If the file was moved or deleted after landing, attempting to open or reveal
+/// it shows a descriptive SnackBar rather than failing silently.
+@visibleForTesting
+class SavedFileInfo extends StatelessWidget {
+  const SavedFileInfo({
+    super.key,
+    required this.fileName,
+    required this.path,
+    this.onOpenFile = FileLauncher.openFile,
+    this.onRevealFile = FileLauncher.revealFile,
+    @visibleForTesting this.homeDirForTesting,
+    @visibleForTesting this.isWindowsForTesting,
+    @visibleForTesting this.isMacForTesting,
+  });
 
   final String fileName;
   final String path;
 
+  /// Invoked when the user clicks or activates the file name.
+  ///
+  /// Expected to return `true` if the file was opened, or `false` if it could
+  /// not be opened (e.g. because it was moved or deleted).
+  final Future<bool> Function(String path) onOpenFile;
+
+  /// Invoked when the user clicks or activates the saved path.
+  ///
+  /// Expected to return `true` if the file was revealed, or `false` if it could
+  /// not be found.
+  final Future<bool> Function(String path) onRevealFile;
+
+  final String? homeDirForTesting;
+  final bool? isWindowsForTesting;
+  final bool? isMacForTesting;
+
+  Future<void> _open(BuildContext context) async {
+    final ok = await onOpenFile(path);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(content: Text(context.l10n.fileMovedOrDeleted)),
+        );
+    }
+  }
+
+  Future<void> _reveal(BuildContext context) async {
+    final ok = await onRevealFile(path);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(content: Text(context.l10n.fileMovedOrDeleted)),
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final displayPath = formatDisplayPath(
+      path,
+      homeDir: homeDirForTesting,
+      isWindows: isWindowsForTesting,
+    );
 
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Tooltip(
-        message: path,
-        waitDuration: const Duration(milliseconds: 400),
-        child: InkWell(
-          onTap: () => unawaited(FileLauncher.openFile(path)),
-          borderRadius: BorderRadius.circular(6),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            child: Text(
-              fileName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontWeight: FontWeight.w500,
-                color: scheme.primary,
+    final isMac = isMacForTesting ??
+        (!(isWindowsForTesting ?? false) && Platform.isMacOS);
+    final revealLabel = isMac
+        ? context.l10n.showInFinder(fileName)
+        : context.l10n.showInFolder(fileName);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Tooltip(
+          message: context.l10n.openFileTooltip(fileName),
+          waitDuration: const Duration(milliseconds: 400),
+          child: Semantics(
+            button: true,
+            label: context.l10n.openFileTooltip(fileName),
+            excludeSemantics: true,
+            child: InkWell(
+              onTap: () => unawaited(_open(context)),
+              mouseCursor: SystemMouseCursors.click,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Text(
+                  fileName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                    color: scheme.primary,
+                  ),
+                ),
               ),
             ),
           ),
         ),
-      ),
+        const SizedBox(height: 2),
+        Tooltip(
+          message: path,
+          waitDuration: const Duration(milliseconds: 400),
+          child: Semantics(
+            button: true,
+            label: revealLabel,
+            excludeSemantics: true,
+            child: InkWell(
+              onTap: () => unawaited(_reveal(context)),
+              mouseCursor: SystemMouseCursors.click,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Text(
+                  displayPath,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1366,37 +1618,39 @@ class _TransferStatusChip extends StatelessWidget {
       // which is not what is happening, and left the user looking for
       // something to do on the wrong device.
       TransferStatus.prompting => (
-          isIncoming ? 'Waiting for you' : 'Awaiting response',
+          isIncoming
+              ? context.l10n.transferStatusWaitingForYou
+              : context.l10n.transferStatusAwaitingResponse,
           scheme.tertiaryContainer,
           scheme.onTertiaryContainer,
         ),
       TransferStatus.offered => (
-          'Offered',
+          context.l10n.transferStatusOffered,
           scheme.tertiaryContainer,
           scheme.onTertiaryContainer,
         ),
       TransferStatus.inProgress => (
-          'Transferring',
+          context.l10n.transferTransferring,
           scheme.primaryContainer,
           scheme.onPrimaryContainer,
         ),
       TransferStatus.completed => (
-          'Completed',
+          context.l10n.transferCompleted,
           success.container,
           success.onContainer,
         ),
       TransferStatus.cancelled => (
-          'Cancelled',
+          context.l10n.transferCancelled,
           scheme.surfaceContainerHighest,
           scheme.onSurfaceVariant,
         ),
       TransferStatus.declined => (
-          'Declined',
+          context.l10n.transferDeclined,
           scheme.errorContainer,
           scheme.onErrorContainer,
         ),
       TransferStatus.failed => (
-          'Failed',
+          context.l10n.transferFailed,
           scheme.errorContainer,
           scheme.onErrorContainer,
         ),
@@ -1427,14 +1681,19 @@ class _IncomingTransferDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: Text('Incoming transfer from ${request.peerName}'),
+        title: Text(
+          context.l10n.incomingTransferFromPeer(request.peerName),
+        ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                '${request.peerName} wants to send ${request.offer.files.length} file(s):',
+                context.l10n.incomingTransferFilesCount(
+                  request.peerName,
+                  request.offer.files.length,
+                ),
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 12),
@@ -1459,9 +1718,9 @@ class _IncomingTransferDialog extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: <Widget>[
-                  const Text(
-                    'Total size:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                  Text(
+                    context.l10n.totalSizeLabel,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   Text(
                     formatBytes(request.totalBytes),
@@ -1480,7 +1739,9 @@ class _IncomingTransferDialog extends StatelessWidget {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    'First transfer from this device.\nFiles will be saved in: ${request.destinationPath}',
+                    context.l10n.firstTransferNote(
+                      request.destinationPath,
+                    ),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
@@ -1495,17 +1756,17 @@ class _IncomingTransferDialog extends StatelessWidget {
           TextButton(
             autofocus: true,
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Decline'),
+            child: Text(context.l10n.declineButton),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Accept'),
+            child: Text(context.l10n.acceptButton),
           ),
         ],
       );
 }
 
-class PermissionRequestDialog extends StatelessWidget {
+class PermissionRequestDialog extends StatefulWidget {
   const PermissionRequestDialog({
     required this.peerName,
     required this.requestedTier,
@@ -1519,11 +1780,45 @@ class PermissionRequestDialog extends StatelessWidget {
   final PermissionTier currentTier;
   final String? justification;
 
-  static String _tierTitle(PermissionTier tier) => switch (tier) {
-        PermissionTier.readOnly => 'View Only',
-        PermissionTier.standard => 'Control',
-        PermissionTier.extended => 'Control + Launch Apps',
-        PermissionTier.admin => 'Administrator (Full Access)',
+  @override
+  State<PermissionRequestDialog> createState() =>
+      _PermissionRequestDialogState();
+}
+
+class _PermissionRequestDialogState extends State<PermissionRequestDialog> {
+  static const int _timeoutSeconds = 60;
+  static const int _temporarySeconds = 30 * 60;
+  int _remainingSeconds = _timeoutSeconds;
+  bool _temporary = true;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    // The phone must never retain an unanswered security prompt indefinitely.
+    // A periodic tick also makes the deadline visible to the desktop user.
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      if (_remainingSeconds <= 1) {
+        Navigator.of(context).pop();
+      } else {
+        setState(() => _remainingSeconds--);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  static String _tierTitle(BuildContext context, PermissionTier tier) =>
+      switch (tier) {
+        PermissionTier.readOnly => context.l10n.tierTitleViewOnly,
+        PermissionTier.standard => context.l10n.tierTitleControl,
+        PermissionTier.extended => context.l10n.tierTitleControlAndApps,
+        PermissionTier.admin => context.l10n.tierTitleAdmin,
       };
 
   // These are read by someone deciding whether to hand over their machine, so
@@ -1531,19 +1826,12 @@ class PermissionRequestDialog extends StatelessWidget {
   // be listed under View Only and was left behind when streaming moved up to
   // Control — a dialog that overstates what a tier grants is worse than no
   // dialog, because it is trusted.
-  static String _tierExplanation(PermissionTier tier) => switch (tier) {
-        PermissionTier.readOnly =>
-          'Allows viewing system status, media state, and the display layout — '
-              'but not the contents of the screen.',
-        PermissionTier.standard =>
-          'Allows sending keyboard and mouse input, synchronizing clipboard, '
-              'controlling media, viewing this screen, and transferring files '
-              '— every transfer is still confirmed here before it starts.',
-        PermissionTier.extended =>
-          'Allows launching applications and running pre-registered commands '
-              'without a further prompt.',
-        PermissionTier.admin =>
-          'Allows controlling power (shutdown, restart, sleep, lock) and managing paired devices.',
+  static String _tierExplanation(BuildContext context, PermissionTier tier) =>
+      switch (tier) {
+        PermissionTier.readOnly => context.l10n.tierExplViewOnly,
+        PermissionTier.standard => context.l10n.tierExplControl,
+        PermissionTier.extended => context.l10n.tierExplExtended,
+        PermissionTier.admin => context.l10n.tierExplAdmin,
       };
 
   @override
@@ -1552,7 +1840,7 @@ class PermissionRequestDialog extends StatelessWidget {
     final colorScheme = theme.colorScheme;
 
     return AlertDialog(
-      title: const Text('Permission elevation request'),
+      title: Text(context.l10n.permissionElevationRequestTitle),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1563,20 +1851,20 @@ class PermissionRequestDialog extends StatelessWidget {
                 style: theme.textTheme.bodyMedium,
                 children: <TextSpan>[
                   TextSpan(
-                    text: peerName,
+                    text: widget.peerName,
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  const TextSpan(text: ' is requesting '),
+                  TextSpan(text: context.l10n.peerIsRequesting),
                   TextSpan(
-                    text: _tierTitle(requestedTier),
+                    text: _tierTitle(context, widget.requestedTier),
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: requestedTier == PermissionTier.admin
+                      color: widget.requestedTier == PermissionTier.admin
                           ? colorScheme.error
                           : colorScheme.primary,
                     ),
                   ),
-                  const TextSpan(text: ' access to this computer.'),
+                  TextSpan(text: context.l10n.accessToThisComputer),
                 ],
               ),
             ),
@@ -1592,23 +1880,24 @@ class PermissionRequestDialog extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
-                    'What this allows:',
+                    context.l10n.whatThisAllows,
                     style: theme.textTheme.labelMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _tierExplanation(requestedTier),
+                    _tierExplanation(context, widget.requestedTier),
                     style: theme.textTheme.bodySmall,
                   ),
                 ],
               ),
             ),
-            if (justification != null && justification!.isNotEmpty) ...<Widget>[
+            if (widget.justification != null &&
+                widget.justification!.isNotEmpty) ...<Widget>[
               const SizedBox(height: 16),
               Text(
-                'Message from device:',
+                context.l10n.messageFromDevice,
                 style: theme.textTheme.labelMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.bold,
@@ -1624,14 +1913,14 @@ class PermissionRequestDialog extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  '“$justification”',
+                  '“${widget.justification}”',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontStyle: FontStyle.italic,
                   ),
                 ),
               ),
             ],
-            if (requestedTier == PermissionTier.admin) ...<Widget>[
+            if (widget.requestedTier == PermissionTier.admin) ...<Widget>[
               const SizedBox(height: 16),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1644,7 +1933,7 @@ class PermissionRequestDialog extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Admin access allows restarting or shutting down your machine and discarding unsaved work.',
+                      context.l10n.adminWarningMessage,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.error,
                       ),
@@ -1653,6 +1942,23 @@ class PermissionRequestDialog extends StatelessWidget {
                 ],
               ),
             ],
+            const SizedBox(height: 16),
+            Text(context.l10n.automaticallyDeniedInSeconds(_remainingSeconds)),
+            SegmentedButton<bool>(
+              segments: <ButtonSegment<bool>>[
+                ButtonSegment<bool>(
+                  value: true,
+                  label: Text(context.l10n.temporary30Minutes),
+                ),
+                ButtonSegment<bool>(
+                  value: false,
+                  label: Text(context.l10n.permanent),
+                ),
+              ],
+              selected: <bool>{_temporary},
+              onSelectionChanged: (selected) =>
+                  setState(() => _temporary = selected.single),
+            ),
           ],
         ),
       ),
@@ -1660,12 +1966,13 @@ class PermissionRequestDialog extends StatelessWidget {
         // Deny holds initial focus so pressing Enter/Space denies by default.
         TextButton(
           autofocus: true,
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Deny'),
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(context.l10n.denyButton),
         ),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('Approve'),
+          onPressed: () =>
+              Navigator.of(context).pop(_temporary ? _temporarySeconds : 0),
+          child: Text(context.l10n.approveButton),
         ),
       ],
     );
@@ -1706,11 +2013,7 @@ class _StatusCard extends StatelessWidget {
                 color: statusColor.withValues(alpha: 0.11),
                 borderRadius: BorderRadius.circular(18),
               ),
-              child: AppIcon(
-                AppIcons.airdrop,
-                size: 24,
-                color: statusColor,
-              ),
+              child: AppIcon(AppIcons.airdrop, size: 24, color: statusColor),
             ),
             const SizedBox(width: 18),
             Expanded(
@@ -1719,13 +2022,16 @@ class _StatusCard extends StatelessWidget {
                 children: <Widget>[
                   Text(
                     status.isRunning
-                        ? 'Discoverable on this network'
-                        : 'Not running',
+                        ? context.l10n.statusDiscoverable
+                        : context.l10n.statusNotRunning,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${status.deviceName} · port ${status.boundPort}',
+                    context.l10n.devicePortInfo(
+                      status.deviceName,
+                      status.boundPort,
+                    ),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 2),
@@ -1738,9 +2044,9 @@ class _StatusCard extends StatelessWidget {
                       status.localAddresses
                           .map((address) => '$address:${status.boundPort}')
                           .join('  ·  '),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            fontFamily: 'monospace',
-                          ),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
                     ),
                   const SizedBox(height: 2),
                   // The device ID is shown because it is the only thing a
@@ -1748,9 +2054,9 @@ class _StatusCard extends StatelessWidget {
                   // computers on one network.
                   SelectableText(
                     status.deviceId,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontFamily: 'monospace',
-                        ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
                   ),
                   // Screen sharing is started from the phone and has no
                   // control on this window at all, so with the permission
@@ -1772,9 +2078,7 @@ class _StatusCard extends StatelessWidget {
                         const SizedBox(width: 6),
                         Flexible(
                           child: Text(
-                            'Ready to share this screen — start it from the '
-                            'phone, using the monitor button at the top of '
-                            'its remote screen.',
+                            context.l10n.readyToShareScreenPrompt,
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ),
@@ -1789,8 +2093,10 @@ class _StatusCard extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: statusColor.withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(999),
@@ -1808,7 +2114,9 @@ class _StatusCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 7),
                       Text(
-                        status.isRunning ? 'Online' : 'Offline',
+                        status.isRunning
+                            ? context.l10n.statusOnline
+                            : context.l10n.statusOffline,
                         style:
                             Theme.of(context).textTheme.labelMedium?.copyWith(
                                   color: statusColor,
@@ -1828,7 +2136,7 @@ class _StatusCard extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: onPairPhone,
                     icon: const AppIcon(AppIcons.qrCode, size: 18),
-                    label: const Text('Pair a phone'),
+                    label: Text(context.l10n.pairPhoneButton),
                   ),
                 ],
               ],
@@ -1858,10 +2166,11 @@ class _ScreenSharingBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final label = viewers.length == 1
-        ? '${viewers.single} is watching this screen'
-        : '${viewers.length} devices are watching this screen: '
-            '${viewers.join(", ")}';
+    final label = context.l10n.screenWatchingBanner(
+      viewers.length,
+      viewers.isNotEmpty ? viewers.first : '',
+      viewers.join(', '),
+    );
 
     return Card(
       color: scheme.errorContainer,
@@ -1869,8 +2178,10 @@ class _ScreenSharingBanner extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Row(
           children: <Widget>[
-            AppIcon(AppIcons.materialMonitorPlay,
-                color: scheme.onErrorContainer),
+            AppIcon(
+              AppIcons.materialMonitorPlay,
+              color: scheme.onErrorContainer,
+            ),
             const SizedBox(width: 16),
             Expanded(
               // Announced as its own live region: a screen-reader user gets no
@@ -1890,7 +2201,7 @@ class _ScreenSharingBanner extends StatelessWidget {
             const SizedBox(width: 16),
             FilledButton.tonal(
               onPressed: () => onStop(),
-              child: const Text('Stop sharing'),
+              child: Text(context.l10n.stopSharing),
             ),
           ],
         ),
@@ -1944,10 +2255,7 @@ class _PermissionBanner extends StatelessWidget {
             AppIcon(icon, color: foreground),
             const SizedBox(width: 16),
             Expanded(
-              child: Text(
-                reason,
-                style: TextStyle(color: foreground),
-              ),
+              child: Text(reason, style: TextStyle(color: foreground)),
             ),
             const SizedBox(width: 16),
             // The banner clears itself within a couple of seconds of the grant,
@@ -1955,7 +2263,7 @@ class _PermissionBanner extends StatelessWidget {
             // left looking at a stale error.
             FilledButton.tonal(
               onPressed: () => onOpenSettings(),
-              child: const Text('Open Settings'),
+              child: Text(context.l10n.openSettings),
             ),
           ],
         ),
@@ -1999,8 +2307,9 @@ class _DeviceTile extends StatelessWidget {
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color:
-                Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
+            color: Theme.of(
+              context,
+            ).colorScheme.primary.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(14),
           ),
           child: AppIcon(
@@ -2013,9 +2322,12 @@ class _DeviceTile extends StatelessWidget {
         title: Text(device.name),
         subtitle: Text(
           device.awaitingPairing
-              ? 'Waiting for pairing approval'
-              : '${device.address} · ${quality.roundTripMillis.toStringAsFixed(1)} ms'
-                  ' · ${quality.bars}/4',
+              ? context.l10n.waitingForPairingApproval
+              : context.l10n.deviceConnectionStats(
+                  device.address,
+                  quality.roundTripMillis.toStringAsFixed(1),
+                  quality.bars,
+                ),
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
@@ -2023,9 +2335,9 @@ class _DeviceTile extends StatelessWidget {
             Tooltip(
               message: canSyncClipboard
                   ? (device.clipboardSyncEnabled
-                      ? 'Clipboard sync enabled'
-                      : 'Clipboard sync disabled')
-                  : 'Clipboard sync not permitted at current tier',
+                      ? context.l10n.clipboardSyncEnabledTooltip
+                      : context.l10n.clipboardSyncDisabledTooltip)
+                  : context.l10n.clipboardSyncNotPermittedTooltip,
               child: Switch(
                 value: canSyncClipboard && device.clipboardSyncEnabled,
                 onChanged: canSyncClipboard
@@ -2038,7 +2350,7 @@ class _DeviceTile extends StatelessWidget {
                 AppIcons.edit,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
-              tooltip: 'Rename this device',
+              tooltip: context.l10n.renameDeviceTooltip,
               onPressed: onRename,
             ),
             // The way out of an agreement. Switching it off does not un-pair
@@ -2052,9 +2364,8 @@ class _DeviceTile extends StatelessWidget {
                     : Theme.of(context).colorScheme.onSurfaceVariant,
               ),
               tooltip: remembered
-                  ? 'Remembered — connects without being asked. '
-                      'Click to start asking again.'
-                  : 'Not remembered. Click to let it connect without asking.',
+                  ? context.l10n.rememberedDeviceTooltip
+                  : context.l10n.notRememberedDeviceTooltip,
               onPressed: () => onRememberChanged(!remembered),
             ),
             DropdownButton<PermissionTier>(
@@ -2065,13 +2376,13 @@ class _DeviceTile extends StatelessWidget {
                 for (final tier in PermissionTier.values)
                   DropdownMenuItem<PermissionTier>(
                     value: tier,
-                    child: Text(_tierLabel(tier)),
+                    child: Text(_tierLabel(context, tier)),
                   ),
               ],
             ),
             IconButton(
               icon: const AppIcon(AppIcons.delete),
-              tooltip: 'Forget this device',
+              tooltip: context.l10n.forgetDeviceTooltip,
               onPressed: onRevoke,
               color: Theme.of(context).colorScheme.error,
             ),
@@ -2081,11 +2392,12 @@ class _DeviceTile extends StatelessWidget {
     );
   }
 
-  static String _tierLabel(PermissionTier tier) => switch (tier) {
-        PermissionTier.readOnly => 'View only',
-        PermissionTier.standard => 'Control',
-        PermissionTier.extended => 'Control + apps',
-        PermissionTier.admin => 'Full access',
+  static String _tierLabel(BuildContext context, PermissionTier tier) =>
+      switch (tier) {
+        PermissionTier.readOnly => context.l10n.tierLabelViewOnly,
+        PermissionTier.standard => context.l10n.tierLabelControl,
+        PermissionTier.extended => context.l10n.tierLabelControlAndApps,
+        PermissionTier.admin => context.l10n.tierLabelFullAccess,
       };
 }
 
@@ -2099,8 +2411,9 @@ class _RenameDeviceDialog extends StatefulWidget {
 }
 
 class _RenameDeviceDialogState extends State<_RenameDeviceDialog> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.initialName);
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialName,
+  );
   String? _error;
 
   @override
@@ -2114,8 +2427,7 @@ class _RenameDeviceDialogState extends State<_RenameDeviceDialog> {
     final sanitised = sanitiseDeviceName(raw);
     if (sanitised == null) {
       setState(() {
-        _error =
-            'Invalid name: 1–64 characters, no control codes or line breaks.';
+        _error = context.l10n.invalidDeviceNameError;
       });
       return;
     }
@@ -2124,7 +2436,7 @@ class _RenameDeviceDialogState extends State<_RenameDeviceDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Rename device'),
+        title: Text(context.l10n.renameDeviceDialogTitle),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2133,7 +2445,7 @@ class _RenameDeviceDialogState extends State<_RenameDeviceDialog> {
               controller: _controller,
               autofocus: true,
               decoration: InputDecoration(
-                labelText: 'Device name',
+                labelText: context.l10n.deviceNameLabel,
                 errorText: _error,
                 border: const OutlineInputBorder(),
               ),
@@ -2144,11 +2456,11 @@ class _RenameDeviceDialogState extends State<_RenameDeviceDialog> {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancelButton),
           ),
           FilledButton(
             onPressed: _submit,
-            child: const Text('Save'),
+            child: Text(context.l10n.saveButton),
           ),
         ],
       );
@@ -2175,12 +2487,12 @@ class PairingDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Pair this device?'),
+        title: Text(context.l10n.pairingDialogTitle),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text('$peerName wants to control this computer.'),
+            Text(context.l10n.pairingDialogMessage(peerName)),
             const SizedBox(height: 20),
             // Grouped for the eye and announced digit by digit — see
             // [PairingCodeDisplay]. The security of the *numeric* flow rests
@@ -2198,10 +2510,7 @@ class PairingDialog extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             Text(
-              'Approve only if your phone is showing exactly these six '
-              'digits, or if you just scanned the code on this screen with '
-              'it. Different numbers mean something is intercepting the '
-              'connection.',
+              context.l10n.pairingDialogInstructions,
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
@@ -2219,11 +2528,11 @@ class PairingDialog extends StatelessWidget {
           TextButton(
             autofocus: true,
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Deny'),
+            child: Text(context.l10n.denyButton),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('The numbers match'),
+            child: Text(context.l10n.theNumbersMatchButton),
           ),
         ],
       );
@@ -2249,23 +2558,22 @@ class ConnectionRequestDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Allow this device to connect?'),
+        title: Text(context.l10n.connectionRequestDialogTitle),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text('$peerName is asking to connect to this computer.'),
+            Text(
+              context.l10n.connectionRequestPeerMessage(peerName),
+            ),
             const SizedBox(height: 12),
             Text(
-              'You paired with it before, so its identity has already been '
-              'checked. This is only about now: allow it if the device is in '
-              'your hands, and turn it away if it is not.',
+              context.l10n.connectionRequestExplanation,
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
             Text(
-              'Remote Link will not ask about this device again until you '
-              'quit the app.',
+              context.l10n.connectionRequestSessionNote,
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
@@ -2277,11 +2585,11 @@ class ConnectionRequestDialog extends StatelessWidget {
           TextButton(
             autofocus: true,
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Don\'t allow'),
+            child: Text(context.l10n.dontAllowButton),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Allow'),
+            child: Text(context.l10n.allowButton),
           ),
         ],
       );
@@ -2301,19 +2609,15 @@ class RememberDeviceDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Remember this device?'),
+        title: Text(context.l10n.rememberDeviceDialogTitle),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text(
-              '$peerName is connected. Remote Link can let it straight in next '
-              'time, with nothing to scan and nobody to ask.',
-            ),
+            Text(context.l10n.rememberDeviceIntro(peerName)),
             const SizedBox(height: 12),
             Text(
-              '$peerName is being asked the same thing. Both devices have to '
-              'agree, and either one can change its mind later in Devices.',
+              context.l10n.rememberDeviceExplanation(peerName),
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
@@ -2324,12 +2628,12 @@ class RememberDeviceDialog extends StatelessWidget {
           // the risk a default answer carries is a convenience, not access.
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Keep asking'),
+            child: Text(context.l10n.keepAskingButton),
           ),
           FilledButton(
             autofocus: true,
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Remember'),
+            child: Text(context.l10n.rememberButton),
           ),
         ],
       );
@@ -2409,8 +2713,8 @@ class _StartupError extends StatelessWidget {
 
     if (_alreadyRunning) {
       final where = Platform.isMacOS
-          ? 'the menu bar at the top of the screen'
-          : 'the notification area beside the clock';
+          ? context.l10n.menuBarLocationMac
+          : context.l10n.notificationAreaLocationOther;
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -2422,15 +2726,13 @@ class _StartupError extends StatelessWidget {
                 const BrandMark(size: 72),
                 const SizedBox(height: 20),
                 Text(
-                  '$kProductName is already running',
+                  context.l10n.alreadyRunningTitle(kProductName),
                   style: theme.textTheme.titleMedium,
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Your phone can already reach this computer. Open the copy '
-                  "that is running from its icon in $where — you don't need "
-                  'this second one.',
+                  context.l10n.alreadyRunningSubtitle(where),
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
@@ -2443,7 +2745,7 @@ class _StartupError extends StatelessWidget {
                 FilledButton.icon(
                   onPressed: () => exit(0),
                   icon: const AppIcon(AppIcons.materialClose),
-                  label: const Text('Close this window'),
+                  label: Text(context.l10n.closeThisWindow),
                 ),
               ],
             ),
@@ -2461,7 +2763,7 @@ class _StartupError extends StatelessWidget {
             const AppIcon(AppIcons.materialError, size: 48),
             const SizedBox(height: 16),
             Text(
-              '$kProductName could not start',
+              context.l10n.couldNotStartTitle(kProductName),
               style: theme.textTheme.titleMedium,
             ),
             const SizedBox(height: 8),

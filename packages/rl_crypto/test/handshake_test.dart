@@ -53,6 +53,54 @@ void main() {
     desktop = await DeviceIdentity.generate();
   });
 
+  test('full handshake can resume in memory with fresh directional keys',
+      () async {
+    final (clientFull, serverFull) = await _run(client: phone, server: desktop);
+    expect(clientFull.keys.resumptionSecret, serverFull.keys.resumptionSecret);
+    final tickets = ResumptionTickets(clock: FakeClock());
+    final ticket = await tickets.issue(
+        peerKey: phone.publicKey,
+        tier: PermissionTier.standard.wireValue,
+        secret: serverFull.keys.resumptionSecret);
+    final nonce = Uint8List(32)..[0] = 9;
+    final proof = await Primitives.mac(
+        key: clientFull.keys.resumptionSecret,
+        data: <int>[...ticket, ...nonce]);
+    final opened = await tickets.open(
+        ticket,
+        nonce,
+        proof,
+        (key, tier) async =>
+            tier == PermissionTier.standard.wireValue &&
+            Primitives.constantTimeEquals(key, phone.publicKey));
+    expect(opened, isNotNull);
+    final clientEphemeral = await Primitives.generateKeyPair();
+    final serverEphemeral = await Primitives.generateKeyPair();
+    final clientPublic =
+        Uint8List.fromList((await clientEphemeral.extractPublicKey()).bytes);
+    final serverPublic =
+        Uint8List.fromList((await serverEphemeral.extractPublicKey()).bytes);
+    final transcript = await ResumeKeys.transcript(
+        ticket, nonce, clientPublic, serverPublic, Uint8List(8));
+    final clientKeys = await ResumeKeys.derive(
+        secret: clientFull.keys.resumptionSecret,
+        shared: await Primitives.sharedSecret(
+            keyPair: clientEphemeral, remotePublicKey: serverPublic),
+        transcript: transcript,
+        client: true);
+    final serverKeys = await ResumeKeys.derive(
+        secret: opened!.secret,
+        shared: await Primitives.sharedSecret(
+            keyPair: serverEphemeral, remotePublicKey: clientPublic),
+        transcript: transcript,
+        client: false);
+    expect(clientKeys.exporterSecret,
+        isNot(equals(clientFull.keys.exporterSecret)));
+    final encrypted = await clientKeys.send.seal(<int>[1, 2, 3]);
+    expect(
+        await serverKeys.receive.open(encrypted, counter: 0), <int>[1, 2, 3]);
+  });
+
   group('identity', () {
     test('device id is derived deterministically from the public key',
         () async {

@@ -363,6 +363,18 @@ final class UdpDiscoveryServer {
   Timer? _timer;
   bool _running = false;
   bool _refused = false;
+  final List<String> _boundInterfaces = <String>[];
+  String? _lastError;
+
+  /// Whether the discovery server is currently running and broadcasting.
+  bool get isRunning => _running;
+
+  /// Interface names on which the UDP discovery sockets are currently bound.
+  List<String> get boundInterfaces =>
+      List<String>.unmodifiable(_boundInterfaces);
+
+  /// Most recent error encountered during socket setup or transmission, if any.
+  String? get lastError => _lastError;
 
   Future<void> start() async {
     if (_running) return;
@@ -395,7 +407,10 @@ final class UdpDiscoveryServer {
           ),
         );
         _sockets.add(socket);
+        _boundInterfaces.add(interface.name);
       } on SocketException catch (e) {
+        _lastError =
+            'could not bind announce socket on ${interface.name}: ${e.message}';
         _log.warn(
           'could not bind announce socket on ${interface.name}',
           fields: <String, Object?>{'error': e.message},
@@ -418,7 +433,8 @@ final class UdpDiscoveryServer {
     // Reply directly to the asker rather than to the group. A phone that just
     // opened the app gets an answer in one round trip, and the other twenty
     // devices on the network are not woken up to ignore it.
-    _sendTo(socket, datagram.address, BeaconKind.announce);
+    _sendTo(socket, datagram.address, BeaconKind.announce,
+        targetPort: datagram.port);
   }
 
   /// Sends one announcement on every bound socket.
@@ -435,6 +451,7 @@ final class UdpDiscoveryServer {
     StackTrace stack,
   ) {
     final code = error is SocketException ? error.osError?.errorCode : null;
+    _lastError = error.toString();
     if (code != null && _refusedErrnos.contains(code)) {
       _unavailableSockets.add(socket);
       if (_refused) return;
@@ -456,7 +473,8 @@ final class UdpDiscoveryServer {
   }
 
   void _sendTo(
-      RawDatagramSocket socket, InternetAddress target, BeaconKind kind) {
+      RawDatagramSocket socket, InternetAddress target, BeaconKind kind,
+      {int? targetPort}) {
     if (_unavailableSockets.contains(socket)) return;
 
     try {
@@ -475,7 +493,7 @@ final class UdpDiscoveryServer {
               acceptsNewPairings: beacon.acceptsNewPairings,
               activeSessions: beacon.activeSessions,
             ).encode();
-      socket.send(payload, target, port);
+      socket.send(payload, target, targetPort ?? port);
     } on SocketException catch (e) {
       _noteSocketFailure(socket, e, StackTrace.current);
     }
@@ -504,6 +522,8 @@ final class UdpDiscoveryServer {
     }
     _sockets.clear();
     _unavailableSockets.clear();
+    _boundInterfaces.clear();
+    _lastError = null;
     _refused = false;
   }
 }

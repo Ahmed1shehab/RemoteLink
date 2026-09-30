@@ -20,6 +20,27 @@ enum TransferStatus {
   failed,
 }
 
+/// Stable reason shown by the transfer UI in the current locale.
+enum TransferFailure {
+  timedOut,
+  hashMismatch,
+  noSpace,
+  noSpaceOnPeer,
+  chunkRefused,
+  cancelledByPeer,
+  cancelledByYou,
+  declinedByPeer,
+  declinedByYou,
+  connectionLost,
+  deviceDisconnected,
+  ioError,
+  receiverUnavailable,
+  storageUnavailable,
+  couldNotComplete,
+  couldNotAccept,
+  retryFailed,
+}
+
 /// Progress details for one file in a transfer.
 @immutable
 final class TransferFileProgress {
@@ -83,7 +104,7 @@ final class TransferRecord {
     this.eta,
     required this.createdAt,
     this.completedAt,
-    this.errorMessage,
+    this.failure,
   });
 
   final String transferId;
@@ -98,7 +119,7 @@ final class TransferRecord {
   final Duration? eta;
   final DateTime createdAt;
   final DateTime? completedAt;
-  final String? errorMessage;
+  final TransferFailure? failure;
 
   double get progress =>
       totalBytes > 0 ? (transferredBytes / totalBytes).clamp(0.0, 1.0) : 0.0;
@@ -109,6 +130,8 @@ final class TransferRecord {
       status == TransferStatus.prompting;
 
   bool get canCancel => isActive;
+
+  bool get canRemove => !isActive;
 
   /// Whether this computer can start this transfer again.
   ///
@@ -131,7 +154,8 @@ final class TransferRecord {
     double? speedBytesPerSecond,
     Duration? eta,
     DateTime? completedAt,
-    String? errorMessage,
+    TransferFailure? failure,
+    bool clearFailure = false,
   }) =>
       TransferRecord(
         transferId: transferId,
@@ -146,7 +170,7 @@ final class TransferRecord {
         eta: eta ?? this.eta,
         createdAt: createdAt,
         completedAt: completedAt ?? this.completedAt,
-        errorMessage: errorMessage ?? this.errorMessage,
+        failure: clearFailure ? null : failure ?? this.failure,
       );
 }
 

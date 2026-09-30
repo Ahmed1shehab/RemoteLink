@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:rl_core/rl_core.dart';
 
+import '../../app/l10n.dart';
 import 'file_name_text.dart';
 
 /// Whether [fileName] names something this app can draw.
@@ -109,11 +110,11 @@ class ImagePreviewPage extends StatelessWidget {
           child: Image.file(
             file,
             fit: BoxFit.contain,
-            errorBuilder: (context, error, stackTrace) => const Padding(
-              padding: EdgeInsets.all(24),
+            errorBuilder: (context, error, stackTrace) => Padding(
+              padding: const EdgeInsets.all(24),
               child: Text(
-                'This image could not be opened.',
-                style: TextStyle(color: Colors.white70),
+                context.l10n.imageOpenFailed,
+                style: const TextStyle(color: Colors.white70),
               ),
             ),
           ),

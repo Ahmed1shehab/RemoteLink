@@ -14,9 +14,11 @@ import '../domain/auto_start.dart';
 import '../domain/clipboard_history_store.dart';
 import '../domain/desktop_preferences.dart';
 import '../domain/desktop_service.dart';
+import '../domain/file_launcher.dart';
 import '../domain/file_transfer_store.dart';
 import '../domain/instance_lock.dart';
 import '../domain/transfer_model.dart';
+import 'l10n.dart';
 
 /// Riverpod, not Bloc.
 ///
@@ -67,6 +69,32 @@ final autoStartProvider = Provider<AutoStart>(
     label: kAutoStartLabel,
     executablePath: Platform.resolvedExecutable,
   ),
+);
+
+/// Seam for opening files in their default application and revealing them in the
+/// desktop operating system's file manager.
+///
+/// Abstracted behind an interface and provider so widget tests can exercise
+/// transfer completion and user file-opening actions without spawning child
+/// processes or depending on host window managers.
+abstract interface class FileLauncherService {
+  Future<bool> openFile(String path);
+  Future<bool> revealFile(String path);
+}
+
+final class SystemFileLauncher implements FileLauncherService {
+  const SystemFileLauncher();
+
+  @override
+  Future<bool> openFile(String path) => FileLauncher.openFile(path);
+
+  @override
+  Future<bool> revealFile(String path) => FileLauncher.revealFile(path);
+}
+
+/// The active file launcher implementation used by desktop UI components.
+final fileLauncherProvider = Provider<FileLauncherService>(
+  (ref) => const SystemFileLauncher(),
 );
 
 /// Whether the companion is registered to start when the user logs in.
@@ -309,7 +337,9 @@ Future<void> setClipboardHistoryPersistence({
 final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
   final identity = await ref.watch(identityProvider.future);
   final trustStore = await ref.watch(trustStoreProvider.future);
-  final name = ref.watch(deviceNameProvider);
+  // A name edit must not recreate the server and disconnect every phone.
+  // Settings updates the running service through announceOwnName instead.
+  final name = ref.read(deviceNameProvider);
   final transferStore = await ref.watch(incomingTransferStoreProvider.future);
   final directory = await ref.watch(appDirectoryProvider.future);
   final history = await ref.watch(clipboardHistoryProvider.future);
@@ -337,6 +367,12 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
     );
 
   await service.start();
+  // Settings can change the name while startup is still binding sockets.
+  // In that window the UI has no service value to announce through yet.
+  final currentName = ref.read(deviceNameProvider);
+  if (service.deviceName != currentName) {
+    await service.announceOwnName(currentName);
+  }
   ref.onDispose(service.stop);
   return service;
 });
@@ -348,10 +384,11 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
 /// reach the service when the user invokes them, while passive rendering only
 /// depends on these inert values.
 final desktopStatusProvider = FutureProvider<DesktopStatus>((ref) async {
+  final name = ref.watch(deviceNameProvider);
   final service = await ref.watch(desktopServiceProvider.future);
   return DesktopStatus(
     isRunning: service.isRunning,
-    deviceName: service.deviceName,
+    deviceName: name,
     boundPort: service.boundPort,
     localAddresses: service.localAddresses,
     deviceId: service.identity.id.value,
@@ -527,7 +564,7 @@ final screenViewersProvider = StreamProvider<List<String>>((ref) async* {
 });
 
 final inputAvailabilityProvider =
-    StreamProvider<({bool available, String? reason})>((ref) async* {
+    StreamProvider<({bool available, BackendFailure? reason})>((ref) async* {
   final service = await ref.watch(desktopServiceProvider.future);
 
   yield (
@@ -545,7 +582,7 @@ final inputAvailabilityProvider =
 
 /// Whether the host can capture its screen, and why not when it cannot.
 final screenCaptureAvailabilityProvider =
-    StreamProvider<({bool available, String? reason})>((ref) async* {
+    StreamProvider<({bool available, BackendFailure? reason})>((ref) async* {
   final service = await ref.watch(desktopServiceProvider.future);
 
   yield (
@@ -576,6 +613,27 @@ final memoryLogSinkProvider = Provider<MemoryLogSink>((ref) {
     }
   }
   return MemoryLogSink();
+});
+
+/// File log sink backing persistent on-disk diagnostics.
+final fileLogSinkProvider = Provider<FileLogSink?>((ref) {
+  final sink = Log.sink;
+  if (sink is FileLogSink) return sink;
+  if (sink is MultiLogSink) {
+    for (final s in sink.sinks) {
+      if (s is FileLogSink) return s;
+    }
+  }
+  return null;
+});
+
+/// Crash handler capturing uncaught exceptions alongside recent logs.
+final crashHandlerProvider = Provider<CrashHandler>((ref) {
+  return CrashHandler.instance ??
+      CrashHandler(
+        memorySink: ref.watch(memoryLogSinkProvider),
+        sink: ref.watch(fileLogSinkProvider),
+      );
 });
 
 /// Projects a live connection into what the diagnostics screen renders.
@@ -622,20 +680,25 @@ final desktopDiagnosticsProvider =
         ),
         backends: BackendAvailability(
           input: BackendDiagnostic(
-            name: 'Input injection',
+            name: currentAppLocalizations().backendInputName,
             isAvailable: service.inputAvailable,
-            unavailableReason: service.inputUnavailableReason,
+            failure: service.inputUnavailableReason,
           ),
           clipboard: BackendDiagnostic(
-            name: 'Clipboard sync',
+            name: currentAppLocalizations().backendClipboardName,
             isAvailable: service.clipboardAvailable,
-            unavailableReason: service.clipboardUnavailableReason,
+            failure: service.clipboardUnavailableReason,
           ),
           media: BackendDiagnostic(
-            name: 'Media control',
+            name: currentAppLocalizations().backendMediaName,
             isAvailable: service.mediaAvailable,
-            unavailableReason: service.mediaUnavailableReason,
+            failure: service.mediaUnavailableReason,
           ),
+        ),
+        beacon: DiscoveryBeaconDiagnostic(
+          isAdvertising: service.isDiscoveryAdvertising,
+          interfaces: service.discoveryInterfaces,
+          lastError: service.discoveryLastError,
         ),
         devices: <DeviceDiagnostic>[
           for (final device in service.devices) deviceDiagnosticFor(device),
@@ -663,6 +726,24 @@ final desktopDiagnosticsProvider =
   }
 });
 
+/// Discovery beacon status reported on the desktop diagnostics panel.
+final class DiscoveryBeaconDiagnostic {
+  const DiscoveryBeaconDiagnostic({
+    required this.isAdvertising,
+    required this.interfaces,
+    this.lastError,
+  });
+
+  /// Whether the beacon is actively broadcasting UDP announcements or Bonjour records.
+  final bool isAdvertising;
+
+  /// Interface names on which discovery is currently bound/active.
+  final List<String> interfaces;
+
+  /// Most recent error encountered during discovery socket binding or advertising, if any.
+  final String? lastError;
+}
+
 /// Diagnostic snapshot data structure.
 final class DiagnosticsInfo {
   const DiagnosticsInfo({
@@ -670,12 +751,17 @@ final class DiagnosticsInfo {
     required this.dispatcherCounters,
     required this.backends,
     required this.devices,
+    this.beacon = const DiscoveryBeaconDiagnostic(
+      isAdvertising: false,
+      interfaces: <String>[],
+    ),
   });
 
   final DesktopStatus serviceStatus;
   final DispatcherCounters dispatcherCounters;
   final BackendAvailability backends;
   final List<DeviceDiagnostic> devices;
+  final DiscoveryBeaconDiagnostic beacon;
 }
 
 /// Statistics from [CommandDispatcher].
@@ -697,11 +783,13 @@ final class BackendDiagnostic {
     required this.name,
     required this.isAvailable,
     this.unavailableReason,
+    this.failure,
   });
 
   final String name;
   final bool isAvailable;
   final String? unavailableReason;
+  final BackendFailure? failure;
 }
 
 /// Availability of all platform backends.
@@ -747,5 +835,5 @@ final class DeviceDiagnostic {
   /// every device today — a line of explanation on every tile of the main
   /// screen would be permanent clutter for a feature that does not exist. The
   /// diagnostics screen is where someone goes to ask why something is missing.
-  final String? phoneControlBlocked;
+  final PhoneControlBlock? phoneControlBlocked;
 }

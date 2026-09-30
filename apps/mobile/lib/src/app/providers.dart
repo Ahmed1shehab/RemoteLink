@@ -16,6 +16,7 @@ import 'package:rl_transport/rl_transport.dart';
 
 import '../features/devices/bonjour_discovery.dart';
 import '../features/input/pointer_controller.dart';
+import 'l10n.dart';
 
 /// What this phone can do, advertised during the handshake.
 /// What this phone advertises in its hello.
@@ -56,10 +57,12 @@ const Capabilities kMobileCapabilities = Capabilities(
 
 const String _identityKey = 'remotelink.identity.private';
 const String _trustKey = 'remotelink.trust.peers';
+const String _resumePrefix = 'remotelink.resume.';
 const String _deviceNameKey = 'remotelink.device.name';
 const String _pointerSettingsKey = 'remotelink.settings.pointer';
 const String _clipboardSettingsKey = 'remotelink.settings.clipboard';
 const String _appearanceKey = 'remotelink.settings.appearance';
+const String _hapticsKey = 'remotelink.settings.haptics';
 const String _sensitivityTutorialSeenKey =
     'remotelink.tutorial.sensitivity_seen';
 
@@ -353,6 +356,36 @@ final clientProvider = FutureProvider<RemoteLinkClient>((ref) async {
     identity: identity,
     capabilities: mobileCapabilities(ref.watch(phoneControlBackendProvider)),
     clock: ref.watch(clockProvider),
+    onResumption: (serverKey, value) async {
+      final storage = await ref.read(identityStoreProvider.future);
+      await storage.write(
+        '$_resumePrefix${base64UrlEncode(serverKey)}',
+        jsonEncode(<String, String>{
+          'ticket': base64Encode(value.ticket),
+          'secret': base64Encode(value.secret),
+        }),
+      );
+    },
+    loadResumption: (serverKey) async {
+      final storage = await ref.read(identityStoreProvider.future);
+      final raw =
+          await storage.read('$_resumePrefix${base64UrlEncode(serverKey)}');
+      if (raw == null) return null;
+      try {
+        final value = jsonDecode(raw) as Map<String, dynamic>;
+        final ticket = base64Decode(value['ticket'] as String);
+        final secret = base64Decode(value['secret'] as String);
+        if (ticket.length != 125 || secret.length != 32) return null;
+        return ClientResumption(
+          ticket: Uint8List.fromList(ticket),
+          secret: Uint8List.fromList(secret),
+        );
+      } on FormatException {
+        return null;
+      } on TypeError {
+        return null;
+      }
+    },
   );
   ref.onDispose(client.dispose);
   return client;
@@ -473,6 +506,40 @@ final desktopMessagesProvider = StreamProvider<Message>((ref) async* {
   yield* client.messages;
 });
 
+/// Keeps desktop self-renames even when the device list is off screen.
+/// The app root watches this for the lifetime of the connection supervisor;
+/// a screen-level listener would miss broadcast messages while controlling a
+/// computer and leave the two lists disagreeing until the next rename.
+final desktopRenameProvider = FutureProvider<void>((ref) async {
+  final client = await ref.watch(clientProvider.future);
+  await for (final message in client.messages) {
+    if (message is! DeviceRename) continue;
+    final peerId = client.session?.peerId;
+    if (peerId == null) continue;
+    final store = await ref.read(trustStoreProvider.future);
+    if (!await applyDesktopRename(store, peerId, message.name)) continue;
+    await persistTrustStore(
+        store, await ref.read(identityStoreProvider.future));
+    ref.invalidate(trustedPeersProvider);
+  }
+});
+
+/// Returns whether a validated rename changed a trusted record. Unknown peers
+/// cannot manufacture a new trust entry merely by sending a name.
+@visibleForTesting
+Future<bool> applyDesktopRename(
+  TrustStore store,
+  DeviceId peerId,
+  String rawName,
+) async {
+  final name = sanitiseDeviceName(rawName);
+  if (name == null) return false;
+  final peer = await store.findById(peerId);
+  if (peer == null || peer.name == name) return false;
+  await store.upsert(peer.copyWith(name: name));
+  return true;
+}
+
 /// Live permission tier of the current session, updated on [PermissionGrant] messages.
 final currentPermissionTierProvider =
     StreamProvider<PermissionTier?>((ref) async* {
@@ -515,8 +582,10 @@ final class DeviceNameNotifier extends StateNotifier<String> {
       if (host.isNotEmpty) return host;
     } catch (_) {}
     if (Platform.isIOS) return 'iPhone';
-    if (Platform.isAndroid) return 'Android Phone';
-    return 'Phone';
+    if (Platform.isAndroid) {
+      return currentAppLocalizations().defaultAndroidPhoneName;
+    }
+    return currentAppLocalizations().defaultPhoneName;
   }
 
   Future<void> _load() async {
@@ -536,7 +605,7 @@ final class DeviceNameNotifier extends StateNotifier<String> {
   Future<String?> setDeviceName(String newName) async {
     final sanitised = sanitiseDeviceName(newName);
     if (sanitised == null) {
-      return 'Invalid name: 1–64 characters, no control codes or line breaks.';
+      return currentAppLocalizations().invalidComputerName;
     }
 
     state = sanitised;
@@ -728,6 +797,42 @@ final themeModeProvider = StateNotifierProvider<ThemeModeNotifier, ThemeMode>(
   ThemeModeNotifier.new,
 );
 
+/// Whether haptic feedback is triggered on gestures, keyboard taps, and buttons.
+///
+/// Persisted in [IdentityStore]. Defaults to true so touch interactions feel
+/// responsive out of the box.
+final class HapticsNotifier extends StateNotifier<bool> {
+  HapticsNotifier(this._ref) : super(true) {
+    unawaited(_load());
+  }
+
+  @visibleForTesting
+  HapticsNotifier.forTesting(super.initial) : _ref = null;
+
+  final Ref? _ref;
+
+  Future<void> _load() async {
+    if (_ref == null) return;
+    final storage = await _ref.read(identityStoreProvider.future);
+    final raw = await storage.read(_hapticsKey);
+    if (raw != null) {
+      state = raw != 'false';
+    }
+  }
+
+  Future<void> setEnabled(bool enabled) async {
+    state = enabled;
+    if (_ref != null) {
+      final storage = await _ref.read(identityStoreProvider.future);
+      await storage.write(_hapticsKey, enabled ? 'true' : 'false');
+    }
+  }
+}
+
+final hapticsProvider = StateNotifierProvider<HapticsNotifier, bool>(
+  HapticsNotifier.new,
+);
+
 /// Whether the user has seen or dismissed the pointer sensitivity tutorial.
 class SensitivityTutorialNotifier extends StateNotifier<bool> {
   SensitivityTutorialNotifier(this._ref) : super(false) {
@@ -763,6 +868,16 @@ final sensitivityTutorialSeenProvider =
   SensitivityTutorialNotifier.new,
 );
 
+/// Where mobile identity, trust, logs, and settings are stored.
+Future<Directory> mobileAppDirectory() async {
+  final base = await getApplicationSupportDirectory();
+  final directory = Directory('${base.path}/RemoteLink');
+  if (!directory.existsSync()) {
+    await directory.create(recursive: true);
+  }
+  return directory;
+}
+
 /// In-memory log buffer backing the diagnostics view.
 final memoryLogSinkProvider = Provider<MemoryLogSink>((ref) {
   final sink = Log.sink;
@@ -773,4 +888,25 @@ final memoryLogSinkProvider = Provider<MemoryLogSink>((ref) {
     }
   }
   return MemoryLogSink();
+});
+
+/// File log sink backing persistent on-disk diagnostics.
+final fileLogSinkProvider = Provider<FileLogSink?>((ref) {
+  final sink = Log.sink;
+  if (sink is FileLogSink) return sink;
+  if (sink is MultiLogSink) {
+    for (final s in sink.sinks) {
+      if (s is FileLogSink) return s;
+    }
+  }
+  return null;
+});
+
+/// Crash handler capturing uncaught exceptions alongside recent logs.
+final crashHandlerProvider = Provider<CrashHandler>((ref) {
+  return CrashHandler.instance ??
+      CrashHandler(
+        memorySink: ref.watch(memoryLogSinkProvider),
+        sink: ref.watch(fileLogSinkProvider),
+      );
 });

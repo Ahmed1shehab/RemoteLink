@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,8 +8,10 @@ import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
 import '../app/app_icons.dart';
+import '../app/l10n.dart';
 import '../app/providers.dart';
 import '../app/theme.dart';
+import '../domain/desktop_service.dart';
 
 /// Diagnostics panel displaying service status, dispatcher counters,
 /// backend availability with failure reasons, connected peers, and logs.
@@ -44,16 +47,24 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
   Widget build(BuildContext context) {
     final diagnosticsAsync = ref.watch(desktopDiagnosticsProvider);
     final memorySink = ref.watch(memoryLogSinkProvider);
+    final fileSink = ref.watch(fileLogSinkProvider);
+    final crashHandler = ref.watch(crashHandlerProvider);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Diagnostics'),
+        title: Text(context.l10n.diagnosticsScreenTitle),
         actions: <Widget>[
           diagnosticsAsync.maybeWhen(
             data: (info) => FilledButton.tonalIcon(
-              onPressed: () => _copyFullReport(context, info, memorySink),
+              onPressed: () => _copyFullReport(
+                context,
+                info,
+                memorySink,
+                fileSink,
+                crashHandler.lastReport,
+              ),
               icon: const AppIcon(AppIcons.materialClipboard, size: 18),
-              label: const Text('Copy All'),
+              label: Text(context.l10n.copyAllButton),
             ),
             orElse: () => const SizedBox.shrink(),
           ),
@@ -66,12 +77,18 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Text(
-              'Failed to load diagnostics: $error',
+              context.l10n.failedToLoadDiagnostics('$error'),
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
         ),
-        data: (info) => _buildContent(context, info, memorySink),
+        data: (info) => _buildContent(
+          context,
+          info,
+          memorySink,
+          fileSink,
+          crashHandler,
+        ),
       ),
     );
   }
@@ -80,6 +97,8 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
     BuildContext context,
     DiagnosticsInfo info,
     MemoryLogSink memorySink,
+    FileLogSink? fileSink,
+    CrashHandler crashHandler,
   ) {
     return Align(
       alignment: Alignment.topCenter,
@@ -91,18 +110,20 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Text(
-                'System health',
+                context.l10n.systemHealthTitle,
                 style: Theme.of(context).textTheme.headlineMedium,
               ),
               const SizedBox(height: 4),
               Text(
-                'Network, permissions, connected devices, and live logs.',
+                context.l10n.systemHealthSubtitle,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
               ),
               const SizedBox(height: 24),
               _ServiceStatusCard(status: info.serviceStatus),
+              const SizedBox(height: 16),
+              _DiscoveryBeaconCard(beacon: info.beacon),
               const SizedBox(height: 16),
               _DispatcherCountersCard(counters: info.dispatcherCounters),
               const SizedBox(height: 16),
@@ -115,7 +136,13 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
                 selectedLevel: _selectedLevel,
                 onLevelSelected: (level) =>
                     setState(() => _selectedLevel = level),
-                onCopyLogs: () => _copyLogs(context, memorySink.records),
+                onCopyLogs: () => _copyLogs(
+                  context,
+                  memorySink.records,
+                  fileSink,
+                  crashHandler.lastReport,
+                  info,
+                ),
               ),
             ],
           ),
@@ -124,10 +151,31 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
     );
   }
 
+  LogRedactor _createRedactor(DiagnosticsInfo? info) {
+    final home = Platform.environment['HOME'] ??
+        Platform.environment['USERPROFILE'] ??
+        '';
+    final peerNames = <String>{
+      if (info != null) ...[
+        if (info.serviceStatus.deviceName.isNotEmpty)
+          info.serviceStatus.deviceName,
+        for (final d in info.devices)
+          if (d.name.isNotEmpty) d.name,
+      ],
+    };
+
+    return LogRedactor(
+      homeDirectories: [if (home.isNotEmpty) home],
+      knownPeerNames: peerNames,
+    );
+  }
+
   void _copyFullReport(
     BuildContext context,
     DiagnosticsInfo info,
     MemoryLogSink memorySink,
+    FileLogSink? fileSink,
+    CrashReport? lastCrashReport,
   ) {
     final buffer = StringBuffer();
     final now = DateTime.now().toUtc().toIso8601String();
@@ -149,6 +197,22 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
       for (final addr in info.serviceStatus.localAddresses) {
         buffer.writeln('  - $addr:${info.serviceStatus.boundPort}');
       }
+    }
+    buffer.writeln();
+
+    buffer.writeln('--- Discovery Beacon ---');
+    buffer.writeln(
+        'Advertising: ${info.beacon.isAdvertising ? "Active" : "Off"}');
+    buffer.writeln('Interfaces:');
+    if (info.beacon.interfaces.isEmpty) {
+      buffer.writeln('  (none detected)');
+    } else {
+      for (final iface in info.beacon.interfaces) {
+        buffer.writeln('  - $iface');
+      }
+    }
+    if (info.beacon.lastError != null) {
+      buffer.writeln('Last Error: ${info.beacon.lastError}');
     }
     buffer.writeln();
 
@@ -182,43 +246,81 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
     }
     buffer.writeln();
 
-    buffer
-        .writeln('--- System Logs (${memorySink.records.length} records) ---');
-    for (final record in memorySink.records) {
-      buffer.writeln(record.toString());
+    if (lastCrashReport != null) {
+      buffer.writeln('--- Last Crash Report ---');
+      buffer.writeln(lastCrashReport.format());
+      buffer.writeln();
     }
 
-    Clipboard.setData(ClipboardData(text: buffer.toString()));
+    if (fileSink != null) {
+      buffer.writeln('--- System Logs ---');
+      final fileLogs = fileSink.readAllLogs();
+      if (fileLogs.isNotEmpty) {
+        buffer.write(fileLogs);
+        if (!fileLogs.endsWith('\n')) {
+          buffer.writeln();
+        }
+      }
+    } else {
+      buffer.writeln(
+          '--- System Logs (${memorySink.records.length} records) ---');
+      for (final record in memorySink.records) {
+        buffer.writeln(record.toString());
+      }
+    }
+
+    final redactor = _createRedactor(info);
+    final text = redactor.redact(buffer.toString());
+
+    Clipboard.setData(ClipboardData(text: text));
     final messenger = ScaffoldMessenger.of(context);
     messenger.clearSnackBars();
     messenger.showSnackBar(
-      const SnackBar(content: Text('Full diagnostics copied to clipboard')),
+      SnackBar(content: Text(context.l10n.fullDiagnosticsCopied)),
     );
   }
 
   void _writeBackendReport(StringBuffer buffer, BackendDiagnostic backend) {
     buffer.write(
         '${backend.name}: ${backend.isAvailable ? "Available" : "Unavailable"}');
-    if (!backend.isAvailable && backend.unavailableReason != null) {
-      buffer.write(' (Reason: ${backend.unavailableReason})');
+    if (!backend.isAvailable &&
+        (backend.unavailableReason != null || backend.failure != null)) {
+      buffer.write(
+          ' (Reason: ${backend.unavailableReason ?? backend.failure!.name})');
     }
     buffer.writeln();
   }
 
-  void _copyLogs(BuildContext context, List<LogRecord> records) {
-    final filtered = _selectedLevel == null
-        ? records
-        : records
-            .where((r) => r.level.severity >= _selectedLevel!.severity)
-            .toList();
+  void _copyLogs(
+    BuildContext context,
+    List<LogRecord> records,
+    FileLogSink? fileSink,
+    CrashReport? lastCrashReport, [
+    DiagnosticsInfo? info,
+  ]) {
+    final redactor = _createRedactor(info);
+    final text = buildLogExport(
+      fileSink: fileSink,
+      memoryRecords: records,
+      lastCrashReport: lastCrashReport,
+      redactor: redactor,
+      filterLevel: _selectedLevel,
+    );
 
-    final text = filtered.map((r) => r.toString()).join('\n');
     Clipboard.setData(ClipboardData(text: text));
     final messenger = ScaffoldMessenger.of(context);
     messenger.clearSnackBars();
+    final count = records
+        .where((r) =>
+            _selectedLevel == null ||
+            r.level.severity >= _selectedLevel!.severity)
+        .length;
+    final snackBarMessage = fileSink != null
+        ? context.l10n.logsCopied
+        : context.l10n.copiedLogRecords(count);
     messenger.showSnackBar(
       SnackBar(
-        content: Text('Copied ${filtered.length} log records to clipboard'),
+        content: Text(snackBarMessage),
       ),
     );
   }
@@ -249,7 +351,7 @@ class _ServiceStatusCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  'Service & Network',
+                  context.l10n.serviceNetworkTitle,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -278,7 +380,9 @@ class _ServiceStatusCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        status.isRunning ? 'Running' : 'Stopped',
+                        status.isRunning
+                            ? context.l10n.statusRunning
+                            : context.l10n.statusStopped,
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: status.isRunning
                               ? colorScheme.onPrimaryContainer
@@ -292,14 +396,20 @@ class _ServiceStatusCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            _infoRow(context, 'Device Name', status.deviceName),
+            _infoRow(context, context.l10n.deviceNameLabel, status.deviceName),
             const SizedBox(height: 6),
-            _infoRow(context, 'Bound Port', 'Port ${status.boundPort}'),
+            _infoRow(context, context.l10n.boundPortLabel,
+                context.l10n.boundPortValue(status.boundPort)),
             const SizedBox(height: 6),
-            _infoRow(context, 'Device ID', status.deviceId, isMonospace: true),
+            _infoRow(
+              context,
+              context.l10n.deviceIdLabel,
+              status.deviceId,
+              isMonospace: true,
+            ),
             const SizedBox(height: 12),
             Text(
-              'LAN Addresses for Phone Connection:',
+              context.l10n.lanAddressesTitle,
               style: theme.textTheme.labelMedium?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
@@ -307,7 +417,7 @@ class _ServiceStatusCard extends StatelessWidget {
             const SizedBox(height: 6),
             if (status.localAddresses.isEmpty)
               Text(
-                'No LAN addresses detected',
+                context.l10n.noLanAddresses,
                 style: theme.textTheme.bodySmall?.copyWith(
                   fontStyle: FontStyle.italic,
                 ),
@@ -330,11 +440,14 @@ class _ServiceStatusCard extends StatelessWidget {
                           color: colorScheme.outlineVariant,
                         ),
                       ),
-                      child: SelectableText(
-                        '$address:${status.boundPort}',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.w600,
+                      child: Directionality(
+                        textDirection: TextDirection.ltr,
+                        child: SelectableText(
+                          '$address:${status.boundPort}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ),
@@ -358,6 +471,222 @@ class _ServiceStatusCard extends StatelessWidget {
       children: <Widget>[
         SizedBox(
           width: 120,
+          child: Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Directionality(
+            textDirection:
+                isMonospace ? TextDirection.ltr : Directionality.of(context),
+            child: SelectableText(
+              value,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontFamily: isMonospace ? 'monospace' : null,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Displays the current state of discovery beacons (UDP multicast / Bonjour
+/// advertising), listing active network interfaces and any error encountered
+/// during advertisement socket binding.
+class _DiscoveryBeaconCard extends StatelessWidget {
+  const _DiscoveryBeaconCard({required this.beacon});
+
+  final DiscoveryBeaconDiagnostic beacon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                AppIcon(
+                  AppIcons.airdrop,
+                  color: colorScheme.primary,
+                  size: 24,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    context.l10n.discoveryBeaconTitle,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: beacon.isAdvertising
+                        ? colorScheme.primaryContainer
+                        : colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      AppIcon(
+                        beacon.isAdvertising
+                            ? AppIcons.materialLink
+                            : AppIcons.materialClose,
+                        size: 14,
+                        color: beacon.isAdvertising
+                            ? colorScheme.onPrimaryContainer
+                            : colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        beacon.isAdvertising
+                            ? context.l10n.advertisingLabel
+                            : context.l10n.offLabel,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: beacon.isAdvertising
+                              ? colorScheme.onPrimaryContainer
+                              : colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _infoRow(
+              context,
+              context.l10n.advertisingLabel,
+              beacon.isAdvertising
+                  ? context.l10n.activeLabel
+                  : context.l10n.offLabel,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              context.l10n.interfacesLabel,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 6),
+            if (beacon.interfaces.isEmpty)
+              Text(
+                context.l10n.noInterfacesDetected,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontStyle: FontStyle.italic,
+                ),
+              )
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: <Widget>[
+                  for (final iface in beacon.interfaces)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: colorScheme.outlineVariant,
+                        ),
+                      ),
+                      child: Directionality(
+                        textDirection: TextDirection.ltr,
+                        child: SelectableText(
+                          iface,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            if (beacon.lastError != null) ...<Widget>[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: colorScheme.errorContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    AppIcon(
+                      AppIcons.materialError,
+                      color: colorScheme.onErrorContainer,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            context.l10n.lastErrorLabel,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: colorScheme.onErrorContainer,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          SelectableText(
+                            beacon.lastError!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onErrorContainer,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _infoRow(
+    BuildContext context,
+    String label,
+    String value, {
+    bool isMonospace = false,
+  }) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SizedBox(
+          width: 140,
           child: Text(
             label,
             style: theme.textTheme.bodySmall?.copyWith(
@@ -404,7 +733,7 @@ class _DispatcherCountersCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  'Command Dispatcher',
+                  context.l10n.dispatcherCountersTitle,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -417,7 +746,7 @@ class _DispatcherCountersCard extends StatelessWidget {
                 Expanded(
                   child: _counterTile(
                     context,
-                    label: 'Applied',
+                    label: context.l10n.appliedLabel,
                     count: counters.applied,
                     color: colorScheme.primary,
                     icon: AppIcons.materialSettings,
@@ -427,7 +756,7 @@ class _DispatcherCountersCard extends StatelessWidget {
                 Expanded(
                   child: _counterTile(
                     context,
-                    label: 'Denied',
+                    label: context.l10n.deniedLabel,
                     count: counters.denied,
                     color: colorScheme.error,
                     icon: AppIcons.materialSettings,
@@ -437,7 +766,7 @@ class _DispatcherCountersCard extends StatelessWidget {
                 Expanded(
                   child: _counterTile(
                     context,
-                    label: 'Unsupported',
+                    label: context.l10n.unsupportedLabel,
                     count: counters.unsupported,
                     color: colorScheme.outline,
                     icon: AppIcons.materialSettings,
@@ -520,7 +849,7 @@ class _BackendsCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  'Backend Availability',
+                  context.l10n.backendsTitle,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -585,7 +914,9 @@ class _BackendsCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    backend.isAvailable ? 'Available' : 'Unavailable',
+                    backend.isAvailable
+                        ? context.l10n.availableLabel
+                        : context.l10n.unavailableLabel,
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: backend.isAvailable
                           ? colorScheme.onPrimaryContainer
@@ -599,7 +930,8 @@ class _BackendsCard extends StatelessWidget {
           ],
         ),
         if (!backend.isAvailable &&
-            backend.unavailableReason != null) ...<Widget>[
+            (backend.unavailableReason != null ||
+                backend.failure != null)) ...<Widget>[
           const SizedBox(height: 8),
           Container(
             width: double.infinity,
@@ -622,7 +954,11 @@ class _BackendsCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: SelectableText(
-                    backend.unavailableReason!,
+                    backend.failure == null
+                        ? describeNativeBackendReason(
+                            context.l10n, backend.unavailableReason!)
+                        : describeBackendFailure(
+                            context.l10n, backend.failure!),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: colorScheme.onErrorContainer,
                     ),
@@ -662,7 +998,7 @@ class _ConnectedDevicesCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  'Connected Devices (${devices.length})',
+                  context.l10n.connectedDevicesTitle(devices.length),
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -674,7 +1010,7 @@ class _ConnectedDevicesCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(
-                  'No devices connected.',
+                  context.l10n.noDevicesConnectedDiagnostics,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                     fontStyle: FontStyle.italic,
@@ -721,8 +1057,8 @@ class _ConnectedDevicesCard extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                '${device.address} · ${_tierLabel(device.tier)} · '
-                '${device.roundTripMillis.toStringAsFixed(1)} ms · '
+                '${device.address} · ${_tierLabel(context, device.tier)} · '
+                '${context.l10n.deviceLatency(device.roundTripMillis.toStringAsFixed(1))} · '
                 '${device.qualityBars}/4 bars',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: colorScheme.onSurfaceVariant,
@@ -745,7 +1081,12 @@ class _ConnectedDevicesCard extends StatelessWidget {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        device.phoneControlBlocked!,
+                        switch (device.phoneControlBlocked!) {
+                          PhoneControlBlock.capabilityMissing =>
+                            context.l10n.phoneControlCapabilityMissing,
+                          PhoneControlBlock.readOnly =>
+                            context.l10n.phoneControlReadOnly,
+                        },
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: colorScheme.onSurfaceVariant,
                         ),
@@ -761,11 +1102,12 @@ class _ConnectedDevicesCard extends StatelessWidget {
     );
   }
 
-  static String _tierLabel(PermissionTier tier) => switch (tier) {
-        PermissionTier.readOnly => 'View only',
-        PermissionTier.standard => 'Control',
-        PermissionTier.extended => 'Control + apps',
-        PermissionTier.admin => 'Full access',
+  static String _tierLabel(BuildContext context, PermissionTier tier) =>
+      switch (tier) {
+        PermissionTier.readOnly => context.l10n.tierViewOnly,
+        PermissionTier.standard => context.l10n.tierInteractive,
+        PermissionTier.extended => context.l10n.tierInteractive,
+        PermissionTier.admin => context.l10n.tierElevated,
       };
 }
 
@@ -808,7 +1150,7 @@ class _LogViewerCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  'System Logs',
+                  context.l10n.systemLogsTitle,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -817,7 +1159,7 @@ class _LogViewerCard extends StatelessWidget {
                 OutlinedButton.icon(
                   onPressed: onCopyLogs,
                   icon: const AppIcon(AppIcons.materialClipboard, size: 16),
-                  label: const Text('Copy Logs'),
+                  label: Text(context.l10n.copyLogsButton),
                 ),
               ],
             ),
@@ -825,7 +1167,7 @@ class _LogViewerCard extends StatelessWidget {
             Row(
               children: <Widget>[
                 Text(
-                  'Filter Level:',
+                  context.l10n.filterLevel,
                   style: theme.textTheme.labelMedium?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -835,28 +1177,28 @@ class _LogViewerCard extends StatelessWidget {
                   value: selectedLevel,
                   underline: const SizedBox.shrink(),
                   onChanged: onLevelSelected,
-                  items: const <DropdownMenuItem<LogLevel?>>[
+                  items: <DropdownMenuItem<LogLevel?>>[
                     DropdownMenuItem<LogLevel?>(
                       value: null,
-                      child: Text('All Levels'),
+                      child: Text(context.l10n.allLevelsLabel),
                     ),
-                    DropdownMenuItem<LogLevel?>(
+                    const DropdownMenuItem<LogLevel?>(
                       value: LogLevel.trace,
                       child: Text('Trace (≥ trace)'),
                     ),
-                    DropdownMenuItem<LogLevel?>(
+                    const DropdownMenuItem<LogLevel?>(
                       value: LogLevel.debug,
                       child: Text('Debug (≥ debug)'),
                     ),
-                    DropdownMenuItem<LogLevel?>(
+                    const DropdownMenuItem<LogLevel?>(
                       value: LogLevel.info,
                       child: Text('Info (≥ info)'),
                     ),
-                    DropdownMenuItem<LogLevel?>(
+                    const DropdownMenuItem<LogLevel?>(
                       value: LogLevel.warn,
                       child: Text('Warn (≥ warn)'),
                     ),
-                    DropdownMenuItem<LogLevel?>(
+                    const DropdownMenuItem<LogLevel?>(
                       value: LogLevel.error,
                       child: Text('Error (≥ error)'),
                     ),
@@ -864,7 +1206,10 @@ class _LogViewerCard extends StatelessWidget {
                 ),
                 const Spacer(),
                 Text(
-                  'Showing ${filteredRecords.length} of ${records.length}',
+                  context.l10n.showingLogsCount(
+                    filteredRecords.length,
+                    records.length,
+                  ),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -886,7 +1231,7 @@ class _LogViewerCard extends StatelessWidget {
               child: filteredRecords.isEmpty
                   ? Center(
                       child: Text(
-                        'No logs recorded yet',
+                        context.l10n.noLogsRecorded,
                         style: theme.textTheme.bodySmall?.copyWith(
                           fontStyle: FontStyle.italic,
                         ),

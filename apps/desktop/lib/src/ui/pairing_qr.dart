@@ -4,6 +4,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 
 import '../app/app_icons.dart';
+import '../app/l10n.dart';
 
 /// Shows the code a phone scans to pair with this computer.
 ///
@@ -53,7 +54,7 @@ class _PairingQrDialogState extends State<PairingQrDialog> {
     final textTheme = Theme.of(context).textTheme;
 
     return AlertDialog(
-      title: const Text('Pair a phone'),
+      title: Text(context.l10n.pairPhoneTitle),
       // Scrollable because the code has a floor it cannot go below and still
       // be readable across a desk, and a short window — a laptop at 1280×800
       // with the dialog's own insets — leaves less room than that plus the
@@ -66,7 +67,7 @@ class _PairingQrDialogState extends State<PairingQrDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                'Open Remote Link on your phone and tap “Scan code”.',
+                context.l10n.pairPhoneInstruction,
                 style: textTheme.bodyMedium,
               ),
               const SizedBox(height: 20),
@@ -74,23 +75,25 @@ class _PairingQrDialogState extends State<PairingQrDialog> {
               const SizedBox(height: 20),
               if (widget.addresses.length > 1) ...<Widget>[
                 Text(
-                  'This computer has more than one address. If the phone cannot '
-                  'reach it, try another.',
+                  context.l10n.pairPhoneMultipleAddresses,
                   style: textTheme.bodySmall,
                 ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
                   initialValue: _host,
-                  decoration: const InputDecoration(
-                    labelText: 'Address',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: context.l10n.addressLabel,
+                    border: const OutlineInputBorder(),
                     isDense: true,
                   ),
                   items: <DropdownMenuItem<String>>[
                     for (final address in widget.addresses)
                       DropdownMenuItem<String>(
                         value: address,
-                        child: Text(address),
+                        child: Directionality(
+                          textDirection: TextDirection.ltr,
+                          child: Text(address),
+                        ),
                       ),
                   ],
                   onChanged: (value) {
@@ -102,16 +105,19 @@ class _PairingQrDialogState extends State<PairingQrDialog> {
               Row(
                 children: <Widget>[
                   Expanded(
-                    child: SelectableText(
-                      '$_host:${payload.port}',
-                      style: textTheme.bodySmall?.copyWith(
-                        fontFamily: 'monospace',
+                    child: Directionality(
+                      textDirection: TextDirection.ltr,
+                      child: SelectableText(
+                        '$_host:${payload.port}',
+                        style: textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace',
+                        ),
                       ),
                     ),
                   ),
                   IconButton(
                     icon: const AppIcon(AppIcons.materialClipboard, size: 18),
-                    tooltip: 'Copy address',
+                    tooltip: context.l10n.copyAddress,
                     onPressed: () => unawaitedCopy('$_host:${payload.port}'),
                   ),
                 ],
@@ -123,7 +129,7 @@ class _PairingQrDialogState extends State<PairingQrDialog> {
       actions: <Widget>[
         FilledButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Done'),
+          child: Text(context.l10n.doneButton),
         ),
       ],
     );

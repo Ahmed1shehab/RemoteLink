@@ -1,0 +1,834 @@
+{
+  "@@locale": "en",
+  "appTitle": "Remote Link",
+  "@appTitle": {
+    "description": "The application title"
+  },
+  "desktopSubtitle": "Desktop",
+  "connectedStatusLabel": "{count, plural, =0{No devices connected} =1{1 device connected} other{{count} devices connected}}",
+  "@connectedStatusLabel": {
+    "description": "Connected device count label in tray or status",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "allowNewDevicesToPair": "Allow new devices to pair",
+  "openProduct": "Open {productName}",
+  "@openProduct": {
+    "placeholders": {
+      "productName": {
+        "type": "String"
+      }
+    }
+  },
+  "quitProduct": "Quit {productName}",
+  "@quitProduct": {
+    "placeholders": {
+      "productName": {
+        "type": "String"
+      }
+    }
+  },
+  "startupError": "Failed to start {productName}: {error}",
+  "@startupError": {
+    "placeholders": {
+      "productName": {
+        "type": "String"
+      },
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "retryButton": "Retry",
+  "doneButton": "Done",
+  "cancelButton": "Cancel",
+  "saveButton": "Save",
+  "copyButton": "Copy",
+  "copied": "Copied.",
+  "clearAll": "Clear all",
+  "clear": "Clear",
+  "navOverview": "Overview",
+  "navDevices": "Devices",
+  "navSend": "Send",
+  "navTransfers": "Transfers",
+  "navClipboard": "Clipboard",
+  "sidebarReady": "Ready",
+  "sidebarRunning": "Running",
+  "sidebarStopped": "Stopped",
+  "tooltipDiagnostics": "Diagnostics",
+  "tooltipSettings": "Settings",
+  "workspaceTitle": "Workspace",
+  "workspaceSubtitle": "Manage connections, permissions, and transfers from one place.",
+  "overviewTitle": "Overview",
+  "statConnected": "Connected",
+  "statConnectedDevices": "{count, plural, =0{0 connected} =1{1 connected} other{{count} connected}}",
+  "@statConnectedDevices": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "statTransfers": "Transfers",
+  "statRecentTransfers": "{count, plural, =0{0 recent} =1{1 recent} other{{count} recent}}",
+  "@statRecentTransfers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "statClipboardSync": "Clipboard Sync",
+  "clipboardActive": "Active",
+  "clipboardPaused": "Paused",
+  "screenSharingActive": "Sharing screen",
+  "screenSharingDesc": "Screen streaming is currently active with {name}.",
+  "@screenSharingDesc": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "bannerInputBlockedTitle": "Input simulation blocked",
+  "bannerInputBlockedDesc": "Accessibility permissions are required on macOS to simulate mouse and keyboard input.",
+  "bannerOpenSystemSettings": "Open System Settings",
+  "devicesTitle": "Devices",
+  "devicesSubtitle": "Phones and tablets that can reach this computer",
+  "pairPhoneButton": "Pair a phone",
+  "disconnectButton": "Disconnect",
+  "noDevicesConnectedTitle": "No devices connected",
+  "noDevicesConnectedMessage": "Tap “Pair a phone” to connect your phone or tablet.",
+  "tierViewOnly": "View-only",
+  "tierInteractive": "Interactive",
+  "tierElevated": "Elevated",
+  "rememberDevice": "Remember this device",
+  "deviceAwaitingPairing": "Awaiting pairing confirmation",
+  "deviceStreamingScreen": "Streaming screen",
+  "deviceLatency": "{latency} ms",
+  "@deviceLatency": {
+    "placeholders": {
+      "latency": {
+        "type": "String"
+      }
+    }
+  },
+  "sendCardTitle": "Send files to phone",
+  "sendCardSubtitle": "Drag and drop files here, or click to browse",
+  "browseFilesButton": "Browse files",
+  "transfersTitle": "Transfers",
+  "transfersSubtitle": "Files sent and received with connected devices",
+  "noTransfersTitle": "No transfers yet",
+  "noTransfersMessage": "Files sent to or received from connected devices will appear here.",
+  "openFolder": "Open folder",
+  "clearTransferHistory": "Clear history",
+  "transferWaiting": "Waiting for confirmation",
+  "transferTransferring": "Transferring",
+  "transferCompleted": "Completed",
+  "transferDeclined": "Declined",
+  "transferCancelled": "Cancelled",
+  "transferFailed": "Failed",
+  "transferFilesCount": "{count, plural, =1{1 file} other{{count} files}}",
+  "@transferFilesCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "transferSpeed": "{speed}/s",
+  "@transferSpeed": {
+    "placeholders": {
+      "speed": {
+        "type": "String"
+      }
+    }
+  },
+  "transferEta": "ETA: {eta}",
+  "@transferEta": {
+    "placeholders": {
+      "eta": {
+        "type": "String"
+      }
+    }
+  },
+  "missingFilesError": "{count, plural, =1{1 file is no longer available. Choose it again.} other{{count} files are no longer available. Choose them again.}}",
+  "@missingFilesError": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "clipboardHistoryTitle": "Clipboard history",
+  "clipboardHistorySubtitle": "Quickly reuse recent content from this computer",
+  "clipboardCleared": "Clipboard history cleared.",
+  "persistenceEncrypted": "Kept on this computer, encrypted. Content marked confidential by a password manager is never recorded.",
+  "persistenceMemoryOnly": "Kept in memory only — this list is gone when Remote Link quits. Nothing is written to disk.",
+  "persistenceEnabledSnackBar": "Clipboard history will be kept, encrypted, on this computer.",
+  "persistenceDisabledSnackBar": "Stored clipboard history deleted. Keeping it in memory only.",
+  "nothingCopiedYetTitle": "Nothing copied yet",
+  "nothingCopiedYetMessage": "{count, plural, =1{The last item you copy will appear here.} other{The last {count} items you copy will appear here.}}",
+  "@nothingCopiedYetMessage": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "unpin": "Unpin",
+  "pin": "Pin",
+  "removeFromHistory": "Remove from history",
+  "clipboardUnavailable": "The clipboard is unavailable.",
+  "pinLimitReached": "{count, plural, =1{You can pin up to 1 item. Unpin one first.} other{You can pin up to {count} items. Unpin one first.}}",
+  "@pinLimitReached": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "timeJustNow": "Just now",
+  "timeMinutesAgo": "{count, plural, =1{1 min ago} other{{count} min ago}}",
+  "@timeMinutesAgo": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "timeHoursAgo": "{count, plural, =1{1 h ago} other{{count} h ago}}",
+  "@timeHoursAgo": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "timeDaysAgo": "{count, plural, =1{1 d ago} other{{count} d ago}}",
+  "@timeDaysAgo": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "pairingRequestTitle": "Device Pairing Request",
+  "pairingRequestMessage": "“{name}” wants to pair with this computer. Verify that the security code matches:",
+  "@pairingRequestMessage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "incomingConnectionTitle": "Incoming Connection",
+  "incomingConnectionMessage": "“{name}” is asking to connect. Allow this connection?",
+  "@incomingConnectionMessage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "rememberDeviceTitle": "Remember Device",
+  "rememberDeviceMessage": "Do you want to remember “{name}” so it connects automatically in the future?",
+  "@rememberDeviceMessage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "rememberAlways": "Always allow",
+  "rememberThisSession": "This session only",
+  "rememberDecline": "Don't allow",
+  "incomingTransferTitle": "Incoming File Transfer",
+  "incomingTransferMessage": "“{name}” wants to send {count, plural, =1{1 file ({size})} other{{count} files ({size})}}:",
+  "@incomingTransferMessage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "acceptButton": "Accept",
+  "declineButton": "Decline",
+  "permissionRequestTitle": "Permission Request",
+  "permissionRequestMessage": "“{name}” is requesting {tier} permission. Allow this tier?",
+  "@permissionRequestMessage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "tier": {
+        "type": "String"
+      }
+    }
+  },
+  "securityCodeSpoken": "Security code: {digits}",
+  "@securityCodeSpoken": {
+    "placeholders": {
+      "digits": {
+        "type": "String"
+      }
+    }
+  },
+  "pairPhoneTitle": "Pair a phone",
+  "pairPhoneInstruction": "Open Remote Link on your phone and tap “Scan code”.",
+  "pairPhoneMultipleAddresses": "This computer has more than one address. If the phone cannot reach it, try another.",
+  "addressLabel": "Address",
+  "copyAddress": "Copy address",
+  "settingsTitle": "Settings",
+  "versionLabel": "Version {version}",
+  "@versionLabel": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "startupSectionTitle": "Startup",
+  "startAtLoginTitle": "Start when I log in",
+  "startAtLoginSubtitleOn": "Starts hidden, so your phone can reach this computer without anyone opening a window first.",
+  "startAtLoginSubtitleOff": "Your phone will not find this computer until you open Remote Link yourself.",
+  "connectionsSectionTitle": "Connections",
+  "askBeforeConnectingTitle": "Ask before a paired device connects",
+  "askBeforeConnectingSubtitleOn": "A device you have paired with waits until you allow it. Asked once per device each time Remote Link starts, so a dropped Wi-Fi connection does not ask again.",
+  "askBeforeConnectingSubtitleOff": "Any device you have paired with connects straight away, whoever is holding it.",
+  "windowSectionTitle": "Closing the window",
+  "closingWindowKeepsServiceTitle": "Closing this window keeps the service running",
+  "closingWindowKeepsServiceSubtitle": "Your paired phones stay connected, and transfers in progress finish. Reopen or quit Remote Link from its icon in {location}.",
+  "@closingWindowKeepsServiceSubtitle": {
+    "placeholders": {
+      "location": {
+        "type": "String"
+      }
+    }
+  },
+  "menuBarLocationMac": "the menu bar at the top of the screen",
+  "notificationAreaLocationOther": "the notification area beside the clock",
+  "savingSectionTitle": "Saving received files",
+  "folderLabel": "Folder",
+  "saveFolderChecking": "Checking…",
+  "saveFolderError": "Could not work out where to save files.",
+  "useDownloadsButton": "Use Downloads",
+  "changeFolderButton": "Change…",
+  "saveFilesHerePrompt": "Save files here",
+  "thisComputerSectionTitle": "This computer",
+  "computerNameLabel": "Name",
+  "computerNameSubtitle": "{name} — this is what your phone shows in its list.",
+  "@computerNameSubtitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "renameButton": "Rename",
+  "renameComputerDialogTitle": "Rename this computer",
+  "supportSectionTitle": "Support",
+  "diagnosticsTitle": "Diagnostics",
+  "diagnosticsSubtitle": "Connection counters, permissions, and a log you can copy into a bug report.",
+  "diagnosticsScreenTitle": "Diagnostics",
+  "systemHealthTitle": "System health",
+  "systemHealthSubtitle": "Network, permissions, connected devices, and live logs.",
+  "copyAllButton": "Copy All",
+  "fullDiagnosticsCopied": "Full diagnostics copied to clipboard",
+  "logsCopied": "Logs copied to clipboard",
+  "copiedLogRecords": "{count, plural, =0{Copied 0 log records to clipboard} =1{Copied 1 log record to clipboard} other{Copied {count} log records to clipboard}}",
+  "@copiedLogRecords": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "serviceNetworkTitle": "Service & Network",
+  "statusRunning": "Running",
+  "statusStopped": "Stopped",
+  "deviceNameLabel": "Device Name",
+  "boundPortLabel": "Bound Port",
+  "boundPortValue": "Port {port}",
+  "@boundPortValue": {
+    "placeholders": {
+      "port": {
+        "type": "int"
+      }
+    }
+  },
+  "deviceIdLabel": "Device ID",
+  "lanAddressesTitle": "LAN Addresses for Phone Connection:",
+  "noLanAddresses": "No LAN addresses detected",
+  "discoveryBeaconTitle": "Discovery Beacon",
+  "advertisingLabel": "Advertising",
+  "activeLabel": "Active",
+  "offLabel": "Off",
+  "interfacesLabel": "Advertising Interface(s):",
+  "noInterfacesDetected": "No interfaces bound",
+  "lastErrorLabel": "Last Discovery Error",
+  "dispatcherCountersTitle": "Command Dispatcher",
+  "appliedLabel": "Applied",
+  "deniedLabel": "Denied",
+  "unsupportedLabel": "Unsupported",
+  "backendsTitle": "Backend Availability",
+  "availableLabel": "Available",
+  "unavailableLabel": "Unavailable",
+  "reasonLabel": "Reason: {reason}",
+  "@reasonLabel": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "connectedDevicesTitle": "{count, plural, =0{Connected Devices (0)} =1{Connected Devices (1)} other{Connected Devices ({count})}}",
+  "@connectedDevicesTitle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "noDevicesConnectedDiagnostics": "No devices connected",
+  "systemLogsTitle": "System Logs",
+  "allLevelsLabel": "All Levels",
+  "copyLogsButton": "Copy Logs",
+  "failedToLoadDiagnostics": "Failed to load diagnostics: {error}",
+  "@failedToLoadDiagnostics": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "showingLogsCount": "Showing {filtered} of {total}",
+  "@showingLogsCount": {
+    "placeholders": {
+      "filtered": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "noLogsRecorded": "No logs recorded yet",
+  "serviceOnline": "Service online",
+  "serviceOffline": "Service offline",
+  "navActivity": "Activity",
+  "alreadyRunningTitle": "{productName} is already running",
+  "@alreadyRunningTitle": {
+    "placeholders": {
+      "productName": {
+        "type": "String"
+      }
+    }
+  },
+  "alreadyRunningSubtitle": "Your phone can already reach this computer. Open the copy that is running from its icon in {where} — you don't need this second one.",
+  "@alreadyRunningSubtitle": {
+    "placeholders": {
+      "where": {
+        "type": "String"
+      }
+    }
+  },
+  "closeThisWindow": "Close this window",
+  "couldNotStartTitle": "{productName} could not start",
+  "@couldNotStartTitle": {
+    "placeholders": {
+      "productName": {
+        "type": "String"
+      }
+    }
+  },
+  "screenWatchingBanner": "{count, plural, =1{{name} is watching this screen} other{{count} devices are watching this screen: {names}}}",
+  "@screenWatchingBanner": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "name": {
+        "type": "String"
+      },
+      "names": {
+        "type": "String"
+      }
+    }
+  },
+  "stopSharing": "Stop sharing",
+  "screenRecordingPermissionReason": "Remote Link needs Screen Recording permission before it can share this screen.",
+  "openSettings": "Open Settings",
+  "statusDiscoverable": "Discoverable on this network",
+  "statusNotRunning": "Not running",
+  "devicePortInfo": "{name} · port {port}",
+  "@devicePortInfo": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "port": {
+        "type": "int"
+      }
+    }
+  },
+  "readyToShareScreenPrompt": "Ready to share this screen — start it from the phone, using the monitor button at the top of its remote screen.",
+  "statusOnline": "Online",
+  "statusOffline": "Offline",
+  "sendToDeviceTitle": "Send to device",
+  "sendToDeviceSubtitle": "Share files, links, or notes with a connected phone",
+  "connectDeviceToSendPrompt": "Connect a device to send files or text.",
+  "sendToLabel": "Send to",
+  "transfersNotPermitted": " · transfers not permitted",
+  "tabFileDragDrop": "File / Drag & Drop",
+  "tabTextUrl": "Text / URL",
+  "dragAndDropPrompt": "Drag and drop files here to send",
+  "chooseFilesButton": "Choose files",
+  "addMoreFilesButton": "Add more files",
+  "removeFileTooltip": "Remove {fileName}",
+  "@removeFileTooltip": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
+  "textSnippetLabel": "Text or URL snippet",
+  "textSnippetHint": "Enter text to send directly to the phone…",
+  "fileNameOptionalLabel": "File name (optional)",
+  "fileNameOptionalHint": "snippet.txt",
+  "sendFileButton": "Send File",
+  "sendTextButton": "Send Text",
+  "foldersNotSupportedError": "Folders cannot be sent yet: {folders}",
+  "@foldersNotSupportedError": {
+    "placeholders": {
+      "folders": {
+        "type": "String"
+      }
+    }
+  },
+  "openFileDialogError": "Could not open the file dialog: {error}",
+  "@openFileDialogError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "selectTargetDeviceError": "Please select a target device",
+  "chooseAtLeastOneFileError": "Choose at least one file to send",
+  "filesNoLongerThere": "{count, plural, =1{{fileName} is no longer there.} other{{count} files are no longer there.}}",
+  "@filesNoLongerThere": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
+  "enterTextToSendError": "Please enter text to send",
+  "sendFailedError": "Send failed: {error}",
+  "@sendFailedError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "transfersActiveSubtitle": "Completed and active transfers appear here",
+  "transfersRecentCount": "{count, plural, =1{1 recent transfer} other{{count} recent transfers}}",
+  "@transfersRecentCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "noActiveOrRecentTransfers": "No active or recent transfers.",
+  "transferFromPeer": "From {name}",
+  "@transferFromPeer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "transferToPeer": "To {name}",
+  "@transferToPeer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "transferStatusWaitingForYou": "Waiting for you",
+  "transferStatusAwaitingResponse": "Awaiting response",
+  "transferStatusOffered": "Offered",
+  "removeButton": "Remove",
+  "fileMovedOrDeleted": "File was moved or deleted",
+  "showInFinder": "Show {fileName} in Finder",
+  "@showInFinder": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
+  "showInFolder": "Show {fileName} in folder",
+  "@showInFolder": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
+  "openFileTooltip": "Open {fileName}",
+  "@openFileTooltip": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
+  "incomingTransferFromPeer": "Incoming transfer from {name}",
+  "@incomingTransferFromPeer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "incomingTransferFilesCount": "{count, plural, =1{{name} wants to send 1 file:} other{{name} wants to send {count} files:}}",
+  "@incomingTransferFilesCount": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "totalSizeLabel": "Total size:",
+  "firstTransferNote": "First transfer from this device.\nFiles will be saved in: {path}",
+  "@firstTransferNote": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "permissionElevationRequestTitle": "Permission elevation request",
+  "peerIsRequesting": " is requesting ",
+  "accessToThisComputer": " access to this computer.",
+  "tierTitleViewOnly": "View Only",
+  "tierTitleControl": "Control",
+  "tierTitleControlAndApps": "Control + Launch Apps",
+  "tierTitleAdmin": "Administrator (Full Access)",
+  "tierExplViewOnly": "Allows viewing system status, media state, and the display layout — but not the contents of the screen.",
+  "tierExplControl": "Allows sending keyboard and mouse input, synchronizing clipboard, controlling media, viewing this screen, and transferring files — every transfer is still confirmed here before it starts.",
+  "tierExplExtended": "Allows launching applications and running pre-registered commands without a further prompt.",
+  "tierExplAdmin": "Allows controlling power (shutdown, restart, sleep, lock) and managing paired devices.",
+  "whatThisAllows": "What this allows:",
+  "messageFromDevice": "Message from device:",
+  "adminWarningMessage": "Admin access allows restarting or shutting down your machine and discarding unsaved work.",
+  "automaticallyDeniedInSeconds": "{count, plural, =1{Automatically denied in 1 second} other{Automatically denied in {count} seconds}}",
+  "@automaticallyDeniedInSeconds": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "temporary30Minutes": "Temporary · 30 minutes",
+  "permanent": "Permanent",
+  "denyButton": "Deny",
+  "approveButton": "Approve",
+  "waitingForPairingApproval": "Waiting for pairing approval",
+  "deviceConnectionStats": "{address} · {latency} ms · {bars}/4",
+  "@deviceConnectionStats": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      },
+      "latency": {
+        "type": "String"
+      },
+      "bars": {
+        "type": "int"
+      }
+    }
+  },
+  "clipboardSyncEnabledTooltip": "Clipboard sync enabled",
+  "clipboardSyncDisabledTooltip": "Clipboard sync disabled",
+  "clipboardSyncNotPermittedTooltip": "Clipboard sync not permitted at current tier",
+  "renameDeviceTooltip": "Rename this device",
+  "rememberedDeviceTooltip": "Remembered — connects without being asked. Click to start asking again.",
+  "notRememberedDeviceTooltip": "Not remembered. Click to let it connect without asking.",
+  "forgetDeviceTooltip": "Forget this device",
+  "tierLabelViewOnly": "View only",
+  "tierLabelControl": "Control",
+  "tierLabelControlAndApps": "Control + apps",
+  "tierLabelFullAccess": "Full access",
+  "renameDeviceDialogTitle": "Rename device",
+  "invalidDeviceNameError": "Invalid name: 1–64 characters, no control codes or line breaks.",
+  "pairingDialogTitle": "Pair this device?",
+  "pairingDialogMessage": "{name} wants to control this computer.",
+  "@pairingDialogMessage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "pairingDialogInstructions": "Approve only if your phone is showing exactly these six digits, or if you just scanned the code on this screen with it. Different numbers mean something is intercepting the connection.",
+  "theNumbersMatchButton": "The numbers match",
+  "connectionRequestDialogTitle": "Allow this device to connect?",
+  "connectionRequestPeerMessage": "{name} is asking to connect to this computer.",
+  "@connectionRequestPeerMessage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "connectionRequestExplanation": "You paired with it before, so its identity has already been checked. This is only about now: allow it if the device is in your hands, and turn it away if it is not.",
+  "connectionRequestSessionNote": "Remote Link will not ask about this device again until you quit the app.",
+  "dontAllowButton": "Don't allow",
+  "allowButton": "Allow",
+  "rememberDeviceDialogTitle": "Remember this device?",
+  "rememberDeviceIntro": "{name} is connected. Remote Link can let it straight in next time, with nothing to scan and nobody to ask.",
+  "@rememberDeviceIntro": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "rememberDeviceExplanation": "{name} is being asked the same thing. Both devices have to agree, and either one can change its mind later in Devices.",
+  "@rememberDeviceExplanation": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "keepAskingButton": "Keep asking",
+  "rememberButton": "Remember",
+  "rememberDeviceAgreedSnackBar": "{name} will be remembered once it agrees too.",
+  "@rememberDeviceAgreedSnackBar": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "couldNotRetryError": "Could not retry: {error}",
+  "@couldNotRetryError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "invalidDeviceNameSnackBar": "Invalid device name. Names must be 1–64 characters with no control characters.",
+  "waitingForDevicesMessage": "Waiting for devices to connect…",
+  "errorMessage": "Error: {error}",
+  "@errorMessage": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "noDevicesConnectedPrompt": "No devices connected. Open Remote Link on your phone — it should find this computer automatically, or you can show it a code to scan.",
+  "showPairingCodeButton": "Show pairing code",
+  "connectedDevicesSectionTitle": "Connected devices",
+  "connectedDevicesCountSubtitle": "{count, plural, =0{Phones connected to this computer appear here} =1{1 connected} other{{count} connected}}",
+  "@connectedDevicesCountSubtitle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "transferFailureTimedOut": "Transfer timed out",
+  "transferFailureHashMismatch": "File integrity hash mismatch",
+  "transferFailureNoSpace": "Not enough storage space",
+  "transferFailureNoSpaceOnPeer": "Not enough storage space on peer",
+  "transferFailureChunkRefused": "File chunk refused",
+  "transferFailureCancelledByPeer": "Cancelled by {peerName}",
+  "@transferFailureCancelledByPeer": {
+    "placeholders": {
+      "peerName": {
+        "type": "String"
+      }
+    }
+  },
+  "transferFailureCancelledByYou": "Cancelled by you",
+  "transferFailureDeclinedByPeer": "Declined by {peerName}",
+  "@transferFailureDeclinedByPeer": {
+    "placeholders": {
+      "peerName": {
+        "type": "String"
+      }
+    }
+  },
+  "transferFailureDeclinedByYou": "Declined by you",
+  "transferFailureConnectionLost": "Connection lost",
+  "transferFailureDeviceDisconnected": "Device disconnected",
+  "transferFailureIoError": "I/O error during transfer",
+  "transferFailureReceiverUnavailable": "Receiver unavailable",
+  "transferFailureStorageUnavailable": "Storage unavailable",
+  "transferFailureCouldNotComplete": "File could not be completed",
+  "transferFailureCouldNotAccept": "Could not accept transfer",
+  "transferFailureRetryFailed": "Retry failed",
+  "startingService": "Starting the service…",
+  "filterLevel": "Filter Level:",
+  "phoneControlCapabilityMissing": "Controlling a phone from this computer is not available. iPhones offer no way to allow it at all, Android needs a service this build does not include, and there is no viewer here yet.",
+  "phoneControlReadOnly": "Raise this device above read-only to control it.",
+  "backendInputName": "Input injection",
+  "backendClipboardName": "Clipboard sync",
+  "backendMediaName": "Media control",
+  "backendClipboardUnsupported": "Clipboard sync is not supported on {platform}",
+  "@backendClipboardUnsupported": {
+    "placeholders": {
+      "platform": {
+        "type": "String"
+      }
+    }
+  },
+  "backendClipboardUnavailable": "Clipboard backend unavailable",
+  "backendMediaUnsupported": "Media control is not supported on {platform}",
+  "@backendMediaUnsupported": {
+    "placeholders": {
+      "platform": {
+        "type": "String"
+      }
+    }
+  },
+  "backendMediaUnavailable": "Media backend unavailable",
+  "inputAccessibilityPermission": "Remote Link needs Accessibility permission. Enable it in System Settings › Privacy & Security › Accessibility, then quit and reopen Remote Link.",
+  "backendInputUnsupported": "Input control is not supported on {platform}.",
+  "backendInputLibrariesUnavailable": "Input control could not start on this computer.",
+  "backendUnavailableGeneric": "This control is unavailable right now.",
+  "thisPlatform": "this platform",
+  "@backendInputUnsupported": {
+    "placeholders": {
+      "platform": {
+        "type": "String"
+      }
+    }
+  }
+}

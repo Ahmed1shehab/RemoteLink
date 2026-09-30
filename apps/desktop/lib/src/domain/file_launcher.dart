@@ -39,16 +39,13 @@ abstract final class FileLauncher {
   ///
   /// Selecting rather than merely opening is the difference between "here is
   /// your file" and "here are four hundred files, one of which is yours".
+  ///
+  /// Returns false if the file was moved or deleted after landing so callers
+  /// can inform the user rather than failing silently.
   static Future<bool> revealFile(String path) async {
     if (!await File(path).exists()) {
-      // The file was moved or deleted after it arrived. Its folder is still
-      // the useful answer, so fall back to that rather than doing nothing.
-      final parent = File(path).parent;
-      if (!await parent.exists()) {
-        _log.warn('refusing to reveal a path that is no longer there');
-        return false;
-      }
-      return openFolder(parent.path);
+      _log.warn('refusing to reveal a path that is no longer there');
+      return false;
     }
     return _run(
       switch (NativeBackends.currentPlatform) {

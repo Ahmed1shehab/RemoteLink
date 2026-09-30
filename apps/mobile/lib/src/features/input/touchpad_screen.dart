@@ -6,12 +6,13 @@ import 'dart:typed_data';
 import 'dart:ui' show PointMode;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/app_icons.dart';
+import '../../app/haptics.dart';
+import '../../app/l10n.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
@@ -224,7 +225,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
               direction: direction,
             ),
           );
-          HapticFeedback.mediumImpact();
+          unawaited(ref.read(appHapticsProvider).mediumImpact());
         }
       }
       return;
@@ -425,7 +426,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
         MouseButtonEvent(
             button: button, pressed: false, clickCount: clickCount),
       );
-      HapticFeedback.selectionClick();
+      unawaited(ref.read(appHapticsProvider).selectionClick());
     }
 
     _pointer.endGesture();
@@ -493,7 +494,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
     unawaitedSend(
       const MouseButtonEvent(button: MouseButton.left, pressed: true),
     );
-    HapticFeedback.mediumImpact();
+    unawaited(ref.read(appHapticsProvider).mediumImpact());
   }
 
   void unawaitedSend(Message message) => unawaited(_send(message));
@@ -525,15 +526,13 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
             child: Semantics(
               container: true,
               explicitChildNodes: true,
-              label: 'Touchpad',
+              label: context.l10n.touchpadLabel,
               // Stated rather than implied. Without it the surface announces
               // nothing at all, and a gesture area that announces nothing is
               // indistinguishable from empty space.
               hint: connected
-                  ? 'Drag to move the pointer. Double tap to click. '
-                      'Swipe with three fingers to scroll. '
-                      'Directional controls are available below.'
-                  : 'Not connected.',
+                  ? context.l10n.touchpadHint
+                  : context.l10n.notConnectedPeriod,
               // Screen-reader equivalents of the gestures this surface is built
               // from. A reader intercepts raw touches, so without these the
               // pointer cannot be moved or clicked from here at all.
@@ -563,27 +562,30 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
                     // it is defined by *not* moving, so a frame of delay is
                     // invisible.
                     onLongPress: _onLongPress,
-                    child: _TouchpadSurface(
-                      enabled: connected,
-                      showHint: _hintVisible,
-                      glowController: _glowController,
-                      showTutorialBanner:
-                          !ref.watch(sensitivityTutorialSeenProvider),
-                      onOpenSettings: () {
-                        ref
+                    child: Directionality(
+                      textDirection: TextDirection.ltr,
+                      child: _TouchpadSurface(
+                        enabled: connected,
+                        showHint: _hintVisible,
+                        glowController: _glowController,
+                        showTutorialBanner:
+                            !ref.watch(sensitivityTutorialSeenProvider),
+                        onOpenSettings: () {
+                          ref
+                              .read(sensitivityTutorialSeenProvider.notifier)
+                              .markSeen();
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const SettingsScreen(),
+                            ),
+                          );
+                        },
+                        onOpenTutorial: () =>
+                            SensitivityTutorialDialog.show(context, ref),
+                        onDismissTutorial: () => ref
                             .read(sensitivityTutorialSeenProvider.notifier)
-                            .markSeen();
-                        Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const SettingsScreen(),
-                          ),
-                        );
-                      },
-                      onOpenTutorial: () =>
-                          SensitivityTutorialDialog.show(context, ref),
-                      onDismissTutorial: () => ref
-                          .read(sensitivityTutorialSeenProvider.notifier)
-                          .markSeen(),
+                            .markSeen(),
+                      ),
                     ),
                   ),
                 ),
@@ -597,28 +599,34 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
               // inside this rather than pushing the click buttons off-screen.
               constraints: BoxConstraints(maxHeight: constraints.maxHeight / 2),
               child: SingleChildScrollView(
-                child: _CursorPad(
-                  enabled: connected,
-                  step: _cursorStep,
-                  onStepChanged: (step) => setState(() => _cursorStep = step),
-                  onMove: _move,
-                  onClick: _click,
-                  onScroll: _scroll,
-                  onClose: () => setState(() => _showCursorPad = false),
+                child: Directionality(
+                  textDirection: TextDirection.ltr,
+                  child: _CursorPad(
+                    enabled: connected,
+                    step: _cursorStep,
+                    onStepChanged: (step) => setState(() => _cursorStep = step),
+                    onMove: _move,
+                    onClick: _click,
+                    onScroll: _scroll,
+                    onClose: () => setState(() => _showCursorPad = false),
+                  ),
                 ),
               ),
             ),
-          _ButtonRow(
-            immersive: widget.immersive,
-            onLeft: () => _click(MouseButton.left),
-            onMiddle: () => _click(MouseButton.middle),
-            onRight: () => _click(MouseButton.right),
-            onToggleCursorPad: () =>
-                setState(() => _showCursorPad = !showCursorPad),
-            onShowSensitivityTutorial: () =>
-                SensitivityTutorialDialog.show(context, ref),
-            cursorPadShowing: showCursorPad,
-            enabled: connected,
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: _ButtonRow(
+              immersive: widget.immersive,
+              onLeft: () => _click(MouseButton.left),
+              onMiddle: () => _click(MouseButton.middle),
+              onRight: () => _click(MouseButton.right),
+              onToggleCursorPad: () =>
+                  setState(() => _showCursorPad = !showCursorPad),
+              onShowSensitivityTutorial: () =>
+                  SensitivityTutorialDialog.show(context, ref),
+              cursorPadShowing: showCursorPad,
+              enabled: connected,
+            ),
           ),
         ],
       ),
@@ -628,7 +636,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
   void _click(MouseButton button) {
     unawaitedSend(MouseButtonEvent(button: button, pressed: true));
     unawaitedSend(MouseButtonEvent(button: button, pressed: false));
-    HapticFeedback.selectionClick();
+    unawaited(ref.read(appHapticsProvider).selectionClick());
   }
 
   /// Moves the cursor by a fixed amount, bypassing the gesture path entirely.
@@ -640,7 +648,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
   /// has to move a predictable distance or it cannot be aimed.
   void _move(int dx, int dy) {
     unawaitedSend(MouseMove(deltaX: dx, deltaY: dy));
-    HapticFeedback.selectionClick();
+    unawaited(ref.read(appHapticsProvider).selectionClick());
   }
 
   void _scroll(int dx, int dy) {
@@ -653,7 +661,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
         pixelsY: dy,
       ),
     );
-    HapticFeedback.selectionClick();
+    unawaited(ref.read(appHapticsProvider).selectionClick());
   }
 }
 
@@ -796,10 +804,7 @@ class _TouchpadSurface extends StatelessWidget {
                             ),
                             const SizedBox(height: 12),
                             Text(
-                              'Drag to move · Tap to click\n'
-                              'Two fingers to scroll or right-click\n'
-                              'Hold to drag\n\n'
-                              'Adjust sensitivity anytime in Settings',
+                              context.l10n.touchpadWatermarkHint,
                               textAlign: TextAlign.center,
                               // Full-strength `onSurfaceVariant`. This was drawn
                               // at 60% alpha — roughly 2.6:1 on the surface
@@ -815,16 +820,16 @@ class _TouchpadSurface extends StatelessWidget {
                       ),
                     )
                   : Text(
-                      'Not connected',
+                      context.l10n.notConnected,
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
             ),
           ),
           if (enabled && showTutorialBanner)
-            Positioned(
+            PositionedDirectional(
               top: 0,
-              left: 0,
-              right: 0,
+              start: 0,
+              end: 0,
               child: _SensitivityHintBanner(
                 onOpenSettings: onOpenSettings ?? () {},
                 onOpenTutorial: onOpenTutorial ?? () {},
@@ -858,8 +863,8 @@ class _SensitivityHintBanner extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: Container(
-        margin: const EdgeInsets.fromLTRB(14, 10, 14, 0),
-        padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
+        margin: const EdgeInsetsDirectional.fromSTEB(14, 10, 14, 0),
+        padding: const EdgeInsetsDirectional.fromSTEB(12, 6, 8, 6),
         decoration: BoxDecoration(
           color: (dark ? colorScheme.surfaceContainerHigh : Colors.white)
               .withValues(alpha: dark ? 0.92 : 0.96),
@@ -900,14 +905,14 @@ class _SensitivityHintBanner extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
                     Text(
-                      'Pointer Sensitivity',
+                      context.l10n.sensitivityBannerTitle,
                       style: theme.textTheme.labelMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: colorScheme.onSurface,
                       ),
                     ),
                     Text(
-                      'Tap for tutorial or adjust in Settings',
+                      context.l10n.sensitivityBannerSubtitle,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                         fontSize: 11,
@@ -924,7 +929,7 @@ class _SensitivityHintBanner extends StatelessWidget {
                 foregroundColor: const Color(0xFF007ACC),
               ),
               onPressed: onOpenSettings,
-              child: const Text('Adjust'),
+              child: Text(context.l10n.adjust),
             ),
             IconButton(
               visualDensity: VisualDensity.compact,
@@ -932,7 +937,7 @@ class _SensitivityHintBanner extends StatelessWidget {
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
               icon: const Icon(Icons.close),
-              tooltip: 'Dismiss hint',
+              tooltip: context.l10n.dismissHint,
               onPressed: onDismiss,
             ),
           ],
@@ -1317,13 +1322,6 @@ class _CursorPad extends StatelessWidget {
     required this.onClose,
   });
 
-  /// Pixels per press at each setting, and what to call them out loud.
-  static const List<(int, String)> steps = <(int, String)>[
-    (10, 'Fine'),
-    (40, 'Normal'),
-    (160, 'Coarse'),
-  ];
-
   static const int defaultStep = 40;
 
   final bool enabled;
@@ -1337,8 +1335,15 @@ class _CursorPad extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final stepName = steps
-        .firstWhere((entry) => entry.$1 == step, orElse: () => steps[1])
+    final l10n = context.l10n;
+    final localizedSteps = <(int, String)>[
+      (10, l10n.stepFine),
+      (40, l10n.stepNormal),
+      (160, l10n.stepCoarse),
+    ];
+    final stepName = localizedSteps
+        .firstWhere((entry) => entry.$1 == step,
+            orElse: () => localizedSteps[1])
         .$2
         .toLowerCase();
 
@@ -1357,12 +1362,12 @@ class _CursorPad extends StatelessWidget {
             children: <Widget>[
               Expanded(
                 child: Text(
-                  'Pointer controls',
+                  l10n.pointerControlsTitle,
                   style: Theme.of(context).textTheme.labelLarge,
                 ),
               ),
               IconButton(
-                tooltip: 'Hide pointer controls',
+                tooltip: l10n.hidePointerControls,
                 icon: const Icon(Icons.close),
                 onPressed: onClose,
               ),
@@ -1372,15 +1377,15 @@ class _CursorPad extends StatelessWidget {
           // announced before them rather than after.
           Semantics(
             container: true,
-            label: 'Step size, currently $stepName',
+            label: l10n.stepSizeAnnouncement(stepName),
             child: SegmentedButton<int>(
               showSelectedIcon: false,
               segments: <ButtonSegment<int>>[
-                for (final (pixels, name) in steps)
+                for (final (pixels, name) in localizedSteps)
                   ButtonSegment<int>(
                     value: pixels,
                     label: Text(name),
-                    tooltip: '$name — $pixels pixels per press',
+                    tooltip: l10n.stepTooltip(name, pixels),
                   ),
               ],
               selected: <int>{step},
@@ -1396,7 +1401,7 @@ class _CursorPad extends StatelessWidget {
             children: <Widget>[
               _CursorButton(
                 icon: Icons.keyboard_arrow_left,
-                label: 'Move pointer left $step pixels',
+                label: l10n.movePointerLeft(step),
                 onPressed: enabled ? () => onMove(-step, 0) : null,
               ),
               Column(
@@ -1404,19 +1409,19 @@ class _CursorPad extends StatelessWidget {
                 children: <Widget>[
                   _CursorButton(
                     icon: Icons.keyboard_arrow_up,
-                    label: 'Move pointer up $step pixels',
+                    label: l10n.movePointerUp(step),
                     onPressed: enabled ? () => onMove(0, -step) : null,
                   ),
                   _CursorButton(
                     icon: Icons.keyboard_arrow_down,
-                    label: 'Move pointer down $step pixels',
+                    label: l10n.movePointerDown(step),
                     onPressed: enabled ? () => onMove(0, step) : null,
                   ),
                 ],
               ),
               _CursorButton(
                 icon: Icons.keyboard_arrow_right,
-                label: 'Move pointer right $step pixels',
+                label: l10n.movePointerRight(step),
                 onPressed: enabled ? () => onMove(step, 0) : null,
               ),
             ],
@@ -1429,22 +1434,22 @@ class _CursorPad extends StatelessWidget {
             children: <Widget>[
               _CursorButton(
                 icon: Icons.mouse_outlined,
-                label: 'Left click',
+                label: l10n.leftClick,
                 onPressed: enabled ? () => onClick(MouseButton.left) : null,
               ),
               _CursorButton(
                 icon: Icons.menu_open,
-                label: 'Right click',
+                label: l10n.rightClick,
                 onPressed: enabled ? () => onClick(MouseButton.right) : null,
               ),
               _CursorButton(
                 icon: Icons.expand_less,
-                label: 'Scroll up',
+                label: l10n.scrollUp,
                 onPressed: enabled ? () => onScroll(0, -step) : null,
               ),
               _CursorButton(
                 icon: Icons.expand_more,
-                label: 'Scroll down',
+                label: l10n.scrollDown,
                 onPressed: enabled ? () => onScroll(0, step) : null,
               ),
             ],
@@ -1525,11 +1530,11 @@ class _ButtonRow extends StatelessWidget {
               Expanded(
                 flex: 3,
                 child: _PadButton(
-                  label: 'Left',
+                  label: context.l10n.padButtonLeft,
                   // "Left" alone is a direction, not an action. Each of these
                   // announced a word that could equally have meant "move
                   // left" — on a screen whose whole job is moving left.
-                  semanticLabel: 'Left click',
+                  semanticLabel: context.l10n.leftClick,
                   onPressed: enabled ? onLeft : null,
                 ),
               ),
@@ -1544,8 +1549,8 @@ class _ButtonRow extends StatelessWidget {
                 // thumb reaches for without looking.
                 flex: 2,
                 child: _PadButton(
-                  label: 'Mid',
-                  semanticLabel: 'Middle click',
+                  label: context.l10n.padButtonMid,
+                  semanticLabel: context.l10n.middleClick,
                   onPressed: enabled ? onMiddle : null,
                 ),
               ),
@@ -1553,21 +1558,21 @@ class _ButtonRow extends StatelessWidget {
               Expanded(
                 flex: 3,
                 child: _PadButton(
-                  label: 'Right',
-                  semanticLabel: 'Right click',
+                  label: context.l10n.padButtonRight,
+                  semanticLabel: context.l10n.rightClick,
                   onPressed: enabled ? onRight : null,
                 ),
               ),
               const SizedBox(width: 8),
               IconButton(
-                tooltip: 'Pointer sensitivity tutorial',
+                tooltip: context.l10n.sensitivityTutorialTooltip,
                 icon: const Icon(Icons.tune_outlined),
                 onPressed: onShowSensitivityTutorial,
               ),
               IconButton(
                 tooltip: cursorPadShowing
-                    ? 'Hide pointer controls'
-                    : 'Show pointer controls',
+                    ? context.l10n.hidePointerControls
+                    : context.l10n.showPointerControls,
                 icon: Icon(
                   cursorPadShowing ? Icons.gamepad : Icons.gamepad_outlined,
                 ),

@@ -132,6 +132,8 @@ These are not features. They are things that are currently wrong.
 
 ### RL-000 — Replace the stale scaffolding widget tests
 
+**Status — DONE.** Both app roots have widget coverage; the desktop root uses an inert `DesktopService` provider override in `apps/desktop/test/support/fakes.dart`.
+
 **Priority** P0 · **Size** S · **Blocks** RL-001
 
 **Files**
@@ -395,6 +397,8 @@ implying an attack.
 ---
 
 ### RL-102 — Session resumption
+
+**Status — DONE.** Ticket sealing, one-round-trip resume, replay and trust checks live in `rl_crypto` and `rl_transport`; the mobile client persists tickets, and `PROTOCOL.md` §6.1 specifies the wire flow.
 
 **Priority** P1 · **Size** M · **Security gap 4** · **Blocked by** RL-104
 
@@ -711,6 +715,8 @@ timing the read against a local no-op move first.
 
 ### RL-108 — Test coverage for the untested surface
 
+**Status — DONE.** Trust, pairing, discovery, clipboard, and the exhaustive dispatcher tier matrix have tests; the discovery query test also caught and fixed replies sent to the wrong UDP port.
+
 **Priority** P1 · **Size** M · **Blocked by** RL-000
 
 **Files**
@@ -1005,6 +1011,8 @@ survives a reconnect.
 
 ### RL-204 — Device rename
 
+**Status — DONE.** Each device announces only its own validated display name; receivers persist the sender's name, while aliases for other devices stay local.
+
 **Priority** P2 · **Size** S
 
 **Spec.** `DeviceRename` decodes and is dropped. Handle it by updating the
@@ -1021,6 +1029,8 @@ escapes are all rejected.
 ---
 
 ### RL-205 — Permission elevation flow
+
+**Status — DONE.** The desktop approval dialog now denies after a visible 60-second countdown and offers permanent or 30-minute temporary grants through the existing expiry service.
 
 **Priority** P2 · **Size** M
 
@@ -1247,6 +1257,8 @@ relative for precision.
 ---
 
 ### RL-400 — File transfer protocol messages
+
+**Status — DONE.** The five payloads and adversarial filename tests live in `rl_protocol`; `PROTOCOL.md` §12 now specifies their wire fields and transfer behavior.
 
 **Priority** P4 · **Size** M
 
@@ -1641,6 +1653,8 @@ reasoning is in `Release.entitlements`.
 
 ### RL-700 — Mobile settings screen
 
+**Status — DONE.** Implemented in `apps/mobile/lib/src/features/settings/settings_screen.dart` with device identity, paired computer management, touchpad, haptics, clipboard, diagnostics, and about sections.
+
 **Priority** P2 · **Size** M
 
 **Spec.** There is no settings screen at all. Needed: rename this phone · view
@@ -1655,6 +1669,8 @@ second preferences mechanism.
 
 ### RL-701 — Desktop diagnostics panel
 
+**Status — DONE.** Implemented in `apps/desktop/lib/src/ui/diagnostics_screen.dart` with dispatcher counters, connection metrics, discovery beacon state, backend availability reasons, and filtered log viewer.
+
 **Priority** P2 · **Size** S
 
 **Spec.** `CommandDispatcher` already tracks `appliedCount`, `deniedCount`, and
@@ -1668,6 +1684,8 @@ support conversation from guesswork into a paste.
 ---
 
 ### RL-702 — Localisation
+
+**Status — DONE.** Localisation in apps/desktop and apps/mobile with English and Arabic ARBs, ICU plurals/placeholders, logical directional layout, and RTL test coverage.
 
 **Priority** P3 · **Size** M
 
@@ -1695,6 +1713,8 @@ the six digits must be announced clearly, not read as one large number.
 ---
 
 ### RL-704 — Error reporting and log export
+
+**Status — DONE.** Buffered, size-capped rotating `FileLogSink` with level filtering, redaction pass, crash capture, and redacted export of persistent logs and crash reports in `packages/rl_core`, `apps/mobile`, and `apps/desktop`.
 
 **Priority** P2 · **Size** S
 
@@ -1726,6 +1746,8 @@ currently an admitted gap in a document whose whole purpose is not having any.
 all-rights-reserved by default regardless of intent. Add `CONTRIBUTING.md`
 covering the workspace layout, the strict one-way dependency direction, the
 append-only wire-code rule, and the requirement that packages stay Flutter-free.
+
+**Status — DONE.** LICENSE and CONTRIBUTING.md created at repo root, and GitHub issue templates (bug report, feature request, config.yml) added under `.github/ISSUE_TEMPLATE/`.
 
 **RL-802** — Re-verify `docs/RUNNING.md` against the current code, particularly
 the four silently-failing permissions and the iOS multicast entitlement note,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:remotelink_desktop/src/app/providers.dart';
 import 'package:remotelink_desktop/src/ui/diagnostics_screen.dart';
 import 'package:remotelink_desktop/src/ui/home_screen.dart';
 
@@ -44,15 +45,20 @@ void main() {
     expect(find.text('10.0.0.5:41234'), findsOneWidget);
     expect(find.text('test-device-id'), findsOneWidget);
 
+    // 2b. Discovery beacon state
+    expect(find.text('Discovery Beacon'), findsOneWidget);
+    expect(find.text('Advertising'), findsWidgets);
+    expect(find.text('Active'), findsOneWidget);
+    expect(find.text('en0'), findsOneWidget);
+    expect(find.text('lo0'), findsOneWidget);
+
     // 3. Backend availability and reasons
     expect(find.text('Backend Availability'), findsOneWidget);
     expect(find.text('Input injection'), findsOneWidget);
     expect(find.text('Clipboard sync'), findsOneWidget);
     expect(find.text('Media control'), findsOneWidget);
     expect(
-      find.text(
-        'Remote Link needs Accessibility permission. Enable it in System Settings.',
-      ),
+      find.textContaining('Remote Link needs Accessibility permission'),
       findsOneWidget,
     );
     expect(
@@ -103,9 +109,7 @@ void main() {
     expect(find.text('128'), findsOneWidget);
     expect(find.text('192.168.1.100:41234'), findsOneWidget);
     expect(
-      find.text(
-        'Remote Link needs Accessibility permission. Enable it in System Settings.',
-      ),
+      find.textContaining('Remote Link needs Accessibility permission'),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
@@ -179,6 +183,53 @@ void main() {
 
     expect(find.text('Showing 1 of 4'), findsOneWidget);
     expect(find.textContaining('permission missing error'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('renders discovery beacon with inactive state and error message',
+      (tester) async {
+    tester.view.physicalSize = const Size(1000, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    final errorDiagnostics = DiagnosticsInfo(
+      serviceStatus: fakeDiagnostics.serviceStatus,
+      dispatcherCounters: fakeDiagnostics.dispatcherCounters,
+      backends: fakeDiagnostics.backends,
+      beacon: const DiscoveryBeaconDiagnostic(
+        isAdvertising: false,
+        interfaces: <String>[],
+        lastError: 'SocketException: Failed to bind multicast socket',
+      ),
+      devices: fakeDiagnostics.devices,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          ...desktopHomeOverrides,
+          desktopDiagnosticsProvider
+              .overrideWith((ref) => Stream.value(errorDiagnostics)),
+        ],
+        child: const MaterialApp(
+          home: DiagnosticsScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Discovery Beacon'), findsOneWidget);
+    expect(find.text('Off'), findsWidgets);
+    expect(find.text('No interfaces bound'), findsOneWidget);
+    expect(find.text('Last Discovery Error'), findsOneWidget);
+    expect(
+      find.text('SocketException: Failed to bind multicast socket'),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 }

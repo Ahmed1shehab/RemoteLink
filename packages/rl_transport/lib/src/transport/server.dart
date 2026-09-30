@@ -64,7 +64,8 @@ final class RemoteLinkServer {
     this.port = 47811,
     this.maxSessions = kMaxSessions,
     this.allowPortFallback = true,
-  }) : _clock = clock;
+  })  : _clock = clock,
+        _tickets = ResumptionTickets(clock: clock);
 
   final DeviceIdentity identity;
 
@@ -102,6 +103,7 @@ final class RemoteLinkServer {
   final bool allowPortFallback;
 
   final Clock _clock;
+  final ResumptionTickets _tickets;
   final Log _log = Log.scoped('transport.server');
 
   final StreamController<ServerSession> _accepted =
@@ -236,6 +238,8 @@ final class RemoteLinkServer {
         capabilities: capabilities,
         clock: _clock,
         lookupPeer: _lookupPeerForHandshake,
+        lookupResumePeer: trustStore.findByPublicKey,
+        tickets: _tickets,
         holdKnownPeers: asksBeforeAdmitting,
       );
 
@@ -314,6 +318,9 @@ final class RemoteLinkServer {
     _sessions[accepted.peerId.value] = accepted;
     _watchers[accepted.peerId.value] = accepted.session.stateChanges.listen(
       (state) {
+        if (state == SessionState.established) {
+          unawaited(_issueTicket(accepted.session));
+        }
         if (state == SessionState.closed) {
           unawaited(_onSessionClosed(accepted));
         }
@@ -323,6 +330,28 @@ final class RemoteLinkServer {
     );
 
     if (!_accepted.isClosed) _accepted.add(accepted);
+    if (accepted.session.isEstablished) {
+      unawaited(_issueTicket(accepted.session));
+    }
+  }
+
+  /// Issue only after the peer is trusted and the admission gate is open.
+  /// Re-reading the store also means revocation or a tier change before this
+  /// asynchronous send cannot mint an outdated credential.
+  Future<void> _issueTicket(Session session) async {
+    final peer = await trustStore.findByPublicKey(session.peerStaticPublicKey);
+    if (peer == null || peer.revoked || !session.isEstablished) return;
+    final ticket = await _tickets.issue(
+        peerKey: peer.publicKey,
+        tier: peer.permissionTier,
+        secret: session.resumptionSecret);
+    if (!session.isEstablished) return;
+    try {
+      await session
+          .send(ResumptionTicket(ticket: ticket, lifetimeSeconds: 7200));
+    } on TransportError {
+      // Reconnect may have replaced this session while sealing the ticket.
+    }
   }
 
   Future<void> _onSessionClosed(ServerSession session) async {
@@ -388,6 +417,7 @@ final class RemoteLinkServer {
     _sessions.clear();
     _watchers.clear();
 
+    _tickets.dispose();
     await _accepted.close();
     await _ended.close();
   }

@@ -154,6 +154,91 @@ void main() {
       expect(pending.justification, 'Need to transfer presentation files');
     });
 
+    test('desktop self-rename reaches connected phone', () async {
+      final renames = <DeviceRename>[];
+      final sub = client.messages
+          .where((m) => m is DeviceRename)
+          .cast<DeviceRename>()
+          .listen(renames.add);
+      addTearDown(sub.cancel);
+
+      final secondIdentity = await DeviceIdentity.generate();
+      await desktopTrustStore.upsert(TrustedPeer(
+        id: secondIdentity.id,
+        publicKey: secondIdentity.publicKey,
+        name: 'Second Phone',
+        platform: PlatformKind.android,
+        pairedAt: clock.now(),
+        permissionTier: PermissionTier.standard.wireValue,
+      ));
+      final secondClient = RemoteLinkClient(
+        identity: secondIdentity,
+        capabilities: const Capabilities(Capabilities.sessionResumption),
+        clock: clock,
+      );
+      addTearDown(secondClient.dispose);
+      await secondClient.connect(ConnectionTarget(
+        host: '127.0.0.1',
+        port: service.boundPort,
+        deviceId: desktopIdentity.id,
+        serverPublicKey: desktopIdentity.publicKey,
+      ));
+      await secondClient.waitUntilConnected();
+      final secondRenames = <DeviceRename>[];
+      final secondSub = secondClient.messages
+          .where((m) => m is DeviceRename)
+          .cast<DeviceRename>()
+          .listen(secondRenames.add);
+      addTearDown(secondSub.cancel);
+      final connectionDeadline = DateTime.now().add(const Duration(seconds: 2));
+      while (service.devices.length != 2 &&
+          DateTime.now().isBefore(connectionDeadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(service.devices, hasLength(2));
+
+      expect(await service.announceOwnName('New Mac Studio'), isTrue);
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while ((renames.isEmpty || secondRenames.isEmpty) &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(renames.single.name, 'New Mac Studio');
+      expect(secondRenames.single.name, 'New Mac Studio');
+      expect(service.describeSelf().name, 'New Mac Studio');
+      expect(service.pairingPayload(host: '127.0.0.1').name, 'New Mac Studio');
+      expect((await desktopTrustStore.findById(phoneIdentity.id))?.name,
+          'Pixel 9 Pro');
+    });
+
+    test('desktop phone alias stays local', () async {
+      final renames = <DeviceRename>[];
+      final sub = client.messages
+          .where((m) => m is DeviceRename)
+          .cast<DeviceRename>()
+          .listen(renames.add);
+      addTearDown(sub.cancel);
+
+      expect(await service.renameDevice(phoneIdentity.id, 'New Pixel'), isTrue);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(renames, isEmpty);
+      expect((await desktopTrustStore.findById(phoneIdentity.id))?.name,
+          'New Pixel');
+      expect(service.devices.single.name, 'New Pixel');
+    });
+
+    test('phone rename updates desktop record and device list', () async {
+      await client.session!.send(const DeviceRename('Phone Alias'));
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (service.devices.single.name != 'Phone Alias' &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(service.devices.single.name, 'Phone Alias');
+      expect((await desktopTrustStore.findById(phoneIdentity.id))?.name,
+          'Phone Alias');
+    });
+
     test('approving PermissionRequest persists new tier and sends grant',
         () async {
       final requestReceived = Completer<PendingPermissionRequest>();
@@ -362,6 +447,42 @@ void main() {
   });
 
   group('PermissionRequestDialog Widget', () {
+    testWidgets('counts down and denies unanswered request', (tester) async {
+      int? result = -1;
+      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) {
+        return Scaffold(
+            body: TextButton(
+          onPressed: () async => result = await showDialog<int>(
+            context: context,
+            builder: (_) => const PermissionRequestDialog(
+              peerName: 'Phone',
+              requestedTier: PermissionTier.extended,
+              currentTier: PermissionTier.standard,
+            ),
+          ),
+          child: const Text('Open'),
+        ));
+      })));
+      await tester.tap(find.text('Open'));
+      await tester.pump();
+      expect(find.text('Automatically denied in 60 seconds'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 60));
+      await tester.pump();
+      expect(result, isNull);
+      expect(find.byType(PermissionRequestDialog), findsNothing);
+    });
+
+    testWidgets('offers temporary and permanent grant durations',
+        (tester) async {
+      await tester.pumpWidget(const MaterialApp(
+          home: Scaffold(
+              body: PermissionRequestDialog(
+                  peerName: 'Phone',
+                  requestedTier: PermissionTier.extended,
+                  currentTier: PermissionTier.standard))));
+      expect(find.text('Temporary · 30 minutes'), findsOneWidget);
+      expect(find.text('Permanent'), findsOneWidget);
+    });
     testWidgets('renders device name, tier explanation, and device message',
         (tester) async {
       await tester.pumpWidget(

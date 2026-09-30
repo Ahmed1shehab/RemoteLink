@@ -6,6 +6,7 @@ import 'package:remotelink_desktop/src/domain/command_dispatcher.dart';
 import 'package:remotelink_desktop/src/domain/desktop_service.dart';
 import 'package:remotelink_desktop/src/domain/transfer_model.dart';
 import 'package:rl_core/rl_core.dart';
+import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_native/rl_native.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
@@ -40,6 +41,11 @@ const fakeDiagnostics = DiagnosticsInfo(
       isAvailable: false,
       unavailableReason: 'Media control is not supported on this platform',
     ),
+  ),
+  beacon: DiscoveryBeaconDiagnostic(
+    isAdvertising: true,
+    interfaces: <String>['en0', 'lo0'],
+    lastError: null,
   ),
   devices: <DeviceDiagnostic>[
     DeviceDiagnostic(
@@ -110,6 +116,55 @@ List<Override> desktopHomeOverridesWith({
       if (recopy != null) clipboardRecopyProvider.overrideWithValue(recopy),
     ];
 
+/// Fake file launcher for widget testing without external processes.
+final class FakeFileLauncher implements FileLauncherService {
+  final List<String> opened = <String>[];
+  final List<String> revealed = <String>[];
+  bool openResult = true;
+  bool revealResult = true;
+
+  void reset() {
+    opened.clear();
+    revealed.clear();
+    openResult = true;
+    revealResult = true;
+  }
+
+  @override
+  Future<bool> openFile(String path) async {
+    opened.add(path);
+    return openResult;
+  }
+
+  @override
+  Future<bool> revealFile(String path) async {
+    revealed.add(path);
+    return revealResult;
+  }
+}
+
+final fakeFileLauncher = FakeFileLauncher();
+
+/// An inert service for tests that pump the real app shell.
+///
+/// The root widget owns the tray and may read the service when a menu action
+/// fires. Supplying every backend here ensures that even an incidental read
+/// cannot construct a native backend or bind a socket in a widget test.
+Future<DesktopService> createFakeDesktopService() async => DesktopService(
+      identity: await DeviceIdentity.generate(),
+      trustStore: InMemoryTrustStore(),
+      deviceName: 'Test computer',
+      appVersion: 'test',
+      clock: FakeClock(),
+      input: const UnsupportedInputBackend('test'),
+      clipboardBackend: const UnsupportedClipboardBackend(),
+      media: const UnsupportedMediaBackend(),
+      brightness: const UnsupportedBrightnessBackend('test'),
+      systemInfo: const UnsupportedSystemInfoBackend('test'),
+      networkAdapters: const UnsupportedNetworkAdapterBackend('test'),
+      screenCapture: const UnsupportedScreenCaptureBackend('test'),
+    );
+
 /// Safe provider state for rendering the desktop home screen in widget tests.
 ///
 /// These overrides deliberately stop at the UI-facing providers. In
@@ -131,14 +186,14 @@ final List<Override> desktopHomeOverrides = <Override>[
     (ref) => Stream<List<ConnectedDevice>>.value(const <ConnectedDevice>[]),
   ),
   inputAvailabilityProvider.overrideWith(
-    (ref) => Stream<({bool available, String? reason})>.value(
+    (ref) => Stream<({bool available, BackendFailure? reason})>.value(
       (available: true, reason: null),
     ),
   ),
   // Available, so the advisory banner stays out of the way of tests that are
   // about something else. The banner has its own test.
   screenCaptureAvailabilityProvider.overrideWith(
-    (ref) => Stream<({bool available, String? reason})>.value(
+    (ref) => Stream<({bool available, BackendFailure? reason})>.value(
       (available: true, reason: null),
     ),
   ),
@@ -160,6 +215,7 @@ final List<Override> desktopHomeOverrides = <Override>[
   desktopDiagnosticsProvider.overrideWith(
     (ref) => Stream<DiagnosticsInfo>.value(fakeDiagnostics),
   ),
+  fileLauncherProvider.overrideWithValue(fakeFileLauncher),
   memoryLogSinkProvider.overrideWithValue(fakeMemoryLogSink),
   clipboardHistoryProvider.overrideWith((ref) async {
     final history = ClipboardHistory();

@@ -23,17 +23,8 @@ final class ExportError implements Exception {
   final ExportFailure reason;
   final Object? cause;
 
-  /// What to show the user. Written to be read on a phone, mid-transfer.
-  String get message => switch (reason) {
-        ExportFailure.cancelled => 'Not saved — you closed the share sheet.',
-        ExportFailure.permissionDenied =>
-          'Remote Link cannot add to your photo library. Allow it under '
-              'Settings › Remote Link › Photos, then send it again.',
-        ExportFailure.failed => 'Could not save this file to your phone.',
-      };
-
   @override
-  String toString() => 'ExportError(${reason.name}): $message';
+  String toString() => 'ExportError(${reason.name}): $cause';
 }
 
 /// Hands a finished file to the phone, and keeps nothing.

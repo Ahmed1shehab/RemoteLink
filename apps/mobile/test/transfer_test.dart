@@ -89,6 +89,50 @@ void main() {
     });
   });
 
+  test('phone can cancel and remove a transfer after its peer disappears',
+      () async {
+    final client = RemoteLinkClient(
+      identity: await DeviceIdentity.generate(),
+      capabilities: const Capabilities(Capabilities.sessionResumption),
+      clock: SystemClock(),
+    );
+    final container = ProviderContainer(overrides: <Override>[
+      clientProvider.overrideWith((ref) async => client),
+      transferControllerProvider.overrideWith(
+        (ref) => MobileTransferController(
+          ref,
+          customTransferStore: MobileTransferStore(Directory.systemTemp),
+        ),
+      ),
+    ]);
+    try {
+      final controller = container.read(transferControllerProvider.notifier);
+      controller.state = TransferState(transfers: <TransferRecord>[
+        TransferRecord(
+          transferId: 'stuck',
+          peerId: const DeviceId('gone-pc'),
+          peerName: 'Work PC',
+          direction: TransferDirection.outgoing,
+          status: TransferStatus.inProgress,
+          files: const <TransferFileProgress>[],
+          totalBytes: 0,
+          transferredBytes: 0,
+          createdAt: DateTime(2026),
+        ),
+      ]);
+      await controller.cancelTransfer('stuck');
+      expect(
+          controller.state.transfers.single.status, TransferStatus.cancelled);
+      expect(controller.state.transfers.single.failure,
+          TransferFailure.cancelledByYou);
+      expect(controller.removeTransfer('stuck'), isNotNull);
+      expect(controller.state.transfers, isEmpty);
+    } finally {
+      container.dispose();
+      await client.dispose();
+    }
+  });
+
   group('MobileTransferStore', () {
     late Directory tempDir;
     late MobileTransferStore store;
@@ -747,6 +791,47 @@ void main() {
           expect(offer.files.single.fileType, 'video/mp4');
           expect(
               offer.files.single.fileType, isNot('application/octet-stream'));
+          final receiver = FileTransferReceiver(
+            exporterSecret: serverSession.session.exporterSecret,
+            store: _AcceptingStore(),
+            storageNamespace: phoneIdentity.id.value,
+          );
+          final accepted = await receiver.acceptOffer(
+            offer,
+            tier: PermissionTier.extended,
+          );
+          final confirmed = Completer<void>();
+          final subscription = serverSession.session.messages.listen(
+            (message) async {
+              if (message is FileChunk) {
+                await receiver.receiveChunk(
+                  message,
+                  tier: PermissionTier.extended,
+                );
+              } else if (message is FileComplete) {
+                final result = await receiver.complete(
+                  message,
+                  tier: PermissionTier.extended,
+                );
+                expect(result, CompletionDisposition.completed);
+                await serverSession.session.send(message);
+                confirmed.complete();
+              }
+            },
+          );
+          await serverSession.session.send(accepted.accept);
+          await confirmed.future.timeout(const Duration(seconds: 5));
+          for (var attempt = 0;
+              attempt < 30 &&
+                  controller.state.transfers.single.status !=
+                      TransferStatus.completed;
+              attempt++) {
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+          }
+          expect(controller.state.transfers.single.status,
+              TransferStatus.completed);
+          await subscription.cancel();
+          await receiver.dispose();
         } finally {
           container.dispose();
           tempDir.deleteSync(recursive: true);
@@ -1290,4 +1375,42 @@ final class _DecisionRecordingController extends MobileTransferController {
     declined.add(request.transferId);
     state = state.copyWith(pendingIncoming: () => null);
   }
+}
+
+/// Receives the video in memory so the test can echo completion only after
+/// the real transport receiver has verified its bytes and hash.
+final class _AcceptingStore implements IncomingTransferStore {
+  @override
+  Future<Map<String, IncomingFile>> prepare(FileOffer offer,
+          {required String namespace}) async =>
+      <String, IncomingFile>{
+        for (final file in offer.files) file.fileId: _AcceptingFile(file),
+      };
+}
+
+final class _AcceptingFile implements IncomingFile {
+  _AcceptingFile(this.offer) : _bytes = Uint8List(offer.size);
+
+  @override
+  final OfferedFile offer;
+  final Uint8List _bytes;
+  final List<ReceivedRange> _ranges = <ReceivedRange>[];
+
+  @override
+  List<ReceivedRange> get receivedRanges => _ranges;
+
+  @override
+  Future<void> write(int offset, Uint8List bytes) async {
+    _bytes.setRange(offset, offset + bytes.length, bytes);
+    _ranges.add(ReceivedRange(offset, offset + bytes.length));
+  }
+
+  @override
+  Stream<List<int>> read() => Stream<List<int>>.value(_bytes);
+
+  @override
+  Future<void> commit() async {}
+
+  @override
+  Future<void> delete() async {}
 }

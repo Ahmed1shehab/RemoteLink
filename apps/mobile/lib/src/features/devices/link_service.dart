@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/l10n.dart';
 import '../../app/providers.dart';
 
 /// Keeps this phone's link alive while the app is off screen.
@@ -270,7 +271,7 @@ String _peerName(Ref ref) {
   final reported = ref.read(connectedPeerProvider).valueOrNull?.name;
   if (reported != null && reported.isNotEmpty) return reported;
 
-  return target?.host ?? 'your computer';
+  return target?.host ?? currentAppLocalizations().platformComputer;
 }
 
 /// Runs the background service for exactly as long as there is a link worth
@@ -294,9 +295,10 @@ final backgroundLinkProvider = Provider<void>((ref) {
       case ClientState.pairing:
         unawaited(
           service.start(
-            title: 'Connected to $name',
-            body: 'Remote Link is holding the connection open.',
-            disconnectLabel: 'Disconnect',
+            title: currentAppLocalizations()
+                .notificationConnectedTitle(bidiIsolate(name)),
+            body: currentAppLocalizations().notificationConnectedBody,
+            disconnectLabel: currentAppLocalizations().disconnect,
           ),
         );
       case ClientState.awaitingApproval:
@@ -305,9 +307,11 @@ final backgroundLinkProvider = Provider<void>((ref) {
         // the network is retrying would send the user to the wrong place.
         unawaited(
           service.start(
-            title: 'Waiting for $name',
-            body: 'Allow the connection on $name to carry on.',
-            disconnectLabel: 'Cancel',
+            title: currentAppLocalizations()
+                .notificationWaitingTitle(bidiIsolate(name)),
+            body: currentAppLocalizations()
+                .notificationWaitingBody(bidiIsolate(name)),
+            disconnectLabel: currentAppLocalizations().cancel,
           ),
         );
       case ClientState.connecting:
@@ -317,9 +321,9 @@ final backgroundLinkProvider = Provider<void>((ref) {
         // changes so the shade does not claim a link that is currently down.
         unawaited(
           service.start(
-            title: 'Reconnecting to $name',
-            body: 'Remote Link lost the connection and is trying again.',
-            disconnectLabel: 'Stop',
+            title: currentAppLocalizations().reconnectingTo(bidiIsolate(name)),
+            body: currentAppLocalizations().notificationReconnectingBody,
+            disconnectLabel: currentAppLocalizations().notificationStop,
           ),
         );
       case ClientState.idle:

@@ -5,6 +5,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 
 import '../../app/app_icons.dart';
+import '../../app/l10n.dart';
 
 /// Points the camera at the code the computer is showing.
 ///
@@ -75,11 +76,11 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
-          title: const Text('Scan code'),
+          title: Text(context.l10n.scanCodeToPair),
           actions: <Widget>[
             IconButton(
               icon: const AppIcon(AppIcons.settings),
-              tooltip: 'Torch',
+              tooltip: context.l10n.torchTooltip,
               onPressed: () => unawaited(_controller.toggleTorch()),
             ),
           ],
@@ -97,20 +98,19 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+              padding: const EdgeInsetsDirectional.fromSTEB(24, 20, 24, 32),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   Text(
-                    'On your computer, open Remote Link and click '
-                    '“Pair a phone”.',
+                    context.l10n.scannerInstructions,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   if (_sawForeignCode) ...<Widget>[
                     const SizedBox(height: 10),
                     Text(
-                      'That code is not from Remote Link.',
+                      context.l10n.foreignCodeWarning,
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: Theme.of(context).colorScheme.error,
@@ -158,9 +158,9 @@ class _ScannerUnavailable extends StatelessWidget {
           const SizedBox(height: 20),
           Text(
             switch ((denied, unsupported)) {
-              (true, _) => 'Remote Link cannot use the camera',
-              (_, true) => 'This device has no camera to scan with',
-              _ => 'The camera could not start',
+              (true, _) => context.l10n.cameraPermissionDeniedTitle,
+              (_, true) => context.l10n.cameraUnsupportedTitle,
+              _ => context.l10n.cameraErrorTitle,
             },
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.titleMedium,
@@ -168,14 +168,9 @@ class _ScannerUnavailable extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             switch ((denied, unsupported)) {
-              (true, _) => 'Turn the camera on for Remote Link in your '
-                  'device’s Settings, under Apps.\n\nYou can pair without it: '
-                  'go back, and the computer appears in the list on its own '
-                  'as long as both are on the same Wi-Fi.',
-              (_, true) => 'Go back — the computer appears in the list on its '
-                  'own as long as both are on the same Wi-Fi.',
-              _ => 'Something stopped the camera from starting. Try again, or '
-                  'go back and pick the computer from the list.',
+              (true, _) => context.l10n.cameraPermissionDeniedDesc,
+              (_, true) => context.l10n.cameraUnsupportedDesc,
+              _ => context.l10n.cameraErrorDesc,
             },
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodySmall,
@@ -185,7 +180,7 @@ class _ScannerUnavailable extends StatelessWidget {
             TextButton.icon(
               onPressed: onRetry,
               icon: const AppIcon(AppIcons.settings),
-              label: const Text('Try again'),
+              label: Text(context.l10n.tryAgain),
             ),
           ],
         ],

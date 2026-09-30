@@ -2,8 +2,8 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'app_icons.dart';
-
 import 'brand.dart';
+import 'l10n.dart';
 import 'motion.dart';
 
 @immutable
@@ -47,12 +47,12 @@ class DesktopSidebar extends StatelessWidget {
         filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
         child: Container(
           width: 224,
-          padding: const EdgeInsets.fromLTRB(16, 22, 16, 18),
+          padding: const EdgeInsetsDirectional.fromSTEB(16, 22, 16, 18),
           decoration: BoxDecoration(
             color: (dark ? scheme.surfaceContainerLow : Colors.white)
                 .withValues(alpha: dark ? 0.78 : 0.72),
-            border: Border(
-              right: BorderSide(
+            border: BorderDirectional(
+              end: BorderSide(
                 color: scheme.outlineVariant.withValues(alpha: 0.55),
               ),
             ),
@@ -78,7 +78,7 @@ class DesktopSidebar extends StatelessWidget {
                                 ?.copyWith(fontWeight: FontWeight.w700),
                           ),
                           Text(
-                            'Desktop',
+                            context.l10n.desktopSubtitle,
                             style: Theme.of(context).textTheme.labelSmall,
                           ),
                         ],
@@ -241,12 +241,12 @@ class DesktopCompactHeader extends StatelessWidget {
           IconButton(
             onPressed: onDiagnostics,
             icon: const AppIcon(AppIcons.analytics),
-            tooltip: 'Diagnostics',
+            tooltip: context.l10n.tooltipDiagnostics,
           ),
           IconButton(
             onPressed: onSettings,
             icon: const AppIcon(AppIcons.materialSettings, color: Colors.white),
-            tooltip: 'Settings',
+            tooltip: context.l10n.tooltipSettings,
           ),
         ],
       ),
