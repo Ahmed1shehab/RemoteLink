@@ -6,12 +6,12 @@ import 'dart:typed_data';
 import 'dart:ui' show PointMode;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/app_icons.dart';
+import '../../app/haptics.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
@@ -224,7 +224,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
               direction: direction,
             ),
           );
-          HapticFeedback.mediumImpact();
+          unawaited(ref.read(appHapticsProvider).mediumImpact());
         }
       }
       return;
@@ -425,7 +425,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
         MouseButtonEvent(
             button: button, pressed: false, clickCount: clickCount),
       );
-      HapticFeedback.selectionClick();
+      unawaited(ref.read(appHapticsProvider).selectionClick());
     }
 
     _pointer.endGesture();
@@ -493,7 +493,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
     unawaitedSend(
       const MouseButtonEvent(button: MouseButton.left, pressed: true),
     );
-    HapticFeedback.mediumImpact();
+    unawaited(ref.read(appHapticsProvider).mediumImpact());
   }
 
   void unawaitedSend(Message message) => unawaited(_send(message));
@@ -628,7 +628,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
   void _click(MouseButton button) {
     unawaitedSend(MouseButtonEvent(button: button, pressed: true));
     unawaitedSend(MouseButtonEvent(button: button, pressed: false));
-    HapticFeedback.selectionClick();
+    unawaited(ref.read(appHapticsProvider).selectionClick());
   }
 
   /// Moves the cursor by a fixed amount, bypassing the gesture path entirely.
@@ -640,7 +640,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
   /// has to move a predictable distance or it cannot be aimed.
   void _move(int dx, int dy) {
     unawaitedSend(MouseMove(deltaX: dx, deltaY: dy));
-    HapticFeedback.selectionClick();
+    unawaited(ref.read(appHapticsProvider).selectionClick());
   }
 
   void _scroll(int dx, int dy) {
@@ -653,7 +653,7 @@ class _TouchpadSurfaceViewState extends ConsumerState<TouchpadSurfaceView>
         pixelsY: dy,
       ),
     );
-    HapticFeedback.selectionClick();
+    unawaited(ref.read(appHapticsProvider).selectionClick());
   }
 }
 

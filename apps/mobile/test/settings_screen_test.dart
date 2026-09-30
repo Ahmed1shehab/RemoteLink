@@ -1,10 +1,11 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:remotelink_mobile/src/app/brand.dart';
+import 'package:remotelink_mobile/src/app/haptics.dart';
 import 'package:remotelink_mobile/src/app/providers.dart';
 import 'package:remotelink_mobile/src/features/control/control_screen.dart';
 import 'package:remotelink_mobile/src/features/devices/device_list_screen.dart';
@@ -93,6 +94,7 @@ void main() {
       expect(find.text('Pointer sensitivity'), findsOneWidget);
       expect(find.text('Natural scrolling'), findsOneWidget);
       expect(find.text('Tap to click'), findsOneWidget);
+      expect(find.text('Haptic feedback'), findsOneWidget);
 
       // Section 5: CLIPBOARD
       expect(find.text('Clipboard'), findsOneWidget);
@@ -523,6 +525,101 @@ void main() {
       expect(storedJson, isNotNull);
       final decoded = jsonDecode(storedJson!) as Map<String, dynamic>;
       expect(decoded['syncFromDesktop'], isFalse);
+    });
+
+    testWidgets(
+        'haptics setting toggles, persists, and suppresses haptic calls',
+        (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final hapticCalls = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'HapticFeedback.vibrate') {
+            hapticCalls.add(call);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+
+      final storage = InMemoryIdentityStore();
+      late final WidgetRef capturedRef;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: mobileSettingsOverrides(
+            identityStore: storage,
+          ),
+          child: MaterialApp(
+            home: Consumer(
+              builder: (context, ref, child) {
+                capturedRef = ref;
+                return const SettingsScreen();
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final hapticsFinder = find.widgetWithText(
+        SwitchListTile,
+        'Haptic feedback',
+      );
+      expect(hapticsFinder, findsOneWidget);
+
+      // Default is enabled
+      var tile = tester.widget<SwitchListTile>(hapticsFinder);
+      expect(tile.value, isTrue);
+
+      // When enabled, invoking AppHaptics fires platform haptic feedback
+      await capturedRef.read(appHapticsProvider).selectionClick();
+      await capturedRef.read(appHapticsProvider).mediumImpact();
+      expect(hapticCalls.length, 2);
+      hapticCalls.clear();
+
+      // Toggle haptics off
+      final switchFinder = find.descendant(
+        of: hapticsFinder,
+        matching: find.byType(Switch),
+      );
+      await tester.tap(switchFinder);
+      await tester.pump();
+      await tester.pump();
+
+      tile = tester.widget<SwitchListTile>(hapticsFinder);
+      expect(tile.value, isFalse);
+
+      // Verify written to persistent storage
+      final storedValue = await storage.read('remotelink.settings.haptics');
+      expect(storedValue, 'false');
+
+      // Verify that when disabled, invoking AppHaptics suppresses all haptic calls
+      await capturedRef.read(appHapticsProvider).selectionClick();
+      await capturedRef.read(appHapticsProvider).mediumImpact();
+      await capturedRef.read(appHapticsProvider).lightImpact();
+      await capturedRef.read(appHapticsProvider).heavyImpact();
+      expect(hapticCalls, isEmpty);
+
+      // Toggle back on
+      await tester.tap(switchFinder);
+      await tester.pump();
+      await tester.pump();
+
+      tile = tester.widget<SwitchListTile>(hapticsFinder);
+      expect(tile.value, isTrue);
+
+      await capturedRef.read(appHapticsProvider).selectionClick();
+      expect(hapticCalls.length, 1);
     });
 
     testWidgets('reachable from DeviceListScreen', (tester) async {

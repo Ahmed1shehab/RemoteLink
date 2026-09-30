@@ -1044,6 +1044,17 @@ class _TouchpadSection extends ConsumerWidget {
               value: pointerSettings.tapToClick,
               onChanged: (val) => notifier.setTapToClick(val),
             ),
+            const Divider(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Haptic feedback'),
+              subtitle: const Text(
+                'Vibrate on gestures, keyboard taps, and buttons',
+              ),
+              value: ref.watch(hapticsProvider),
+              onChanged: (val) =>
+                  ref.read(hapticsProvider.notifier).setEnabled(val),
+            ),
           ],
         ),
       ),

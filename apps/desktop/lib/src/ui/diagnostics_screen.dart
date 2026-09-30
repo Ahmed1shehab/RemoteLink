@@ -104,6 +104,8 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
               const SizedBox(height: 24),
               _ServiceStatusCard(status: info.serviceStatus),
               const SizedBox(height: 16),
+              _DiscoveryBeaconCard(beacon: info.beacon),
+              const SizedBox(height: 16),
               _DispatcherCountersCard(counters: info.dispatcherCounters),
               const SizedBox(height: 16),
               _BackendsCard(backends: info.backends),
@@ -149,6 +151,22 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
       for (final addr in info.serviceStatus.localAddresses) {
         buffer.writeln('  - $addr:${info.serviceStatus.boundPort}');
       }
+    }
+    buffer.writeln();
+
+    buffer.writeln('--- Discovery Beacon ---');
+    buffer.writeln(
+        'Advertising: ${info.beacon.isAdvertising ? "Active" : "Off"}');
+    buffer.writeln('Interfaces:');
+    if (info.beacon.interfaces.isEmpty) {
+      buffer.writeln('  (none detected)');
+    } else {
+      for (final iface in info.beacon.interfaces) {
+        buffer.writeln('  - $iface');
+      }
+    }
+    if (info.beacon.lastError != null) {
+      buffer.writeln('Last Error: ${info.beacon.lastError}');
     }
     buffer.writeln();
 
@@ -358,6 +376,211 @@ class _ServiceStatusCard extends StatelessWidget {
       children: <Widget>[
         SizedBox(
           width: 120,
+          child: Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        Expanded(
+          child: SelectableText(
+            value,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontFamily: isMonospace ? 'monospace' : null,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Displays the current state of discovery beacons (UDP multicast / Bonjour
+/// advertising), listing active network interfaces and any error encountered
+/// during advertisement socket binding.
+class _DiscoveryBeaconCard extends StatelessWidget {
+  const _DiscoveryBeaconCard({required this.beacon});
+
+  final DiscoveryBeaconDiagnostic beacon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                AppIcon(
+                  AppIcons.airdrop,
+                  color: colorScheme.primary,
+                  size: 24,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Discovery Beacon',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: beacon.isAdvertising
+                        ? colorScheme.primaryContainer
+                        : colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      AppIcon(
+                        beacon.isAdvertising
+                            ? AppIcons.materialLink
+                            : AppIcons.materialClose,
+                        size: 14,
+                        color: beacon.isAdvertising
+                            ? colorScheme.onPrimaryContainer
+                            : colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        beacon.isAdvertising ? 'Advertising' : 'Off',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: beacon.isAdvertising
+                              ? colorScheme.onPrimaryContainer
+                              : colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _infoRow(
+              context,
+              'Advertising State',
+              beacon.isAdvertising ? 'Active' : 'Off',
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Advertising Interface(s):',
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 6),
+            if (beacon.interfaces.isEmpty)
+              Text(
+                'No interfaces bound',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontStyle: FontStyle.italic,
+                ),
+              )
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: <Widget>[
+                  for (final iface in beacon.interfaces)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: colorScheme.outlineVariant,
+                        ),
+                      ),
+                      child: SelectableText(
+                        iface,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            if (beacon.lastError != null) ...<Widget>[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: colorScheme.errorContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    AppIcon(
+                      AppIcons.materialError,
+                      color: colorScheme.onErrorContainer,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            'Last Discovery Error',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: colorScheme.onErrorContainer,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          SelectableText(
+                            beacon.lastError!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onErrorContainer,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _infoRow(
+    BuildContext context,
+    String label,
+    String value, {
+    bool isMonospace = false,
+  }) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SizedBox(
+          width: 140,
           child: Text(
             label,
             style: theme.textTheme.bodySmall?.copyWith(

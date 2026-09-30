@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 // Prefixed deliberately. `TextInput` and `KeyEvent` are names Flutter's own
 // services library already owns, and this file legitimately needs both worlds:
@@ -12,6 +11,7 @@ import 'package:rl_protocol/rl_protocol.dart' as proto;
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/app_icons.dart';
+import '../../app/haptics.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
 import 'hardware_keyboard_view.dart';
@@ -148,7 +148,7 @@ class _KeyboardScreenState extends ConsumerState<KeyboardScreen> {
     await _send(
       proto.KeyEvent(hidUsage: usage, pressed: false, modifiers: modifiers),
     );
-    unawaited(HapticFeedback.selectionClick());
+    unawaited(ref.read(appHapticsProvider).selectionClick());
 
     // Unlocked modifiers are one-shot, matching how a sticky-keys accessibility
     // mode behaves: press Ctrl, press C, Ctrl releases itself. Holding them
@@ -178,7 +178,7 @@ class _KeyboardScreenState extends ConsumerState<KeyboardScreen> {
 
   Future<void> _shortcut(proto.NamedShortcut shortcut) async {
     await _send(proto.NamedShortcutMessage(shortcut));
-    unawaited(HapticFeedback.selectionClick());
+    unawaited(ref.read(appHapticsProvider).selectionClick());
   }
 
   /// Keeps the newest text visible as it is typed.

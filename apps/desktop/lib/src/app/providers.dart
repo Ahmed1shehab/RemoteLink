@@ -664,6 +664,11 @@ final desktopDiagnosticsProvider =
             unavailableReason: service.mediaUnavailableReason,
           ),
         ),
+        beacon: DiscoveryBeaconDiagnostic(
+          isAdvertising: service.isDiscoveryAdvertising,
+          interfaces: service.discoveryInterfaces,
+          lastError: service.discoveryLastError,
+        ),
         devices: <DeviceDiagnostic>[
           for (final device in service.devices) deviceDiagnosticFor(device),
         ],
@@ -690,6 +695,24 @@ final desktopDiagnosticsProvider =
   }
 });
 
+/// Discovery beacon status reported on the desktop diagnostics panel.
+final class DiscoveryBeaconDiagnostic {
+  const DiscoveryBeaconDiagnostic({
+    required this.isAdvertising,
+    required this.interfaces,
+    this.lastError,
+  });
+
+  /// Whether the beacon is actively broadcasting UDP announcements or Bonjour records.
+  final bool isAdvertising;
+
+  /// Interface names on which discovery is currently bound/active.
+  final List<String> interfaces;
+
+  /// Most recent error encountered during discovery socket binding or advertising, if any.
+  final String? lastError;
+}
+
 /// Diagnostic snapshot data structure.
 final class DiagnosticsInfo {
   const DiagnosticsInfo({
@@ -697,12 +720,17 @@ final class DiagnosticsInfo {
     required this.dispatcherCounters,
     required this.backends,
     required this.devices,
+    this.beacon = const DiscoveryBeaconDiagnostic(
+      isAdvertising: false,
+      interfaces: <String>[],
+    ),
   });
 
   final DesktopStatus serviceStatus;
   final DispatcherCounters dispatcherCounters;
   final BackendAvailability backends;
   final List<DeviceDiagnostic> devices;
+  final DiscoveryBeaconDiagnostic beacon;
 }
 
 /// Statistics from [CommandDispatcher].

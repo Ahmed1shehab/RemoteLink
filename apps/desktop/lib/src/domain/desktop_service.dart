@@ -497,6 +497,22 @@ final class DesktopService {
 
   bool get isRunning => _server?.isRunning ?? false;
 
+  /// Whether discovery is currently active (either UDP multicast beacon or Bonjour).
+  bool get isDiscoveryAdvertising =>
+      (_beacon?.isRunning ?? false) || (_bonjour?.isAdvertising ?? false);
+
+  /// Network interfaces advertising the discovery beacon.
+  List<String> get discoveryInterfaces {
+    final interfaces = _beacon?.boundInterfaces;
+    if (interfaces != null && interfaces.isNotEmpty) {
+      return interfaces;
+    }
+    return _localAddresses;
+  }
+
+  /// Most recent error encountered during discovery advertising, if any.
+  String? get discoveryLastError => _beacon?.lastError ?? _bonjour?.lastError;
+
   bool get inputAvailable => _input.isAvailable;
 
   String? get inputUnavailableReason => _input.unavailableReason;
