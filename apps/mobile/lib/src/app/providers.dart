@@ -763,6 +763,16 @@ final sensitivityTutorialSeenProvider =
   SensitivityTutorialNotifier.new,
 );
 
+/// Where mobile identity, trust, logs, and settings are stored.
+Future<Directory> mobileAppDirectory() async {
+  final base = await getApplicationSupportDirectory();
+  final directory = Directory('${base.path}/RemoteLink');
+  if (!directory.existsSync()) {
+    await directory.create(recursive: true);
+  }
+  return directory;
+}
+
 /// In-memory log buffer backing the diagnostics view.
 final memoryLogSinkProvider = Provider<MemoryLogSink>((ref) {
   final sink = Log.sink;
@@ -773,4 +783,25 @@ final memoryLogSinkProvider = Provider<MemoryLogSink>((ref) {
     }
   }
   return MemoryLogSink();
+});
+
+/// File log sink backing persistent on-disk diagnostics.
+final fileLogSinkProvider = Provider<FileLogSink?>((ref) {
+  final sink = Log.sink;
+  if (sink is FileLogSink) return sink;
+  if (sink is MultiLogSink) {
+    for (final s in sink.sinks) {
+      if (s is FileLogSink) return s;
+    }
+  }
+  return null;
+});
+
+/// Crash handler capturing uncaught exceptions alongside recent logs.
+final crashHandlerProvider = Provider<CrashHandler>((ref) {
+  return CrashHandler.instance ??
+      CrashHandler(
+        memorySink: ref.watch(memoryLogSinkProvider),
+        sink: ref.watch(fileLogSinkProvider),
+      );
 });

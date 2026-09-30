@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_core/rl_core.dart';
 
 import 'src/app/brand.dart';
+import 'src/app/crash_capture.dart';
 import 'src/app/providers.dart';
 import 'src/app/splash_screen.dart';
 import 'src/app/theme.dart';
@@ -19,17 +20,44 @@ import 'src/features/watch/watch_bridge.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  final memorySink = MemoryLogSink();
+  FileLogSink? fileSink;
+  try {
+    final directory = await mobileAppDirectory();
+    fileSink = FileLogSink(
+      path: '${directory.path}/remotelink.log',
+    );
+  } catch (error) {
+    // If the storage directory cannot be resolved on launch, keep running
+    // with memory and console sinks only.
+  }
+
   Log.level = const bool.fromEnvironment('dart.vm.product')
       ? LogLevel.warn
       : LogLevel.debug;
   Log.sink = MultiLogSink(<LogSink>[
     const ConsoleLogSink(),
-    // Kept so a bug report can attach recent history without the user having
-    // needed to enable logging beforehand.
-    MemoryLogSink(),
+    memorySink,
+    if (fileSink != null) fileSink,
   ]);
 
-  runApp(const ProviderScope(child: RemoteLinkApp()));
+  final crashHandler = CrashHandler(
+    memorySink: memorySink,
+    sink: fileSink,
+  );
+  CrashHandler.instance = crashHandler;
+  installCrashCapture(crashHandler);
+
+  runApp(
+    ProviderScope(
+      overrides: <Override>[
+        memoryLogSinkProvider.overrideWithValue(memorySink),
+        if (fileSink != null) fileLogSinkProvider.overrideWithValue(fileSink),
+        crashHandlerProvider.overrideWithValue(crashHandler),
+      ],
+      child: const RemoteLinkApp(),
+    ),
+  );
 }
 
 /// The messenger every screen's snackbars go through.
