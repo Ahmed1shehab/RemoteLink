@@ -14,6 +14,7 @@ import '../domain/auto_start.dart';
 import '../domain/clipboard_history_store.dart';
 import '../domain/desktop_preferences.dart';
 import '../domain/desktop_service.dart';
+import '../domain/file_launcher.dart';
 import '../domain/file_transfer_store.dart';
 import '../domain/instance_lock.dart';
 import '../domain/transfer_model.dart';
@@ -67,6 +68,32 @@ final autoStartProvider = Provider<AutoStart>(
     label: kAutoStartLabel,
     executablePath: Platform.resolvedExecutable,
   ),
+);
+
+/// Seam for opening files in their default application and revealing them in the
+/// desktop operating system's file manager.
+///
+/// Abstracted behind an interface and provider so widget tests can exercise
+/// transfer completion and user file-opening actions without spawning child
+/// processes or depending on host window managers.
+abstract interface class FileLauncherService {
+  Future<bool> openFile(String path);
+  Future<bool> revealFile(String path);
+}
+
+final class SystemFileLauncher implements FileLauncherService {
+  const SystemFileLauncher();
+
+  @override
+  Future<bool> openFile(String path) => FileLauncher.openFile(path);
+
+  @override
+  Future<bool> revealFile(String path) => FileLauncher.revealFile(path);
+}
+
+/// The active file launcher implementation used by desktop UI components.
+final fileLauncherProvider = Provider<FileLauncherService>(
+  (ref) => const SystemFileLauncher(),
 );
 
 /// Whether the companion is registered to start when the user logs in.

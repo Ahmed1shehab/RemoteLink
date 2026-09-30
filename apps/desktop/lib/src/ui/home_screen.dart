@@ -110,6 +110,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ref.watch(rememberedPeersProvider).valueOrNull ?? const <String>{};
     final transfers =
         ref.watch(transfersProvider).valueOrNull ?? <TransferRecord>[];
+    final fileLauncher = ref.watch(fileLauncherProvider);
 
     // Tab order is pinned to the order the sections are read in, rather than
     // left to the default policy.
@@ -277,6 +278,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       transfers: transfers,
                       onCancel: _cancelTransfer,
                       onRetry: _retryTransfer,
+                      onOpenFile: fileLauncher.openFile,
+                      onRevealFile: fileLauncher.revealFile,
                     ),
                   ),
                 ),
@@ -1107,11 +1110,15 @@ class _TransfersSection extends StatelessWidget {
     required this.transfers,
     required this.onCancel,
     required this.onRetry,
+    this.onOpenFile = FileLauncher.openFile,
+    this.onRevealFile = FileLauncher.revealFile,
   });
 
   final List<TransferRecord> transfers;
   final ValueChanged<String> onCancel;
   final ValueChanged<String> onRetry;
+  final Future<bool> Function(String path) onOpenFile;
+  final Future<bool> Function(String path) onRevealFile;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -1136,6 +1143,8 @@ class _TransfersSection extends StatelessWidget {
                 transfer: transfer,
                 onCancel: () => onCancel(transfer.transferId),
                 onRetry: () => onRetry(transfer.transferId),
+                onOpenFile: onOpenFile,
+                onRevealFile: onRevealFile,
               ),
         ],
       );
@@ -1146,11 +1155,15 @@ class _TransferTile extends StatelessWidget {
     required this.transfer,
     required this.onCancel,
     required this.onRetry,
+    this.onOpenFile = FileLauncher.openFile,
+    this.onRevealFile = FileLauncher.revealFile,
   });
 
   final TransferRecord transfer;
   final VoidCallback onCancel;
   final VoidCallback onRetry;
+  final Future<bool> Function(String path) onOpenFile;
+  final Future<bool> Function(String path) onRevealFile;
 
   @override
   Widget build(BuildContext context) {
@@ -1202,34 +1215,35 @@ class _TransferTile extends StatelessWidget {
             const SizedBox(height: 12),
             for (final f in transfer.files) ...<Widget>[
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Expanded(
                     child: switch (f.savedPath) {
-                      final String path => _SavedFileName(
+                      final String path => SavedFileInfo(
                           fileName: f.fileName,
                           path: path,
+                          onOpenFile: onOpenFile,
+                          onRevealFile: onRevealFile,
                         ),
-                      null => Text(
-                          f.fileName,
-                          style: const TextStyle(fontWeight: FontWeight.w500),
+                      null => Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 2,
+                          ),
+                          child: Text(
+                            f.fileName,
+                            style: const TextStyle(fontWeight: FontWeight.w500),
+                          ),
                         ),
                     },
                   ),
-                  if (f.savedPath case final String path) ...<Widget>[
-                    IconButton(
-                      onPressed: () => unawaited(FileLauncher.revealFile(path)),
-                      icon: const AppIcon(AppIcons.materialFiles, size: 18),
-                      tooltip: Platform.isMacOS
-                          ? 'Show in Finder'
-                          : 'Show in folder',
-                      visualDensity: VisualDensity.compact,
-                      color: scheme.onSurfaceVariant,
+                  const SizedBox(width: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      '${formatBytes(f.transferredBytes)} / ${formatBytes(f.totalBytes)}',
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    const SizedBox(width: 4),
-                  ],
-                  Text(
-                    '${formatBytes(f.transferredBytes)} / ${formatBytes(f.totalBytes)}',
-                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
               ),
@@ -1299,43 +1313,246 @@ class _TransferTile extends StatelessWidget {
   }
 }
 
-/// The name of a file that arrived, as a link to the file itself.
+/// Shortens a long path by eliding middle directory segments when it exceeds
+/// [maxLength].
 ///
-/// A received file the user cannot reach from here is a file they have to go
-/// hunting for — and the name shown is not always the name on disk, so hunting
-/// is exactly what it takes. Clicking opens it; the tooltip says where it is.
-class _SavedFileName extends StatelessWidget {
-  const _SavedFileName({required this.fileName, required this.path});
+/// Long paths are awkward in card layouts, but chopping off the end loses the
+/// file name (which may have been renamed to avoid a collision), while chopping
+/// off the front loses where the file landed. Middle elision keeps both the root
+/// folder and the leaf directory/file visible while replacing intermediary
+/// nesting with `...`.
+@visibleForTesting
+String elideMiddlePath(String path, {int maxLength = 55}) {
+  if (path.length <= maxLength) return path;
+
+  final isWindows = path.contains(r'\');
+  final separator = isWindows ? r'\' : '/';
+  final parts = path.split(separator).where((s) => s.isNotEmpty).toList();
+
+  // If there are too few parts to preserve head and tail, perform character
+  // middle truncation.
+  if (parts.length <= 3) {
+    const ellipsis = '...';
+    final available = maxLength - ellipsis.length;
+    if (available <= 0) return path;
+    final headCount = (available / 2).ceil();
+    final tailCount = available - headCount;
+    return '${path.substring(0, headCount)}$ellipsis${path.substring(path.length - tailCount)}';
+  }
+
+  final prefix = path.startsWith(separator) ? separator : '';
+  final head = <String>[parts.first];
+  final tail = <String>[parts.last];
+  var headIndex = 1;
+  if ((parts.first == '~' || parts.first.endsWith(':')) && parts.length > 2) {
+    head.add(parts[1]);
+    headIndex = 2;
+  }
+  var tailIndex = parts.length - 2;
+
+  // Attempt to keep the immediate parent directory in the tail if it fits.
+  while (tailIndex > headIndex) {
+    final candidateTail = parts[tailIndex];
+    final projectedLength = prefix.length +
+        head.join(separator).length +
+        separator.length +
+        3 +
+        separator.length +
+        candidateTail.length +
+        separator.length +
+        tail.join(separator).length;
+    if (projectedLength <= maxLength) {
+      tail.insert(0, candidateTail);
+      tailIndex--;
+    } else {
+      break;
+    }
+  }
+
+  return '$prefix${head.join(separator)}$separator...$separator${tail.join(separator)}';
+}
+
+/// Formats a received file's saved path for display in the desktop UI.
+///
+/// On macOS and Linux, the user's home directory is replaced with `~` so the
+/// path is immediately recognizable and does not waste horizontal space on
+/// redundant `/Users/username` prefixes. On Windows, the real path (e.g.
+/// `C:\Users\me\...`) is preserved intact as paths with tilde are not standard
+/// Windows syntax.
+///
+/// If the resulting path is particularly long, middle directory segments are
+/// elided with [elideMiddlePath] so the folder part and file name remain legible
+/// within the card layout. The full, un-elided path is preserved in a tooltip.
+@visibleForTesting
+String formatDisplayPath(
+  String path, {
+  String? homeDir,
+  bool? isWindows,
+  int maxPathLength = 55,
+}) {
+  final windows = isWindows ?? Platform.isWindows;
+  String formatted;
+  if (windows) {
+    formatted = path;
+  } else {
+    final home = homeDir ?? Platform.environment['HOME'];
+    if (home != null && home.isNotEmpty) {
+      final normalizedHome =
+          home.endsWith('/') ? home.substring(0, home.length - 1) : home;
+      if (path == normalizedHome) {
+        formatted = '~';
+      } else if (path.startsWith('$normalizedHome/')) {
+        formatted = '~${path.substring(normalizedHome.length)}';
+      } else {
+        formatted = path;
+      }
+    } else {
+      formatted = path;
+    }
+  }
+
+  return elideMiddlePath(formatted, maxLength: maxPathLength);
+}
+
+/// The details of a received file, with direct links to open the file in its
+/// default application or reveal it in the operating system's file manager.
+///
+/// A received file the user cannot reach from the transfer card is a file they
+/// have to hunt for on disk — and because files that collide with existing ones
+/// are renamed on arrival, the name on disk is not always the name they sent.
+///
+/// The file name is a clickable link to open the file directly in whatever
+/// application owns its MIME type. Directly underneath, the full saved path is
+/// displayed as a secondary link that reveals the file in Finder (macOS),
+/// Explorer (Windows), or the desktop file manager (Linux) with the item selected.
+///
+/// If the file was moved or deleted after landing, attempting to open or reveal
+/// it shows a descriptive SnackBar rather than failing silently.
+@visibleForTesting
+class SavedFileInfo extends StatelessWidget {
+  const SavedFileInfo({
+    super.key,
+    required this.fileName,
+    required this.path,
+    this.onOpenFile = FileLauncher.openFile,
+    this.onRevealFile = FileLauncher.revealFile,
+    @visibleForTesting this.homeDirForTesting,
+    @visibleForTesting this.isWindowsForTesting,
+    @visibleForTesting this.isMacForTesting,
+  });
 
   final String fileName;
   final String path;
 
+  /// Invoked when the user clicks or activates the file name.
+  ///
+  /// Expected to return `true` if the file was opened, or `false` if it could
+  /// not be opened (e.g. because it was moved or deleted).
+  final Future<bool> Function(String path) onOpenFile;
+
+  /// Invoked when the user clicks or activates the saved path.
+  ///
+  /// Expected to return `true` if the file was revealed, or `false` if it could
+  /// not be found.
+  final Future<bool> Function(String path) onRevealFile;
+
+  final String? homeDirForTesting;
+  final bool? isWindowsForTesting;
+  final bool? isMacForTesting;
+
+  Future<void> _open(BuildContext context) async {
+    final ok = await onOpenFile(path);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          const SnackBar(content: Text('File was moved or deleted')),
+        );
+    }
+  }
+
+  Future<void> _reveal(BuildContext context) async {
+    final ok = await onRevealFile(path);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          const SnackBar(content: Text('File was moved or deleted')),
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final displayPath = formatDisplayPath(
+      path,
+      homeDir: homeDirForTesting,
+      isWindows: isWindowsForTesting,
+    );
 
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Tooltip(
-        message: path,
-        waitDuration: const Duration(milliseconds: 400),
-        child: InkWell(
-          onTap: () => unawaited(FileLauncher.openFile(path)),
-          borderRadius: BorderRadius.circular(6),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            child: Text(
-              fileName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontWeight: FontWeight.w500,
-                color: scheme.primary,
+    final isMac = isMacForTesting ??
+        (!(isWindowsForTesting ?? false) && Platform.isMacOS);
+    final revealLabel =
+        isMac ? 'Show $fileName in Finder' : 'Show $fileName in folder';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Tooltip(
+          message: 'Open $fileName',
+          waitDuration: const Duration(milliseconds: 400),
+          child: Semantics(
+            button: true,
+            label: 'Open $fileName',
+            excludeSemantics: true,
+            child: InkWell(
+              onTap: () => unawaited(_open(context)),
+              mouseCursor: SystemMouseCursors.click,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Text(
+                  fileName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                    color: scheme.primary,
+                  ),
+                ),
               ),
             ),
           ),
         ),
-      ),
+        const SizedBox(height: 2),
+        Tooltip(
+          message: path,
+          waitDuration: const Duration(milliseconds: 400),
+          child: Semantics(
+            button: true,
+            label: revealLabel,
+            excludeSemantics: true,
+            child: InkWell(
+              onTap: () => unawaited(_reveal(context)),
+              mouseCursor: SystemMouseCursors.click,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Text(
+                  displayPath,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
