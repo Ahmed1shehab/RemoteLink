@@ -541,6 +541,8 @@ final class ResumeSession extends Message {
     required this.ticket,
     required this.clientNonce,
     required this.bindingMac,
+    required this.clientEphemeral,
+    required this.capabilities,
   });
 
   final Uint8List ticket;
@@ -549,6 +551,8 @@ final class ResumeSession extends Message {
   /// MAC over `ticket || clientNonce` keyed by the resumption secret, proving
   /// the client actually holds the session key the ticket refers to.
   final Uint8List bindingMac;
+  final Uint8List clientEphemeral;
+  final Capabilities capabilities;
 
   @override
   MessageType get type => MessageType.resumeSession;
@@ -558,12 +562,16 @@ final class ResumeSession extends Message {
     writer
       ..writeLengthPrefixedBytes(ticket)
       ..writeBytes(clientNonce)
-      ..writeBytes(bindingMac);
+      ..writeBytes(bindingMac)
+      ..writeBytes(clientEphemeral)
+      ..writeUint64(capabilities.bits);
   }
 
   static ResumeSession readFrom(ByteReader reader) => ResumeSession(
         ticket: reader.readLengthPrefixedBytes(maxLength: 512),
         clientNonce: reader.readBytes(32),
         bindingMac: reader.readBytes(32),
+        clientEphemeral: reader.readBytes(32),
+        capabilities: Capabilities(reader.readUint64()),
       );
 }

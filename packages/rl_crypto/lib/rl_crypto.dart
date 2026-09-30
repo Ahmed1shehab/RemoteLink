@@ -23,5 +23,6 @@ export 'src/handshake.dart';
 export 'src/identity.dart';
 export 'src/pairing.dart';
 export 'src/primitives.dart';
+export 'src/resumption.dart';
 export 'src/session_cipher.dart';
 export 'src/trust_store.dart';

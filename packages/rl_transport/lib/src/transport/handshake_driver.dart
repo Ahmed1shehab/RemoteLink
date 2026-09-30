@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:rl_core/rl_core.dart';
@@ -42,6 +43,7 @@ abstract final class HandshakeDriver {
     required Clock clock,
     Uint8List? expectedServerKey,
     DeviceId? expectedServerId,
+    ClientResumption? resumption,
     Duration timeout = kHandshakeTimeout,
   }) async {
     final log = Log.scoped('transport.handshake.client');
@@ -57,6 +59,69 @@ abstract final class HandshakeDriver {
 
     try {
       return await _withTimeout(timeout, () async {
+        if (resumption != null && expectedServerKey != null) {
+          final ephemeral = await Primitives.generateKeyPair();
+          final publicKey =
+              Uint8List.fromList((await ephemeral.extractPublicKey()).bytes);
+          final nonce = _secureBytes(32);
+          final mac = await Primitives.mac(
+              key: resumption.secret,
+              data: <int>[...resumption.ticket, ...nonce]);
+          connection.send(codec
+              .encode(ResumeSession(
+                  ticket: resumption.ticket,
+                  clientNonce: nonce,
+                  bindingMac: mac,
+                  clientEphemeral: publicKey,
+                  capabilities: capabilities))
+              .encode());
+          final response = await reader.next();
+          if (response.type == MessageType.handshakeFinish &&
+              response.payload.length == 72) {
+            final serverEphemeral =
+                Uint8List.fromList(response.payload.sublist(0, 32));
+            final negotiatedBytes = response.payload.sublist(32, 40);
+            final advertised = Capabilities(
+                ByteData.sublistView(Uint8List.fromList(negotiatedBytes))
+                    .getUint64(0));
+            final negotiated = advertised.intersect(capabilities);
+            final transcript = await ResumeKeys.transcript(resumption.ticket,
+                nonce, publicKey, serverEphemeral, negotiatedBytes);
+            final proof =
+                await ResumeKeys.serverProof(resumption.secret, transcript);
+            if (Primitives.constantTimeEquals(
+                    proof, response.payload.sublist(40)) &&
+                negotiated.bits == advertised.bits) {
+              final shared = await Primitives.sharedSecret(
+                  keyPair: ephemeral, remotePublicKey: serverEphemeral);
+              final keys = await ResumeKeys.derive(
+                  secret: resumption.secret,
+                  shared: shared,
+                  transcript: transcript,
+                  client: true);
+              final peerId = DeviceId.fromDigest(
+                  await Primitives.sha256(expectedServerKey));
+              final session = Session(
+                  connection: connection,
+                  keys: keys,
+                  clock: clock,
+                  peerId: peerId,
+                  peerStaticPublicKey: expectedServerKey,
+                  shortAuthenticationString: '',
+                  capabilities: negotiated,
+                  isServer: false,
+                  wasResumed: true,
+                  initialRecords: reader.takePendingRecords());
+              await reader.detach();
+              return session;
+            }
+            throw const TransportError(
+                'resume_proof_failed', 'server resume proof failed');
+          }
+          // A normal ServerHello is the explicit rejection. Start the full
+          // exchange on this same socket; no connection-level error is shown.
+          _requireType(response, MessageType.serverHello);
+        }
         connection.send(codec.encode(await handshake.createHello()).encode());
 
         final serverHelloFrame = await reader.next();
@@ -127,6 +192,8 @@ abstract final class HandshakeDriver {
     required Capabilities capabilities,
     required Clock clock,
     required PeerLookup lookupPeer,
+    PeerLookup? lookupResumePeer,
+    ResumptionTickets? tickets,
     bool holdKnownPeers = false,
     Duration timeout = kHandshakeTimeout,
   }) async {
@@ -142,7 +209,94 @@ abstract final class HandshakeDriver {
 
     try {
       return await _withTimeout(timeout, () async {
-        final helloFrame = await reader.next();
+        var helloFrame = await reader.next();
+        if (helloFrame.type == MessageType.resumeSession && tickets != null) {
+          final request = _expect<ResumeSession>(
+              codec, helloFrame, MessageType.resumeSession);
+          final opened = await tickets
+              .open(request.ticket, request.clientNonce, request.bindingMac,
+                  (key, tier) async {
+            final peer = await (lookupResumePeer ?? lookupPeer)(key);
+            return peer != null && !peer.revoked && peer.permissionTier == tier;
+          });
+          if (opened != null) {
+            final ephemeral = await Primitives.generateKeyPair();
+            final publicKey =
+                Uint8List.fromList((await ephemeral.extractPublicKey()).bytes);
+            Uint8List? shared;
+            try {
+              shared = await Primitives.sharedSecret(
+                  keyPair: ephemeral, remotePublicKey: request.clientEphemeral);
+            } on Object {
+              // Even a valid ticket can carry a malformed ephemeral. Treat it
+              // like every other rejected resume and run the full handshake.
+            }
+            if (shared != null) {
+              final negotiated = capabilities.intersect(request.capabilities);
+              final negotiatedBytes = Uint8List(8);
+              ByteData.sublistView(negotiatedBytes)
+                  .setUint64(0, negotiated.bits);
+              final transcript = await ResumeKeys.transcript(
+                  request.ticket,
+                  request.clientNonce,
+                  request.clientEphemeral,
+                  publicKey,
+                  negotiatedBytes);
+              final proof =
+                  await ResumeKeys.serverProof(opened.secret, transcript);
+              final keys = await ResumeKeys.derive(
+                  secret: opened.secret,
+                  shared: shared,
+                  transcript: transcript,
+                  client: false);
+              final peerId =
+                  DeviceId.fromDigest(await Primitives.sha256(opened.peerKey));
+              connection.send(_rawFrame(
+                      Uint8List.fromList(<int>[
+                        ...publicKey,
+                        ...negotiatedBytes,
+                        ...proof,
+                      ]),
+                      codec)
+                  .encode());
+              final result = HandshakeResult(
+                  keys: keys,
+                  peerId: peerId,
+                  peerStaticPublicKey: opened.peerKey,
+                  negotiatedVersion: kProtocolVersion,
+                  capabilities: negotiated,
+                  requiresPairing: false,
+                  shortAuthenticationString: '',
+                  peerWasKnown: true);
+              final session = Session(
+                  connection: connection,
+                  keys: keys,
+                  clock: clock,
+                  peerId: peerId,
+                  peerStaticPublicKey: opened.peerKey,
+                  shortAuthenticationString: '',
+                  capabilities: negotiated,
+                  isServer: true,
+                  wasResumed: true,
+                  requiresPairing: holdKnownPeers,
+                  initialRecords: reader.takePendingRecords());
+              await reader.detach();
+              return (session, result);
+            }
+          }
+          // Do not reveal which validation failed. The client treats this
+          // ordinary hello as a request to send a fresh ClientHello.
+          connection.send(codec
+              .encode(ServerHello(
+                  selectedVersion: kProtocolVersion,
+                  serverId: identity.id,
+                  ephemeralPublicKey: Uint8List(32),
+                  serverNonce: Uint8List(32),
+                  capabilities: capabilities,
+                  requiresPairing: true))
+              .encode());
+          helloFrame = await reader.next();
+        }
         final clientHello = _expect<ClientHello>(
           codec,
           helloFrame,
@@ -312,4 +466,10 @@ final class _RecordReader {
     await _iterator.cancel();
     if (!_queue.isClosed) await _queue.close();
   }
+}
+
+Uint8List _secureBytes(int length) {
+  final source = Random.secure();
+  return Uint8List.fromList(
+      List<int>.generate(length, (_) => source.nextInt(256)));
 }
