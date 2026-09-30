@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1583,30 +1584,51 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
     return 'Manual address / Stored';
   }
 
-  void _exportLogs(BuildContext context, List<LogRecord> records) {
-    final filtered = _selectedLevel == null
-        ? records
-        : records
-            .where((r) => r.level.severity >= _selectedLevel!.severity)
-            .toList();
+  void _exportLogs(
+    BuildContext context,
+    List<LogRecord> records, [
+    FileLogSink? fileSink,
+    CrashReport? lastCrashReport,
+  ]) {
+    final home = Platform.environment['HOME'] ??
+        Platform.environment['USERPROFILE'] ??
+        '';
 
-    final buffer = StringBuffer()
-      ..writeln('=== Remote Link Mobile Diagnostics Logs ===')
-      ..writeln('Generated: ${DateTime.now().toUtc().toIso8601String()}')
-      ..writeln('Total records: ${filtered.length}')
-      ..writeln();
+    final localName = ref.read(deviceNameProvider);
+    final trustedPeers = ref.read(trustedPeersProvider).valueOrNull ?? const [];
+    final client = ref.read(clientProvider).valueOrNull;
 
-    for (final record in filtered) {
-      buffer.writeln(record.toString());
-    }
+    final peerNames = <String>{
+      if (localName.isNotEmpty) localName,
+      for (final p in trustedPeers)
+        if (p.name.isNotEmpty) p.name,
+      if (client?.target?.displayName != null &&
+          client!.target!.displayName!.isNotEmpty)
+        client.target!.displayName!,
+    };
 
-    Clipboard.setData(ClipboardData(text: buffer.toString()));
+    final redactor = LogRedactor(
+      homeDirectories: [if (home.isNotEmpty) home],
+      knownPeerNames: peerNames,
+    );
+
+    final text = buildLogExport(
+      fileSink: fileSink,
+      memoryRecords: records,
+      lastCrashReport: lastCrashReport,
+      redactor: redactor,
+      filterLevel: _selectedLevel,
+      header: '=== Remote Link Mobile Diagnostics Logs ===\n'
+          'Generated: ${DateTime.now().toUtc().toIso8601String()}',
+    );
+
+    Clipboard.setData(ClipboardData(text: text));
 
     final messenger = ScaffoldMessenger.of(context);
     messenger.clearSnackBars();
     messenger.showSnackBar(
-      SnackBar(
-        content: Text('Copied ${filtered.length} log records to clipboard'),
+      const SnackBar(
+        content: Text('Logs copied to clipboard'),
       ),
     );
   }
@@ -1623,6 +1645,8 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
     final quality = ref.watch(connectionQualityProvider).valueOrNull;
     final discovery = ref.watch(discoveryProvider).valueOrNull;
     final memorySink = ref.watch(memoryLogSinkProvider);
+    final fileSink = ref.watch(fileLogSinkProvider);
+    final crashHandler = ref.watch(crashHandlerProvider);
 
     final isConnected = clientState == ClientState.connected;
     final rttText = isConnected && quality != null
@@ -1725,7 +1749,12 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
                   ],
                 ),
                 FilledButton.tonalIcon(
-                  onPressed: () => _exportLogs(context, memorySink.records),
+                  onPressed: () => _exportLogs(
+                    context,
+                    memorySink.records,
+                    fileSink,
+                    crashHandler.lastReport,
+                  ),
                   icon: const AppIcon(AppIcons.clipboard, size: 16),
                   label: const Text('Export Logs'),
                 ),

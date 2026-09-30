@@ -8,6 +8,7 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'src/app/brand.dart';
+import 'src/app/crash_capture.dart';
 import 'src/app/providers.dart';
 import 'src/app/theme.dart';
 import 'src/domain/auto_start.dart';
@@ -24,11 +25,24 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final memorySink = MemoryLogSink();
+  final directory = await desktopAppDirectory();
+  final fileSink = FileLogSink(
+    path: '${directory.path}/remotelink.log',
+  );
+
   Log.level = kReleaseBuild ? LogLevel.info : LogLevel.debug;
   Log.sink = MultiLogSink(<LogSink>[
     const ConsoleLogSink(),
     memorySink,
+    fileSink,
   ]);
+
+  final crashHandler = CrashHandler(
+    memorySink: memorySink,
+    sink: fileSink,
+  );
+  CrashHandler.instance = crashHandler;
+  installCrashCapture(crashHandler);
 
   await windowManager.ensureInitialized();
   await windowManager.waitUntilReadyToShow(
@@ -58,6 +72,8 @@ Future<void> main() async {
     ProviderScope(
       overrides: <Override>[
         memoryLogSinkProvider.overrideWithValue(memorySink),
+        fileLogSinkProvider.overrideWithValue(fileSink),
+        crashHandlerProvider.overrideWithValue(crashHandler),
       ],
       child: const RemoteLinkDesktopApp(),
     ),

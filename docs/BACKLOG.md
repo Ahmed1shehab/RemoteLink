@@ -1712,6 +1712,8 @@ the six digits must be announced clearly, not read as one large number.
 
 ### RL-704 — Error reporting and log export
 
+**Status — DONE.** Buffered, size-capped rotating `FileLogSink` with level filtering, redaction pass, crash capture, and redacted export of persistent logs and crash reports in `packages/rl_core`, `apps/mobile`, and `apps/desktop`.
+
 **Priority** P2 · **Size** S
 
 **Spec.** `MemoryLogSink` exists and is unread. Add: a `FileLogSink` with size-

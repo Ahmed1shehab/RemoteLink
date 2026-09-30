@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -44,6 +45,8 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
   Widget build(BuildContext context) {
     final diagnosticsAsync = ref.watch(desktopDiagnosticsProvider);
     final memorySink = ref.watch(memoryLogSinkProvider);
+    final fileSink = ref.watch(fileLogSinkProvider);
+    final crashHandler = ref.watch(crashHandlerProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -51,7 +54,13 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
         actions: <Widget>[
           diagnosticsAsync.maybeWhen(
             data: (info) => FilledButton.tonalIcon(
-              onPressed: () => _copyFullReport(context, info, memorySink),
+              onPressed: () => _copyFullReport(
+                context,
+                info,
+                memorySink,
+                fileSink,
+                crashHandler.lastReport,
+              ),
               icon: const AppIcon(AppIcons.materialClipboard, size: 18),
               label: const Text('Copy All'),
             ),
@@ -71,7 +80,13 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
             ),
           ),
         ),
-        data: (info) => _buildContent(context, info, memorySink),
+        data: (info) => _buildContent(
+          context,
+          info,
+          memorySink,
+          fileSink,
+          crashHandler,
+        ),
       ),
     );
   }
@@ -80,6 +95,8 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
     BuildContext context,
     DiagnosticsInfo info,
     MemoryLogSink memorySink,
+    FileLogSink? fileSink,
+    CrashHandler crashHandler,
   ) {
     return Align(
       alignment: Alignment.topCenter,
@@ -117,7 +134,13 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
                 selectedLevel: _selectedLevel,
                 onLevelSelected: (level) =>
                     setState(() => _selectedLevel = level),
-                onCopyLogs: () => _copyLogs(context, memorySink.records),
+                onCopyLogs: () => _copyLogs(
+                  context,
+                  memorySink.records,
+                  fileSink,
+                  crashHandler.lastReport,
+                  info,
+                ),
               ),
             ],
           ),
@@ -126,10 +149,31 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
     );
   }
 
+  LogRedactor _createRedactor(DiagnosticsInfo? info) {
+    final home = Platform.environment['HOME'] ??
+        Platform.environment['USERPROFILE'] ??
+        '';
+    final peerNames = <String>{
+      if (info != null) ...[
+        if (info.serviceStatus.deviceName.isNotEmpty)
+          info.serviceStatus.deviceName,
+        for (final d in info.devices)
+          if (d.name.isNotEmpty) d.name,
+      ],
+    };
+
+    return LogRedactor(
+      homeDirectories: [if (home.isNotEmpty) home],
+      knownPeerNames: peerNames,
+    );
+  }
+
   void _copyFullReport(
     BuildContext context,
     DiagnosticsInfo info,
     MemoryLogSink memorySink,
+    FileLogSink? fileSink,
+    CrashReport? lastCrashReport,
   ) {
     final buffer = StringBuffer();
     final now = DateTime.now().toUtc().toIso8601String();
@@ -200,13 +244,33 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
     }
     buffer.writeln();
 
-    buffer
-        .writeln('--- System Logs (${memorySink.records.length} records) ---');
-    for (final record in memorySink.records) {
-      buffer.writeln(record.toString());
+    if (lastCrashReport != null) {
+      buffer.writeln('--- Last Crash Report ---');
+      buffer.writeln(lastCrashReport.format());
+      buffer.writeln();
     }
 
-    Clipboard.setData(ClipboardData(text: buffer.toString()));
+    if (fileSink != null) {
+      buffer.writeln('--- System Logs ---');
+      final fileLogs = fileSink.readAllLogs();
+      if (fileLogs.isNotEmpty) {
+        buffer.write(fileLogs);
+        if (!fileLogs.endsWith('\n')) {
+          buffer.writeln();
+        }
+      }
+    } else {
+      buffer.writeln(
+          '--- System Logs (${memorySink.records.length} records) ---');
+      for (final record in memorySink.records) {
+        buffer.writeln(record.toString());
+      }
+    }
+
+    final redactor = _createRedactor(info);
+    final text = redactor.redact(buffer.toString());
+
+    Clipboard.setData(ClipboardData(text: text));
     final messenger = ScaffoldMessenger.of(context);
     messenger.clearSnackBars();
     messenger.showSnackBar(
@@ -223,20 +287,31 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
     buffer.writeln();
   }
 
-  void _copyLogs(BuildContext context, List<LogRecord> records) {
-    final filtered = _selectedLevel == null
-        ? records
-        : records
-            .where((r) => r.level.severity >= _selectedLevel!.severity)
-            .toList();
+  void _copyLogs(
+    BuildContext context,
+    List<LogRecord> records,
+    FileLogSink? fileSink,
+    CrashReport? lastCrashReport, [
+    DiagnosticsInfo? info,
+  ]) {
+    final redactor = _createRedactor(info);
+    final text = buildLogExport(
+      fileSink: fileSink,
+      memoryRecords: records,
+      lastCrashReport: lastCrashReport,
+      redactor: redactor,
+      filterLevel: _selectedLevel,
+    );
 
-    final text = filtered.map((r) => r.toString()).join('\n');
     Clipboard.setData(ClipboardData(text: text));
     final messenger = ScaffoldMessenger.of(context);
     messenger.clearSnackBars();
+    final snackBarMessage = fileSink != null
+        ? 'Logs copied to clipboard'
+        : 'Copied ${records.where((r) => _selectedLevel == null || r.level.severity >= _selectedLevel!.severity).length} log records to clipboard';
     messenger.showSnackBar(
       SnackBar(
-        content: Text('Copied ${filtered.length} log records to clipboard'),
+        content: Text(snackBarMessage),
       ),
     );
   }

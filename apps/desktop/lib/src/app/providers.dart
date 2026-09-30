@@ -614,6 +614,27 @@ final memoryLogSinkProvider = Provider<MemoryLogSink>((ref) {
   return MemoryLogSink();
 });
 
+/// File log sink backing persistent on-disk diagnostics.
+final fileLogSinkProvider = Provider<FileLogSink?>((ref) {
+  final sink = Log.sink;
+  if (sink is FileLogSink) return sink;
+  if (sink is MultiLogSink) {
+    for (final s in sink.sinks) {
+      if (s is FileLogSink) return s;
+    }
+  }
+  return null;
+});
+
+/// Crash handler capturing uncaught exceptions alongside recent logs.
+final crashHandlerProvider = Provider<CrashHandler>((ref) {
+  return CrashHandler.instance ??
+      CrashHandler(
+        memorySink: ref.watch(memoryLogSinkProvider),
+        sink: ref.watch(fileLogSinkProvider),
+      );
+});
+
 /// Projects a live connection into what the diagnostics screen renders.
 ///
 /// A named function rather than an expression inside the provider so that it
