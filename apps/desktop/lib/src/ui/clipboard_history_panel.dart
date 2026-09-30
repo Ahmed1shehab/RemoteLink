@@ -4,6 +4,7 @@ import 'package:rl_core/rl_core.dart';
 
 import '../app/app_icons.dart';
 import '../app/desktop_ui.dart';
+import '../app/l10n.dart';
 import '../app/providers.dart';
 
 /// The last few things copied on this computer.
@@ -28,14 +29,14 @@ class ClipboardHistoryPanel extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         DesktopSectionHeader(
-          title: 'Clipboard history',
-          subtitle: 'Quickly reuse recent content from this computer',
+          title: context.l10n.clipboardHistoryTitle,
+          subtitle: context.l10n.clipboardHistorySubtitle,
           trailing: snapshot.entries.isEmpty
               ? null
               : TextButton.icon(
                   onPressed: () => _clearAll(context, ref),
                   icon: const AppIcon(AppIcons.materialDeleteSweep, size: 18),
-                  label: const Text('Clear all'),
+                  label: Text(context.l10n.clearAll),
                 ),
         ),
         const SizedBox(height: 12),
@@ -66,7 +67,7 @@ class ClipboardHistoryPanel extends ConsumerWidget {
     final history = await ref.read(clipboardHistoryProvider.future);
     history.clear();
     messenger.showSnackBar(
-      const SnackBar(content: Text('Clipboard history cleared.')),
+      SnackBar(content: Text(context.l10n.clipboardCleared)),
     );
   }
 }
@@ -108,10 +109,8 @@ class _PersistenceRow extends ConsumerWidget {
           Expanded(
             child: Text(
               isPersistent
-                  ? 'Kept on this computer, encrypted. Content marked '
-                      'confidential by a password manager is never recorded.'
-                  : 'Kept in memory only — this list is gone when Remote Link '
-                      'quits. Nothing is written to disk.',
+                  ? context.l10n.persistenceEncrypted
+                  : context.l10n.persistenceMemoryOnly,
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -140,8 +139,8 @@ class _PersistenceRow extends ConsumerWidget {
       SnackBar(
         content: Text(
           enabled
-              ? 'Clipboard history will be kept, encrypted, on this computer.'
-              : 'Stored clipboard history deleted. Keeping it in memory only.',
+              ? context.l10n.persistenceEnabledSnackBar
+              : context.l10n.persistenceDisabledSnackBar,
         ),
       ),
     );
@@ -155,11 +154,10 @@ class _EmptyHistory extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const DesktopEmptyState(
+    return DesktopEmptyState(
       icon: AppIcons.materialClipboard,
-      title: 'Nothing copied yet',
-      message: 'The last $kClipboardHistoryCapacity items you copy will '
-          'appear here.',
+      title: context.l10n.nothingCopiedYetTitle,
+      message: context.l10n.nothingCopiedYetMessage(kClipboardHistoryCapacity),
     );
   }
 }
@@ -201,7 +199,7 @@ class _HistoryRow extends ConsumerWidget {
         style: theme.textTheme.bodyMedium,
       ),
       subtitle: Text(
-        _relative(entry.copiedAt),
+        _relative(context, entry.copiedAt),
         style: theme.textTheme.bodySmall,
       ),
       // The whole row copies. Pin and delete are explicit buttons because both
@@ -216,12 +214,12 @@ class _HistoryRow extends ConsumerWidget {
               size: 18,
               color: entry.pinned ? theme.colorScheme.primary : null,
             ),
-            tooltip: entry.pinned ? 'Unpin' : 'Pin',
+            tooltip: entry.pinned ? context.l10n.unpin : context.l10n.pin,
             onPressed: () => _togglePin(context, ref),
           ),
           IconButton(
             icon: const AppIcon(AppIcons.delete, size: 18),
-            tooltip: 'Remove from history',
+            tooltip: context.l10n.removeFromHistory,
             onPressed: () => _remove(ref),
             color: theme.colorScheme.error,
           ),
@@ -235,7 +233,8 @@ class _HistoryRow extends ConsumerWidget {
     final copied = await ref.read(clipboardRecopyProvider)(entry);
     messenger.showSnackBar(
       SnackBar(
-        content: Text(copied ? 'Copied.' : 'The clipboard is unavailable.'),
+        content: Text(
+            copied ? context.l10n.copied : context.l10n.clipboardUnavailable),
       ),
     );
   }
@@ -247,10 +246,9 @@ class _HistoryRow extends ConsumerWidget {
     final applied = history.setPinned(entry.id, pinned: wants);
     if (!applied && wants) {
       messenger.showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'You can pin up to $kMaxPinnedClipboardEntries items. Unpin one '
-            'first.',
+            context.l10n.pinLimitReached(kMaxPinnedClipboardEntries),
           ),
         ),
       );
@@ -262,11 +260,15 @@ class _HistoryRow extends ConsumerWidget {
     history.remove(entry.id);
   }
 
-  static String _relative(DateTime when) {
+  static String _relative(BuildContext context, DateTime when) {
     final elapsed = DateTime.now().difference(when);
-    if (elapsed.inSeconds < 60) return 'Just now';
-    if (elapsed.inMinutes < 60) return '${elapsed.inMinutes} min ago';
-    if (elapsed.inHours < 24) return '${elapsed.inHours} h ago';
-    return '${elapsed.inDays} d ago';
+    if (elapsed.inSeconds < 60) return context.l10n.timeJustNow;
+    if (elapsed.inMinutes < 60) {
+      return context.l10n.timeMinutesAgo(elapsed.inMinutes);
+    }
+    if (elapsed.inHours < 24) {
+      return context.l10n.timeHoursAgo(elapsed.inHours);
+    }
+    return context.l10n.timeDaysAgo(elapsed.inDays);
   }
 }

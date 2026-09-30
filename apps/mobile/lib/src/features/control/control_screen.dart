@@ -7,6 +7,7 @@ import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/app_icons.dart';
+import '../../app/l10n.dart';
 import '../../app/modern_ui.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
@@ -152,8 +153,8 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                   size: 18,
                 ),
                 tooltip: expanded
-                    ? 'Show the tabs again'
-                    : 'Expand the gesture area',
+                    ? context.l10n.tooltipShowTabs
+                    : context.l10n.tooltipExpandGesture,
                 onPressed: () => setState(() => _immersive = !_immersive),
               )
             : null,
@@ -173,7 +174,7 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
           if (canViewScreen)
             IconButton(
               icon: const Icon(Icons.screenshot_monitor_outlined),
-              tooltip: 'Screen Stream',
+              tooltip: context.l10n.tooltipScreenStream,
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(
                   builder: (_) => const ScreenViewerScreen(),
@@ -185,7 +186,7 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
               AppIcons.settings,
               color: scheme.onSurfaceVariant,
             ),
-            tooltip: 'Settings',
+            tooltip: context.l10n.settings,
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
                 builder: (_) => const SettingsScreen(),
@@ -251,37 +252,41 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
               onDestinationSelected: (index) =>
                   setState(() => _selected = visible[index]),
               destinations: <LiquidNavDestination>[
-                for (final tab in visible) _destinationFor(tab),
+                for (final tab in visible) _destinationFor(tab, context),
               ],
             ),
     );
   }
 
-  static LiquidNavDestination _destinationFor(ControlTab tab) => switch (tab) {
-        ControlTab.touchpad => const LiquidNavDestination(
+  static LiquidNavDestination _destinationFor(
+    ControlTab tab,
+    BuildContext context,
+  ) =>
+      switch (tab) {
+        ControlTab.touchpad => LiquidNavDestination(
             icon: AppIcons.handTap,
             selectedIcon: AppIcons.handTap,
-            label: 'Touchpad',
+            label: context.l10n.tabTouchpad,
           ),
-        ControlTab.keyboard => const LiquidNavDestination(
+        ControlTab.keyboard => LiquidNavDestination(
             icon: AppIcons.keyboard,
             selectedIcon: AppIcons.keyboard,
-            label: 'Keyboard',
+            label: context.l10n.tabKeyboard,
           ),
-        ControlTab.media => const LiquidNavDestination(
+        ControlTab.media => LiquidNavDestination(
             icon: AppIcons.monitorPlay,
             selectedIcon: AppIcons.monitorPlay,
-            label: 'Media',
+            label: context.l10n.tabMedia,
           ),
-        ControlTab.clipboard => const LiquidNavDestination(
+        ControlTab.clipboard => LiquidNavDestination(
             icon: AppIcons.clipboard,
             selectedIcon: AppIcons.clipboard,
-            label: 'Clipboard',
+            label: context.l10n.tabClipboard,
           ),
-        ControlTab.send => const LiquidNavDestination(
+        ControlTab.send => LiquidNavDestination(
             icon: AppIcons.send,
             selectedIcon: AppIcons.send,
-            label: 'Send',
+            label: context.l10n.tabSend,
           ),
       };
 }
@@ -329,12 +334,14 @@ class ClipboardView extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      'Clipboard sync',
+                      context.l10n.clipboardSyncTitle,
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      syncEnabled ? 'Connected and active' : 'Sync is paused',
+                      syncEnabled
+                          ? context.l10n.clipboardConnectedActive
+                          : context.l10n.clipboardSyncPaused,
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
@@ -365,10 +372,13 @@ class ClipboardView extends ConsumerWidget {
                   Expanded(
                     child: Text(
                       clipboard.text == null
-                          ? 'Ready to sync'
+                          ? context.l10n.clipboardReadyToSync
                           : clipboard.fromDesktop
-                              ? 'From ${clipboard.sourceName ?? 'your computer'}'
-                              : 'From this phone',
+                              ? context.l10n.clipboardFromComputer(
+                                  clipboard.sourceName ??
+                                      context.l10n.clipboardFromYourComputer,
+                                )
+                              : context.l10n.clipboardFromThisPhone,
                       style: Theme.of(context).textTheme.labelLarge,
                     ),
                   ),
@@ -384,8 +394,7 @@ class ClipboardView extends ConsumerWidget {
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Text(
-                  clipboard.text ??
-                      'Your latest clipboard item will appear here.',
+                  clipboard.text ?? context.l10n.clipboardPlaceholder,
                   maxLines: 8,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -404,7 +413,7 @@ class ClipboardView extends ConsumerWidget {
                           ? () => controller.sendCurrent()
                           : null,
                       icon: const Icon(Icons.arrow_upward_rounded),
-                      label: const Text('Send'),
+                      label: Text(context.l10n.clipboardSendButton),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -414,7 +423,7 @@ class ClipboardView extends ConsumerWidget {
                           ? controller.requestFromDesktop
                           : null,
                       icon: const Icon(Icons.arrow_downward_rounded),
-                      label: const Text('Get'),
+                      label: Text(context.l10n.clipboardGetButton),
                     ),
                   ),
                 ],
@@ -447,22 +456,21 @@ class ClipboardHistoryList extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         AppSectionTitle(
-          title: 'History',
-          subtitle: 'Tap an item to copy it again',
+          title: context.l10n.historyTitle,
+          subtitle: context.l10n.historySubtitle,
           trailing: snapshot.entries.isNotEmpty
               ? TextButton(
                   onPressed: controller.clear,
-                  child: const Text('Clear all'),
+                  child: Text(context.l10n.clearAll),
                 )
               : null,
         ),
         const SizedBox(height: 12),
         if (snapshot.entries.isEmpty)
-          const AppEmptyState(
+          AppEmptyState(
             icon: AppIcons.materialSettings,
-            title: 'Nothing copied yet',
-            message: 'Recent items appear here. Anything your password manager '
-                'marks confidential is never recorded.',
+            title: context.l10n.nothingCopiedYet,
+            message: context.l10n.nothingCopiedYetExplanation,
           )
         else
           for (final entry in snapshot.entries)
@@ -524,7 +532,7 @@ class _HistoryTile extends StatelessWidget {
                 size: 18,
                 color: entry.pinned ? scheme.primary : scheme.onSurfaceVariant,
               ),
-              tooltip: entry.pinned ? 'Unpin' : 'Pin',
+              tooltip: entry.pinned ? context.l10n.unpin : context.l10n.pin,
               onPressed: () => _togglePin(context),
             ),
             IconButton(
@@ -533,13 +541,13 @@ class _HistoryTile extends StatelessWidget {
                 size: 18,
                 color: scheme.error,
               ),
-              tooltip: 'Remove',
+              tooltip: context.l10n.remove,
               onPressed: () {
                 final removed = controller.remove(entry.id);
                 if (removed == null) return;
                 showBottomUndoSnackBar(
                   context,
-                  message: 'Deleted from history',
+                  message: context.l10n.deletedFromHistory,
                   onUndo: () => controller.restore(removed),
                 );
               },
@@ -555,7 +563,9 @@ class _HistoryTile extends StatelessWidget {
     final copied = await controller.copyToClipboard(entry);
     messenger.showSnackBar(
       SnackBar(
-        content: Text(copied ? 'Copied.' : 'That item can’t be copied here.'),
+        content: Text(
+          copied ? context.l10n.copied : context.l10n.itemCantBeCopied,
+        ),
       ),
     );
   }
@@ -565,10 +575,9 @@ class _HistoryTile extends StatelessWidget {
     final applied = controller.setPinned(entry.id, pinned: wants);
     if (applied || !wants) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
+      SnackBar(
         content: Text(
-          'You can pin up to $kMaxPinnedClipboardEntries items. Unpin one '
-          'first.',
+          context.l10n.pinLimitReached(kMaxPinnedClipboardEntries),
         ),
       ),
     );
@@ -589,19 +598,20 @@ class _ConnectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final l10n = context.l10n;
     final (color, label) = switch (state) {
-      ClientState.connected => (const Color(0xFF3DD68C), 'Connected'),
-      ClientState.reconnecting => (scheme.tertiary, 'Reconnecting'),
-      ClientState.connecting => (scheme.tertiary, 'Connecting'),
-      ClientState.pairing => (scheme.tertiary, 'Pairing'),
-      ClientState.awaitingApproval => (scheme.tertiary, 'Waiting to be let in'),
-      ClientState.failed => (scheme.error, 'Connection failed'),
-      _ => (scheme.outline, 'Not connected'),
+      ClientState.connected => (const Color(0xFF3DD68C), l10n.connected),
+      ClientState.reconnecting => (scheme.tertiary, l10n.reconnecting),
+      ClientState.connecting => (scheme.tertiary, l10n.connecting),
+      ClientState.pairing => (scheme.tertiary, l10n.pairing),
+      ClientState.awaitingApproval => (scheme.tertiary, l10n.waitingToBeLetIn),
+      ClientState.failed => (scheme.error, l10n.connectionFailed),
+      _ => (scheme.outline, l10n.notConnected),
     };
 
     return Semantics(
       liveRegion: true,
-      label: 'Connection status: $label',
+      label: l10n.connectionStatusLabel(label),
       excludeSemantics: true,
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -641,18 +651,19 @@ class _ConnectionBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final l10n = context.l10n;
     final (color, animate, label) = switch (state) {
-      ClientState.connected => (scheme.primary, false, 'Connected'),
-      ClientState.reconnecting => (scheme.tertiary, true, 'Reconnecting'),
-      ClientState.connecting => (scheme.tertiary, true, 'Connecting'),
-      ClientState.pairing => (scheme.tertiary, true, 'Pairing'),
+      ClientState.connected => (scheme.primary, false, l10n.connected),
+      ClientState.reconnecting => (scheme.tertiary, true, l10n.reconnecting),
+      ClientState.connecting => (scheme.tertiary, true, l10n.connecting),
+      ClientState.pairing => (scheme.tertiary, true, l10n.pairing),
       ClientState.awaitingApproval => (
           scheme.tertiary,
           true,
-          'Waiting to be let in'
+          l10n.waitingToBeLetIn,
         ),
-      ClientState.failed => (scheme.error, false, 'Connection failed'),
-      _ => (scheme.surfaceContainerHighest, false, 'Not connected'),
+      ClientState.failed => (scheme.error, false, l10n.connectionFailed),
+      _ => (scheme.surfaceContainerHighest, false, l10n.notConnected),
     };
 
     // The connection state was carried by this bar's colour and by nothing
@@ -660,7 +671,7 @@ class _ConnectionBar extends StatelessWidget {
     // Colour alone is not a signal available to every user, so the same fact is
     // stated here in words.
     return Semantics(
-      label: 'Connection status: $label',
+      label: l10n.connectionStatusLabel(label),
       liveRegion: true,
       child: SizedBox(
         height: 2,
@@ -739,32 +750,32 @@ class SystemStatusStrip extends ConsumerWidget {
                 label: '${status.batteryPercent}%',
                 // Charging is shown by a different glyph and by nothing else.
                 semanticLabel: isCharging
-                    ? 'Computer battery ${status.batteryPercent} percent, '
-                        'charging'
-                    : 'Computer battery ${status.batteryPercent} percent',
+                    ? context.l10n.systemBatteryCharging(status.batteryPercent!)
+                    : context.l10n.systemBattery(status.batteryPercent!),
               ),
             if (hasCpu)
               _StatusChip(
                 icon: const Icon(Icons.memory),
                 iconColor: colorScheme.onSurfaceVariant,
                 label: 'CPU ${status.cpuPercent!.toStringAsFixed(0)}%',
-                semanticLabel: 'Processor '
-                    '${status.cpuPercent!.toStringAsFixed(0)} percent',
+                semanticLabel: context.l10n
+                    .systemProcessor(status.cpuPercent!.toStringAsFixed(0)),
               ),
             if (hasMemory)
               _StatusChip(
                 icon: const Icon(Icons.pie_chart_outline),
                 iconColor: colorScheme.onSurfaceVariant,
                 label: 'RAM ${status.memoryPercent!.toStringAsFixed(0)}%',
-                semanticLabel: 'Memory '
-                    '${status.memoryPercent!.toStringAsFixed(0)} percent',
+                semanticLabel: context.l10n
+                    .systemMemory(status.memoryPercent!.toStringAsFixed(0)),
               ),
             if (hasUptime)
               _StatusChip(
                 icon: const Icon(Icons.schedule),
                 iconColor: colorScheme.onSurfaceVariant,
                 label: _formatUptime(status.uptimeSeconds),
-                semanticLabel: 'Up ${_formatUptime(status.uptimeSeconds)}',
+                semanticLabel: context.l10n
+                    .systemUptime(_formatUptime(status.uptimeSeconds)),
               ),
           ],
         ),

@@ -148,7 +148,7 @@ final class ShareIdle extends ShareOutcome {
 final class ShareSent extends ShareOutcome {
   const ShareSent({required this.description, required this.peerName});
 
-  final String description;
+  final ShareDescription description;
   final String peerName;
 }
 
@@ -156,14 +156,35 @@ final class ShareSent extends ShareOutcome {
 final class ShareWaiting extends ShareOutcome {
   const ShareWaiting(this.description);
 
-  final String description;
+  final ShareDescription description;
+}
+
+enum ShareContentKind { text, file, files }
+
+final class ShareDescription {
+  const ShareDescription.text()
+      : kind = ShareContentKind.text,
+        fileName = null,
+        count = 0;
+  const ShareDescription.file(this.fileName)
+      : kind = ShareContentKind.file,
+        count = 1;
+  const ShareDescription.files(this.count)
+      : kind = ShareContentKind.files,
+        fileName = null;
+
+  final ShareContentKind kind;
+  final String? fileName;
+  final int count;
 }
 
 /// It could not be sent, and will not be retried.
+enum ShareFailure { refused, unexpected }
+
 final class ShareFailed extends ShareOutcome {
   const ShareFailed(this.reason);
 
-  final String reason;
+  final ShareFailure reason;
 }
 
 /// Sends what the user shared, once there is somewhere to send it.
@@ -244,7 +265,7 @@ final class ShareController extends StateNotifier<ShareOutcome> {
                   description: _describe(payload),
                   peerName: target.name,
                 )
-              : const ShareFailed('The computer would not take it.');
+              : const ShareFailed(ShareFailure.refused);
         case SharedFiles(:final files):
           await _ref.read(transferControllerProvider.notifier).sendFiles(
             targetPeerId: target.id,
@@ -259,7 +280,7 @@ final class ShareController extends StateNotifier<ShareOutcome> {
       }
     } on Object catch (error) {
       _log.warn('could not send a share', error: error);
-      state = ShareFailed('$error');
+      state = const ShareFailed(ShareFailure.unexpected);
     }
   }
 
@@ -270,10 +291,11 @@ final class ShareController extends StateNotifier<ShareOutcome> {
     unawaited(_handle(waiting));
   }
 
-  static String _describe(SharedPayload payload) => switch (payload) {
-        SharedText() => 'the text you shared',
-        SharedFiles(:final files) when files.length == 1 => files.single.name,
-        SharedFiles(:final files) => '${files.length} files',
+  static ShareDescription _describe(SharedPayload payload) => switch (payload) {
+        SharedText() => const ShareDescription.text(),
+        SharedFiles(:final files) when files.length == 1 =>
+          ShareDescription.file(files.single.name),
+        SharedFiles(:final files) => ShareDescription.files(files.length),
       };
 
   /// Clears the last outcome, once the UI has shown it.

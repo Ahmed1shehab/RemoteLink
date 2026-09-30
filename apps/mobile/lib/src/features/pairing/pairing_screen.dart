@@ -7,6 +7,7 @@ import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/app_icons.dart';
+import '../../app/l10n.dart';
 import '../../app/providers.dart';
 import '../control/control_screen.dart';
 import 'pairing_code.dart';
@@ -185,7 +186,9 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
     final state = ref.watch(clientStateProvider).valueOrNull;
 
     return Scaffold(
-      appBar: AppBar(title: Text('Pair with ${widget.deviceName}')),
+      appBar: AppBar(
+        title: Text(context.l10n.pairWithDevice(widget.deviceName)),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
@@ -200,32 +203,32 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
             else if (state == ClientState.failed)
               const _PairingFailed()
             else if (widget.viaScannedCode)
-              const Column(
+              Column(
                 // Sized to its contents, so the enclosing column's centring
                 // actually places it mid-screen: a max-height child fills the
                 // body and leaves the spinner pinned under the app bar.
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  CircularProgressIndicator(),
-                  SizedBox(height: 24),
-                  Text('Checking the code…'),
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 24),
+                  Text(context.l10n.checkingTheCode),
                 ],
               )
             else if (_code == null)
-              const Column(
+              Column(
                 // Sized to its contents, so the enclosing column's centring
                 // actually places it mid-screen: a max-height child fills the
                 // body and leaves the spinner pinned under the app bar.
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  CircularProgressIndicator(),
-                  SizedBox(height: 24),
-                  Text('Connecting securely…'),
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 24),
+                  Text(context.l10n.connectingSecurely),
                 ],
               )
             else ...<Widget>[
               Text(
-                'Check that your computer is showing these digits',
+                context.l10n.checkDigitsPrompt,
                 style: Theme.of(context).textTheme.titleMedium,
                 textAlign: TextAlign.center,
               ),
@@ -233,20 +236,19 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
               PairingCodeDisplay(digits: _code!),
               const SizedBox(height: 32),
               Text(
-                'If the numbers are different, something is intercepting the '
-                'connection. Cancel and try again on a network you trust.',
+                context.l10n.numbersDifferentWarning,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 40),
               FilledButton(
                 onPressed: _confirming ? null : _confirm,
-                child: const Text('The numbers match'),
+                child: Text(context.l10n.theNumbersMatch),
               ),
               const SizedBox(height: 8),
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
+                child: Text(context.l10n.cancel),
               ),
             ],
           ],
@@ -281,24 +283,22 @@ class _ScannedKeyMismatch extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'This is not the computer on the code',
+            context.l10n.notTheComputerOnCode,
             style: Theme.of(context).textTheme.titleMedium,
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
           Text(
-            'Something answered at that address with a different identity '
-            'than the code showed. Remote Link did not pair with it and did '
-            'not send it anything.\n\nOn a network you trust this should '
-            'never happen. Show the code again on $deviceName and scan the '
-            'new one.',
+            context.l10n.notTheComputerOnCodeExplanation(
+              deviceName,
+            ),
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 32),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
         ],
       );
@@ -320,14 +320,13 @@ class _PairingFailed extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'Could not establish a secure connection',
+            context.l10n.couldNotEstablishSecureConnection,
             style: Theme.of(context).textTheme.titleMedium,
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
           Text(
-            'The computer refused the connection, or its identity did not '
-            'match what this phone had stored.',
+            context.l10n.pairingFailedRefusedOrMismatched,
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodySmall,
           ),

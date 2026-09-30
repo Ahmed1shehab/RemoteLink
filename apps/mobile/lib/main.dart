@@ -4,6 +4,7 @@ import 'package:rl_core/rl_core.dart';
 
 import 'src/app/brand.dart';
 import 'src/app/crash_capture.dart';
+import 'src/app/l10n.dart';
 import 'src/app/providers.dart';
 import 'src/app/splash_screen.dart';
 import 'src/app/theme.dart';
@@ -125,13 +126,18 @@ class RemoteLinkApp extends ConsumerWidget {
     // system hands over a link the user shared into this app, whichever screen
     // happens to be open at the time.
     ref.listen<ShareOutcome>(shareControllerProvider, (previous, next) {
+      final loc =
+          navigatorKey.currentContext?.l10n ?? currentAppLocalizations();
       final message = switch (next) {
         ShareIdle() => null,
-        ShareSent(:final description, :final peerName) =>
-          'Sent $description to $peerName.',
+        ShareSent(:final description, :final peerName) => loc.shareSent(
+            _describeShare(loc, description), bidiIsolate(peerName)),
         ShareWaiting(:final description) =>
-          'Holding $description until your computer is back.',
-        ShareFailed(:final reason) => 'Could not send that: $reason',
+          loc.shareWaiting(_describeShare(loc, description)),
+        ShareFailed(:final reason) => loc.shareFailed(switch (reason) {
+            ShareFailure.refused => loc.shareRefused,
+            ShareFailure.unexpected => loc.shareUnexpectedFailure,
+          }),
       };
       if (message == null) return;
       scaffoldMessengerKey.currentState
@@ -152,7 +158,16 @@ class RemoteLinkApp extends ConsumerWidget {
       // choice is in Settings › Appearance and is persisted, so `system`,
       // `light` and `dark` are all reachable; only the default differs.
       themeMode: ref.watch(themeModeProvider),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       home: const LaunchScreen(),
     );
   }
 }
+
+String _describeShare(AppLocalizations l10n, ShareDescription description) =>
+    switch (description.kind) {
+      ShareContentKind.text => l10n.shareTextDescription,
+      ShareContentKind.file => bidiIsolate(description.fileName!),
+      ShareContentKind.files => l10n.shareFilesDescription(description.count),
+    };

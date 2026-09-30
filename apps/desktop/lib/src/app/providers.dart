@@ -18,6 +18,7 @@ import '../domain/file_launcher.dart';
 import '../domain/file_transfer_store.dart';
 import '../domain/instance_lock.dart';
 import '../domain/transfer_model.dart';
+import 'l10n.dart';
 
 /// Riverpod, not Bloc.
 ///
@@ -563,7 +564,7 @@ final screenViewersProvider = StreamProvider<List<String>>((ref) async* {
 });
 
 final inputAvailabilityProvider =
-    StreamProvider<({bool available, String? reason})>((ref) async* {
+    StreamProvider<({bool available, BackendFailure? reason})>((ref) async* {
   final service = await ref.watch(desktopServiceProvider.future);
 
   yield (
@@ -581,7 +582,7 @@ final inputAvailabilityProvider =
 
 /// Whether the host can capture its screen, and why not when it cannot.
 final screenCaptureAvailabilityProvider =
-    StreamProvider<({bool available, String? reason})>((ref) async* {
+    StreamProvider<({bool available, BackendFailure? reason})>((ref) async* {
   final service = await ref.watch(desktopServiceProvider.future);
 
   yield (
@@ -679,19 +680,19 @@ final desktopDiagnosticsProvider =
         ),
         backends: BackendAvailability(
           input: BackendDiagnostic(
-            name: 'Input injection',
+            name: currentAppLocalizations().backendInputName,
             isAvailable: service.inputAvailable,
-            unavailableReason: service.inputUnavailableReason,
+            failure: service.inputUnavailableReason,
           ),
           clipboard: BackendDiagnostic(
-            name: 'Clipboard sync',
+            name: currentAppLocalizations().backendClipboardName,
             isAvailable: service.clipboardAvailable,
-            unavailableReason: service.clipboardUnavailableReason,
+            failure: service.clipboardUnavailableReason,
           ),
           media: BackendDiagnostic(
-            name: 'Media control',
+            name: currentAppLocalizations().backendMediaName,
             isAvailable: service.mediaAvailable,
-            unavailableReason: service.mediaUnavailableReason,
+            failure: service.mediaUnavailableReason,
           ),
         ),
         beacon: DiscoveryBeaconDiagnostic(
@@ -782,11 +783,13 @@ final class BackendDiagnostic {
     required this.name,
     required this.isAvailable,
     this.unavailableReason,
+    this.failure,
   });
 
   final String name;
   final bool isAvailable;
   final String? unavailableReason;
+  final BackendFailure? failure;
 }
 
 /// Availability of all platform backends.
@@ -832,5 +835,5 @@ final class DeviceDiagnostic {
   /// every device today — a line of explanation on every tile of the main
   /// screen would be permanent clutter for a feature that does not exist. The
   /// diagnostics screen is where someone goes to ask why something is missing.
-  final String? phoneControlBlocked;
+  final PhoneControlBlock? phoneControlBlocked;
 }

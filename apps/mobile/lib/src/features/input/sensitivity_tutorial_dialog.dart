@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_icons.dart';
+import '../../app/l10n.dart';
 import '../../app/providers.dart';
 import '../settings/settings_screen.dart';
 
@@ -31,9 +32,9 @@ class SensitivityTutorialDialog extends ConsumerWidget {
 
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+      titlePadding: const EdgeInsetsDirectional.fromSTEB(24, 24, 24, 12),
       contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-      actionsPadding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      actionsPadding: const EdgeInsetsDirectional.fromSTEB(16, 12, 16, 16),
       title: Row(
         children: <Widget>[
           Container(
@@ -59,13 +60,13 @@ class SensitivityTutorialDialog extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Text(
-                  'Pointer Sensitivity',
+                  context.l10n.sensitivityBannerTitle,
                   style: theme.textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 Text(
-                  'Customise cursor speed',
+                  context.l10n.customiseCursorSpeed,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -81,31 +82,28 @@ class SensitivityTutorialDialog extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Cursor moving too fast or too slow? You can easily fine-tune pointer speed to suit your workflow:',
+              context.l10n.tutorialIntro,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: colorScheme.onSurface,
               ),
             ),
             const SizedBox(height: 16),
-            const _TutorialStep(
+            _TutorialStep(
               icon: AppIcons.settings,
-              title: 'Open Settings',
-              description:
-                  'Tap the Settings gear icon in the top right corner of the app bar.',
+              title: context.l10n.tutorialStep1Title,
+              description: context.l10n.tutorialStep1Desc,
             ),
             const SizedBox(height: 12),
-            const _TutorialStep(
+            _TutorialStep(
               icon: AppIcons.settings,
-              title: 'Pointer Sensitivity',
-              description:
-                  'Under Touchpad, drag the sensitivity slider between 0.5x and 3.5x.',
+              title: context.l10n.tutorialStep2Title,
+              description: context.l10n.tutorialStep2Desc,
             ),
             const SizedBox(height: 12),
-            const _TutorialStep(
+            _TutorialStep(
               icon: AppIcons.handTap,
-              title: 'Gestures & Scrolling',
-              description:
-                  'Toggle Natural Scrolling or Tap to Click to match your trackpad habits.',
+              title: context.l10n.tutorialStep3Title,
+              description: context.l10n.tutorialStep3Desc,
             ),
             const SizedBox(height: 16),
             Container(
@@ -124,7 +122,7 @@ class SensitivityTutorialDialog extends ConsumerWidget {
                   ),
                   const SizedBox(width: 10),
                   Text(
-                    'Current sensitivity: ',
+                    context.l10n.currentSensitivityLabel,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: colorScheme.onSurfaceVariant,
                     ),
@@ -145,11 +143,11 @@ class SensitivityTutorialDialog extends ConsumerWidget {
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Got it'),
+          child: Text(context.l10n.gotItButton),
         ),
         FilledButton.icon(
           icon: const AppIcon(AppIcons.settings, size: 18),
-          label: const Text('Open Settings'),
+          label: Text(context.l10n.openSettingsButton),
           style: FilledButton.styleFrom(
             backgroundColor: const Color(0xFF007ACC),
             foregroundColor: Colors.white,

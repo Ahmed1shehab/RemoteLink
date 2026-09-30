@@ -114,13 +114,13 @@ void main() {
         totalBytes: 0,
         transferredBytes: 0,
         createdAt: DateTime(2026),
-        errorMessage: 'Connection lost',
+        failure: TransferFailure.connectionLost,
       );
       expect(record.canRemove, isTrue);
       expect(
           record
-              .copyWith(status: TransferStatus.offered, clearErrorMessage: true)
-              .errorMessage,
+              .copyWith(status: TransferStatus.offered, clearFailure: true)
+              .failure,
           isNull);
       expect(record.copyWith(status: TransferStatus.inProgress).canRemove,
           isFalse);
@@ -171,7 +171,7 @@ void main() {
       );
       await Future<void>.delayed(Duration.zero);
       expect(service.transfers.single.status, TransferStatus.cancelled);
-      expect(service.transfers.single.errorMessage, contains('Pixel 8 Pro'));
+      expect(service.transfers.single.failure, TransferFailure.cancelledByPeer);
       expect(service.removeTransfer('cancelled'), isTrue);
       expect(service.transfers, isEmpty);
 
@@ -180,7 +180,7 @@ void main() {
       expect(service.removeTransfer('local'), isFalse);
       await service.cancelTransfer('local');
       expect(service.transfers.single.status, TransferStatus.cancelled);
-      expect(service.transfers.single.errorMessage, 'Cancelled by you');
+      expect(service.transfers.single.failure, TransferFailure.cancelledByYou);
       expect(service.removeTransfer('local'), isTrue);
 
       await service.handleMessageForTesting(pair.session, offer('blocked'));
@@ -284,7 +284,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       await service.endSessionForTesting(pair.session);
       expect(service.transfers.single.status, TransferStatus.failed);
-      expect(service.transfers.single.errorMessage, 'Connection lost');
+      expect(service.transfers.single.failure, TransferFailure.connectionLost);
       expect(service.removeTransfer('lost'), isTrue);
     } finally {
       await pair.client.disconnect();
@@ -467,10 +467,10 @@ void main() {
           overrides: <Override>[
             ...desktopHomeOverrides,
             screenCaptureAvailabilityProvider.overrideWith(
-              (ref) => Stream<({bool available, String? reason})>.value(
+              (ref) => Stream<({bool available, BackendFailure? reason})>.value(
                 (
                   available: false,
-                  reason: 'Screen Recording permission is not granted',
+                  reason: BackendFailure.screenRecordingPermission,
                 ),
               ),
             ),
@@ -489,7 +489,7 @@ void main() {
       // flipping `kScreenSharingShipped` back on restores the assertion instead
       // of leaving a test that quietly proves nothing.
       expect(
-        find.text('Screen Recording permission is not granted'),
+        find.textContaining('Screen Recording permission'),
         kScreenSharingShipped ? findsOneWidget : findsNothing,
       );
       expect(
@@ -531,8 +531,11 @@ void main() {
           overrides: <Override>[
             ...desktopHomeOverrides,
             screenCaptureAvailabilityProvider.overrideWith(
-              (ref) => Stream<({bool available, String? reason})>.value(
-                (available: false, reason: 'Screen Recording is not granted'),
+              (ref) => Stream<({bool available, BackendFailure? reason})>.value(
+                (
+                  available: false,
+                  reason: BackendFailure.screenRecordingPermission
+                ),
               ),
             ),
           ],
@@ -545,7 +548,7 @@ void main() {
 
       expect(find.textContaining('start it from the phone'), findsNothing);
       expect(
-        find.text('Screen Recording is not granted'),
+        find.textContaining('Screen Recording permission'),
         kScreenSharingShipped ? findsOneWidget : findsNothing,
       );
     });
@@ -590,7 +593,7 @@ void main() {
         ],
         totalBytes: 1024 * 1024,
         transferredBytes: 512 * 1024,
-        errorMessage: 'Network timeout',
+        failure: TransferFailure.timedOut,
         createdAt: DateTime.now(),
       );
 
@@ -624,7 +627,7 @@ void main() {
       expect(find.text('From Pixel 8 Pro'), findsOneWidget);
       expect(find.text('image.png'), findsOneWidget);
       expect(find.text('Failed'), findsOneWidget);
-      expect(find.text('Network timeout'), findsOneWidget);
+      expect(find.text('Transfer timed out'), findsOneWidget);
       // Not on an incoming transfer, and this assertion used to say the
       // opposite. Retrying re-sends the offer, and the offer belongs to
       // whichever side chose the files — so on a file arriving from the phone

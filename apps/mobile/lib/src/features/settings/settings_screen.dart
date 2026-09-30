@@ -11,6 +11,7 @@ import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/app_icons.dart';
 import '../../app/brand.dart';
+import '../../app/l10n.dart';
 import '../../app/providers.dart';
 import '../clipboard/clipboard_history_controller.dart';
 import '../devices/bonjour_discovery.dart';
@@ -30,7 +31,7 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: Text(context.l10n.settings),
       ),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -91,13 +92,13 @@ class _ThisPhoneSection extends ConsumerWidget {
           children: <Widget>[
             _SectionHeader(
               icon: AppIcons.monitorSmartphone,
-              title: 'This Phone',
+              title: context.l10n.sectionThisPhone,
               color: colorScheme.primary,
             ),
             const SizedBox(height: 8),
             ListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Device name'),
+              title: Text(context.l10n.deviceName),
               subtitle: Text(
                 phoneName,
                 style: theme.textTheme.bodyMedium?.copyWith(
@@ -109,7 +110,7 @@ class _ThisPhoneSection extends ConsumerWidget {
                   AppIcons.edit,
                   color: colorScheme.onSurfaceVariant,
                 ),
-                tooltip: 'Rename this phone',
+                tooltip: context.l10n.renameThisPhone,
                 onPressed: () => _promptRenamePhone(context, ref, phoneName),
               ),
             ),
@@ -120,7 +121,7 @@ class _ThisPhoneSection extends ConsumerWidget {
                 child: LinearProgressIndicator(),
               ),
               error: (err, _) => Text(
-                'Could not load device identity: $err',
+                context.l10n.couldNotLoadIdentity(err.toString()),
                 style: TextStyle(color: colorScheme.error),
               ),
               data: (identity) {
@@ -129,32 +130,38 @@ class _ThisPhoneSection extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      'Device ID',
+                      context.l10n.deviceId,
                       style: theme.textTheme.labelMedium?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
                     ),
                     const SizedBox(height: 2),
-                    SelectableText(
-                      identity.id.value,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w600,
+                    Directionality(
+                      textDirection: TextDirection.ltr,
+                      child: SelectableText(
+                        identity.id.value,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Public-key fingerprint',
+                      context.l10n.publicKeyFingerprint,
                       style: theme.textTheme.labelMedium?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
                     ),
                     const SizedBox(height: 2),
-                    SelectableText(
-                      fingerprint,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w600,
+                    Directionality(
+                      textDirection: TextDirection.ltr,
+                      child: SelectableText(
+                        fingerprint,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ],
@@ -215,7 +222,7 @@ class _RenamePhoneDialogState extends ConsumerState<_RenamePhoneDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Rename this phone'),
+        title: Text(context.l10n.renamePhoneDialogTitle),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -224,7 +231,7 @@ class _RenamePhoneDialogState extends ConsumerState<_RenamePhoneDialog> {
               controller: _controller,
               autofocus: true,
               decoration: InputDecoration(
-                labelText: 'Phone name',
+                labelText: context.l10n.phoneName,
                 errorText: _error,
                 border: const OutlineInputBorder(),
               ),
@@ -235,11 +242,11 @@ class _RenamePhoneDialogState extends ConsumerState<_RenamePhoneDialog> {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: _submit,
-            child: const Text('Save'),
+            child: Text(context.l10n.save),
           ),
         ],
       );
@@ -271,7 +278,7 @@ class _AppearanceSection extends ConsumerWidget {
           children: <Widget>[
             _SectionHeader(
               icon: AppIcons.settings,
-              title: 'Appearance',
+              title: context.l10n.sectionAppearance,
               color: colorScheme.primary,
             ),
             const SizedBox(height: 10),
@@ -282,24 +289,24 @@ class _AppearanceSection extends ConsumerWidget {
               width: double.infinity,
               child: SegmentedButton<ThemeMode>(
                 showSelectedIcon: false,
-                segments: const <ButtonSegment<ThemeMode>>[
+                segments: <ButtonSegment<ThemeMode>>[
                   ButtonSegment<ThemeMode>(
                     value: ThemeMode.system,
-                    icon: AppIcon(AppIcons.settings, size: 18),
-                    label: Text('System'),
-                    tooltip: 'Follow the phone\u2019s setting',
+                    icon: const AppIcon(AppIcons.settings, size: 18),
+                    label: Text(context.l10n.themeModeSystem),
+                    tooltip: context.l10n.themeModeFollowSystem,
                   ),
                   ButtonSegment<ThemeMode>(
                     value: ThemeMode.light,
-                    icon: AppIcon(AppIcons.settings, size: 18),
-                    label: Text('Light'),
-                    tooltip: 'Always light',
+                    icon: const AppIcon(AppIcons.settings, size: 18),
+                    label: Text(context.l10n.themeModeLight),
+                    tooltip: context.l10n.themeModeAlwaysLight,
                   ),
                   ButtonSegment<ThemeMode>(
                     value: ThemeMode.dark,
-                    icon: AppIcon(AppIcons.settings, size: 18),
-                    label: Text('Dark'),
-                    tooltip: 'Always dark',
+                    icon: const AppIcon(AppIcons.settings, size: 18),
+                    label: Text(context.l10n.themeModeDark),
+                    tooltip: context.l10n.themeModeAlwaysDark,
                   ),
                 ],
                 selected: <ThemeMode>{mode},
@@ -349,7 +356,7 @@ class _ReceivingSection extends ConsumerWidget {
           children: <Widget>[
             _SectionHeader(
               icon: AppIcons.receive,
-              title: 'Receiving',
+              title: context.l10n.sectionReceiving,
               color: colorScheme.primary,
             ),
             const SizedBox(height: 10),
@@ -358,7 +365,7 @@ class _ReceivingSection extends ConsumerWidget {
               value: wanted,
               onChanged: (enabled) =>
                   ref.read(receivingProvider.notifier).setReceiving(enabled),
-              title: const Text('Let nearby devices send to this phone'),
+              title: Text(context.l10n.letNearbyDevicesSendTitle),
               subtitle: Text(
                 wanted
                     // The state, not the setting. The two differ when the
@@ -366,9 +373,9 @@ class _ReceivingSection extends ConsumerWidget {
                     // that reported the preference would tell someone they are
                     // findable at the exact moment they are not.
                     ? live
-                        ? 'Visible on this Wi-Fi as “$name”'
-                        : 'Starting…'
-                    : 'This phone will not appear on other devices',
+                        ? context.l10n.receivingVisibleWifi(name)
+                        : context.l10n.receivingStarting
+                    : context.l10n.receivingHidden,
               ),
             ),
             SwitchListTile(
@@ -377,19 +384,17 @@ class _ReceivingSection extends ConsumerWidget {
               onChanged: (enabled) => ref
                   .read(askBeforeConnectingProvider.notifier)
                   .set(enabled: enabled),
-              title: const Text('Ask before a paired device connects'),
+              title: Text(context.l10n.askBeforeConnectingTitle),
               subtitle: Text(
                 ref.watch(askBeforeConnectingProvider)
-                    ? 'Wait for approval before connecting'
-                    : 'Connect automatically without asking',
+                    ? context.l10n.waitBeforeConnectingSubtitle
+                    : context.l10n.connectAutomaticallySubtitle,
               ),
             ),
             if (connected.isNotEmpty) ...<Widget>[
               const Divider(height: 16),
               Text(
-                connected.length == 1
-                    ? 'Connected now'
-                    : '${connected.length} connected now',
+                context.l10n.connectedNow(connected.length),
                 style: theme.textTheme.labelLarge,
               ),
               const SizedBox(height: 6),
@@ -405,8 +410,10 @@ class _ReceivingSection extends ConsumerWidget {
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        child:
-                            Text(link.name, style: theme.textTheme.bodyMedium),
+                        child: Text(
+                          link.name,
+                          style: theme.textTheme.bodyMedium,
+                        ),
                       ),
                     ],
                   ),
@@ -442,7 +449,7 @@ class _PairedComputersSection extends ConsumerWidget {
               icon: AppIcons.monitorSmartphone,
               // Not "Computers" any more: a paired phone lands in the same
               // trust store and is revoked from the same list.
-              title: 'Paired Devices',
+              title: context.l10n.pairedDevicesTitle,
               color: colorScheme.primary,
             ),
             const SizedBox(height: 10),
@@ -452,7 +459,7 @@ class _PairedComputersSection extends ConsumerWidget {
                 child: LinearProgressIndicator(),
               ),
               error: (err, _) => Text(
-                'Could not load paired computers: $err',
+                context.l10n.couldNotLoadPairedComputers(err.toString()),
                 style: TextStyle(color: colorScheme.error),
               ),
               data: (peers) {
@@ -460,8 +467,7 @@ class _PairedComputersSection extends ConsumerWidget {
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Text(
-                      'No paired computers yet. Pair with a computer on your '
-                      'Wi-Fi network to start.',
+                      context.l10n.noPairedComputersExplanation,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                         fontStyle: FontStyle.italic,
@@ -508,14 +514,15 @@ class _PairedComputerTile extends ConsumerWidget {
     // only thing that tells two identically named machines apart, and the only
     // hint available when a paired computer has moved to a different network.
     final addressText = peer.lastAddress != null
-        ? 'Last seen: ${peer.lastAddress}'
-        : 'No address recorded';
+        ? context.l10n.lastSeen(peer.lastAddress!)
+        : context.l10n.noAddressRecorded;
+    final peerName = peer.name;
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: AppIcon(platformIcon, color: colorScheme.primary, size: 28),
       title: Text(
-        peer.name,
+        peerName,
         style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
       ),
       subtitle: Text(
@@ -528,7 +535,7 @@ class _PairedComputerTile extends ConsumerWidget {
         children: <Widget>[
           IconButton(
             icon: const AppIcon(AppIcons.protection),
-            tooltip: 'Permissions for ${peer.name}',
+            tooltip: context.l10n.permissionsFor(peerName),
             onPressed: () => _requestPermission(context, ref, peer),
           ),
           IconButton(
@@ -536,7 +543,7 @@ class _PairedComputerTile extends ConsumerWidget {
               AppIcons.edit,
               color: colorScheme.onSurfaceVariant,
             ),
-            tooltip: 'Rename ${peer.name}',
+            tooltip: context.l10n.renameNamed(peerName),
             onPressed: () => _renameComputer(context, ref, peer),
           ),
           // The way out of a remembered connection, and the only one short of
@@ -551,16 +558,15 @@ class _PairedComputerTile extends ConsumerWidget {
                   : colorScheme.onSurfaceVariant,
             ),
             tooltip: peer.autoAdmit
-                ? '${peer.name} connects without being asked. '
-                    'Tap to start asking again.'
-                : 'Tap to let ${peer.name} connect without being asked.',
+                ? context.l10n.rememberAutoConnectTooltip(peerName)
+                : context.l10n.rememberAskFirstTooltip(peerName),
             onPressed: () => ref
                 .read(rememberPromptProvider.notifier)
                 .setRemembered(peer.id, remember: !peer.autoAdmit),
           ),
           IconButton(
             icon: AppIcon(AppIcons.delete, color: colorScheme.error),
-            tooltip: 'Forget ${peer.name}',
+            tooltip: context.l10n.forgetNamed(peerName),
             onPressed: () => _confirmForgetComputer(context, ref, peer),
           ),
         ],
@@ -616,15 +622,12 @@ class _PairedComputerTile extends ConsumerWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Forget ${peer.name}?'),
-        content: const Text(
-          'This will remove this computer from your trusted list. You will '
-          'need to pair again to reconnect.',
-        ),
+        title: Text(context.l10n.forgetNamedQuestion(peer.name)),
+        content: Text(context.l10n.forgetComputerConfirmation),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -632,7 +635,7 @@ class _PairedComputerTile extends ConsumerWidget {
               foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Forget'),
+            child: Text(context.l10n.forgetDevice),
           ),
         ],
       ),
@@ -658,7 +661,7 @@ class _PairedComputerTile extends ConsumerWidget {
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Forgot ${peer.name}')),
+        SnackBar(content: Text(context.l10n.forgotNamed(peer.name))),
       );
     }
   }
@@ -689,8 +692,7 @@ class _RenameComputerDialogState extends State<_RenameComputerDialog> {
     final sanitised = sanitiseDeviceName(raw);
     if (sanitised == null) {
       setState(() {
-        _error =
-            'Invalid name: 1–64 characters, no control codes or line breaks.';
+        _error = context.l10n.invalidDeviceName;
       });
       return;
     }
@@ -699,7 +701,7 @@ class _RenameComputerDialogState extends State<_RenameComputerDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Rename computer'),
+        title: Text(context.l10n.renameComputerTitle),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -708,7 +710,7 @@ class _RenameComputerDialogState extends State<_RenameComputerDialog> {
               controller: _controller,
               autofocus: true,
               decoration: InputDecoration(
-                labelText: 'Computer name',
+                labelText: context.l10n.computerName,
                 errorText: _error,
                 border: const OutlineInputBorder(),
               ),
@@ -719,11 +721,11 @@ class _RenameComputerDialogState extends State<_RenameComputerDialog> {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: _submit,
-            child: const Text('Save'),
+            child: Text(context.l10n.save),
           ),
         ],
       );
@@ -750,23 +752,20 @@ class _RequestPermissionDialogState
       TextEditingController();
   bool _isSending = false;
 
-  static String _tierTitle(PermissionTier tier) => switch (tier) {
-        PermissionTier.readOnly => 'View Only',
-        PermissionTier.standard => 'Standard',
-        PermissionTier.extended => 'Extended',
-        PermissionTier.admin => 'Admin',
+  static String _tierTitle(BuildContext context, PermissionTier tier) =>
+      switch (tier) {
+        PermissionTier.readOnly => context.l10n.tierReadOnlyTitle,
+        PermissionTier.standard => context.l10n.tierStandardTitle,
+        PermissionTier.extended => context.l10n.tierExtendedTitle,
+        PermissionTier.admin => context.l10n.tierAdminTitle,
       };
 
-  static String _tierDescription(PermissionTier tier) => switch (tier) {
-        PermissionTier.readOnly =>
-          'Allows viewing system status, media state, and screen stream.',
-        PermissionTier.standard =>
-          'Allows sending keyboard and mouse input, synchronizing clipboard, '
-              'controlling media, viewing this screen, and transferring files.',
-        PermissionTier.extended =>
-          'Allows launching applications and running pre-registered commands.',
-        PermissionTier.admin =>
-          'Allows controlling power (shutdown, restart, sleep, lock) and managing paired devices.',
+  static String _tierDescription(BuildContext context, PermissionTier tier) =>
+      switch (tier) {
+        PermissionTier.readOnly => context.l10n.tierReadOnlyDesc,
+        PermissionTier.standard => context.l10n.tierStandardDesc,
+        PermissionTier.extended => context.l10n.tierExtendedDesc,
+        PermissionTier.admin => context.l10n.tierAdminDesc,
       };
 
   @override
@@ -793,7 +792,7 @@ class _RequestPermissionDialogState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Connect to ${widget.peer.name} to request permission elevation.',
+            context.l10n.connectToRequestElevation(widget.peer.name),
           ),
         ),
       );
@@ -816,15 +815,15 @@ class _RequestPermissionDialogState
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Permission request sent to ${widget.peer.name}.'),
+          content: Text(context.l10n.permissionRequestSent(widget.peer.name)),
         ),
       );
     } on TransportError {
       if (!mounted) return;
       setState(() => _isSending = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to send permission request.'),
+        SnackBar(
+          content: Text(context.l10n.permissionRequestFailed),
         ),
       );
     }
@@ -836,14 +835,14 @@ class _RequestPermissionDialogState
     final colorScheme = theme.colorScheme;
 
     return AlertDialog(
-      title: Text('Permissions · ${widget.peer.name}'),
+      title: Text(context.l10n.permissionsNamed(widget.peer.name)),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Current Permission Tier',
+              context.l10n.currentPermissionTier,
               style: theme.textTheme.labelMedium?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
@@ -860,14 +859,14 @@ class _RequestPermissionDialogState
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
-                    _tierTitle(widget.currentTier),
+                    _tierTitle(context, widget.currentTier),
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    _tierDescription(widget.currentTier),
+                    _tierDescription(context, widget.currentTier),
                     style: theme.textTheme.bodySmall,
                   ),
                 ],
@@ -875,7 +874,7 @@ class _RequestPermissionDialogState
             ),
             const SizedBox(height: 16),
             Text(
-              'Request Higher Tier',
+              context.l10n.requestHigherTier,
               style: theme.textTheme.labelMedium?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
@@ -892,7 +891,7 @@ class _RequestPermissionDialogState
                   .map(
                     (tier) => DropdownMenuItem<PermissionTier>(
                       value: tier,
-                      child: Text(_tierTitle(tier)),
+                      child: Text(_tierTitle(context, tier)),
                     ),
                   )
                   .toList(),
@@ -915,7 +914,8 @@ class _RequestPermissionDialogState
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
-                    'What ${_tierTitle(_selectedTier)} allows:',
+                    context.l10n
+                        .whatTierAllows(_tierTitle(context, _selectedTier)),
                     style: theme.textTheme.labelSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                       color: colorScheme.primary,
@@ -923,7 +923,7 @@ class _RequestPermissionDialogState
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _tierDescription(_selectedTier),
+                    _tierDescription(context, _selectedTier),
                     style: theme.textTheme.bodySmall,
                   ),
                 ],
@@ -932,10 +932,10 @@ class _RequestPermissionDialogState
             const SizedBox(height: 16),
             TextField(
               controller: _justificationController,
-              decoration: const InputDecoration(
-                labelText: 'Reason / Justification (optional)',
-                hintText: 'e.g. Need to transfer files',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: context.l10n.reasonJustificationOptional,
+                hintText: context.l10n.reasonHint,
+                border: const OutlineInputBorder(),
               ),
               maxLength: 256,
             ),
@@ -945,7 +945,7 @@ class _RequestPermissionDialogState
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(context.l10n.cancel),
         ),
         FilledButton(
           onPressed: _isSending ? null : _submit,
@@ -955,7 +955,7 @@ class _RequestPermissionDialogState
                   height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('Request Elevation'),
+              : Text(context.l10n.requestElevation),
         ),
       ],
     );
@@ -984,7 +984,7 @@ class _TouchpadSection extends ConsumerWidget {
           children: <Widget>[
             _SectionHeader(
               icon: AppIcons.handTap,
-              title: 'Touchpad',
+              title: context.l10n.sectionTouchpad,
               color: colorScheme.primary,
             ),
             const SizedBox(height: 10),
@@ -993,7 +993,7 @@ class _TouchpadSection extends ConsumerWidget {
               children: <Widget>[
                 Expanded(
                   child: Text(
-                    'Pointer sensitivity',
+                    context.l10n.pointerSensitivity,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
@@ -1020,17 +1020,17 @@ class _TouchpadSection extends ConsumerWidget {
             const Divider(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Natural scrolling'),
-              subtitle: const Text('Content direction matches finger movement'),
+              title: Text(context.l10n.naturalScrolling),
+              subtitle: Text(context.l10n.naturalScrollingMatches),
               value: pointerSettings.naturalScrolling,
               onChanged: (val) => notifier.setNaturalScrolling(val),
             ),
             const Divider(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Tap to click'),
-              subtitle: const Text(
-                'One finger left-clicks, two fingers right-click',
+              title: Text(context.l10n.tapToClick),
+              subtitle: Text(
+                context.l10n.tapToClickSubtitle,
               ),
               value: pointerSettings.tapToClick,
               onChanged: (val) => notifier.setTapToClick(val),
@@ -1038,9 +1038,9 @@ class _TouchpadSection extends ConsumerWidget {
             const Divider(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Haptic feedback'),
-              subtitle: const Text(
-                'Vibrate on gestures, keyboard taps, and buttons',
+              title: Text(context.l10n.hapticFeedback),
+              subtitle: Text(
+                context.l10n.hapticFeedbackDetail,
               ),
               value: ref.watch(hapticsProvider),
               onChanged: (val) =>
@@ -1078,15 +1078,15 @@ class _ClipboardSection extends ConsumerWidget {
           children: <Widget>[
             _SectionHeader(
               icon: AppIcons.clipboard,
-              title: 'Clipboard',
+              title: context.l10n.sectionClipboard,
               color: colorScheme.primary,
             ),
             const SizedBox(height: 10),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Sync from computer'),
-              subtitle: const Text(
-                'Automatically receive clipboard copied on your computer',
+              title: Text(context.l10n.syncFromDesktop),
+              subtitle: Text(
+                context.l10n.syncFromDesktopDetail,
               ),
               value: clipboardSettings.syncFromDesktop,
               onChanged: (val) => notifier.setSyncFromDesktop(val),
@@ -1094,9 +1094,9 @@ class _ClipboardSection extends ConsumerWidget {
             const Divider(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Sync to computer'),
-              subtitle: const Text(
-                'Send phone clipboard when opening app or pressing Send',
+              title: Text(context.l10n.syncToDesktop),
+              subtitle: Text(
+                context.l10n.syncToDesktopDetail,
               ),
               value: clipboardSettings.syncToDesktop,
               onChanged: (val) => notifier.setSyncToDesktop(val),
@@ -1104,12 +1104,11 @@ class _ClipboardSection extends ConsumerWidget {
             const Divider(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Keep history on this phone'),
+              title: Text(context.l10n.keepHistoryOnThisPhone),
               subtitle: Text(
                 history.isPersistent
-                    ? 'Encrypted and saved securely on this device.'
-                    : 'Off — the list is kept in memory and disappears when you '
-                        'close Remote Link.',
+                    ? context.l10n.historyPersistentSubtitle
+                    : context.l10n.historyMemoryOnlySubtitle,
               ),
               value: history.isPersistent,
               onChanged: (enabled) async {
@@ -1118,10 +1117,9 @@ class _ClipboardSection extends ConsumerWidget {
                 );
                 if (!context.mounted || applied) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
+                  SnackBar(
                     content: Text(
-                      'This phone’s secure storage is unavailable, so history '
-                      'stays in memory only.',
+                      context.l10n.secureStorageUnavailable,
                     ),
                   ),
                 );
@@ -1145,8 +1143,8 @@ class _ClipboardSection extends ConsumerWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Why does my phone need to be open?\n'
-                      'OS security requires Remote Link to be open to read clipboard.',
+                      '${context.l10n.whyPhoneOpenTitle}\n'
+                      '${context.l10n.whyPhoneOpenSubtitle}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
@@ -1189,16 +1187,15 @@ class _BackgroundSection extends ConsumerWidget {
           children: <Widget>[
             _SectionHeader(
               icon: AppIcons.settings,
-              title: 'Background',
+              title: context.l10n.sectionBackground,
               color: colorScheme.primary,
             ),
             const SizedBox(height: 10),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Stay connected in the background'),
-              subtitle: const Text(
-                'Keeps transfers running when you switch apps. Shows a '
-                'notification while connected.',
+              title: Text(context.l10n.stayConnectedBackground),
+              subtitle: Text(
+                context.l10n.stayConnectedBackgroundSubtitle,
               ),
               value: enabled,
               onChanged: (value) =>
@@ -1213,9 +1210,9 @@ class _BackgroundSection extends ConsumerWidget {
                 AppIcons.settings,
                 color: colorScheme.onSurfaceVariant,
               ),
-              title: const Text('Remote Link keeps stopping?'),
-              subtitle: const Text(
-                'Some phones close it anyway. Here is how to stop that.',
+              title: Text(context.l10n.keepsStoppingQuestion),
+              subtitle: Text(
+                context.l10n.keepsStoppingSubtitle,
               ),
               trailing: const AppIcon(AppIcons.settings),
               onTap: () => showDialog<void>(
@@ -1287,11 +1284,11 @@ class _BackgroundClipboardTileState
         _enabled ? AppIcons.settings : AppIcons.clipboard,
         color: _enabled ? colorScheme.primary : colorScheme.onSurfaceVariant,
       ),
-      title: const Text('Copy in any app, paste on your computer'),
+      title: Text(context.l10n.copyInAnyApp),
       subtitle: Text(
         _enabled
-            ? 'On. What you copy anywhere goes to your computer.'
-            : 'Off. Android only allows this through Accessibility settings.',
+            ? context.l10n.backgroundClipboardOn
+            : context.l10n.backgroundClipboardOff,
       ),
       trailing: const AppIcon(AppIcons.settings),
       onTap: () => showDialog<void>(
@@ -1316,30 +1313,23 @@ class _BackgroundClipboardDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return AlertDialog(
-      title: const Text('Copying while Remote Link is closed'),
-      content: const SingleChildScrollView(
+      title: Text(context.l10n.backgroundClipboardTitle),
+      content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Android does not let an app read the clipboard unless it is the '
-              'app you are looking at. That is why copying in Chrome does not '
-              'reach your computer on its own.',
+              context.l10n.accessibilityDialogPara1,
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
             Text(
-              'The one exception is an accessibility service, which you turn '
-              'on yourself in Android settings. Remote Link uses it for the '
-              'clipboard and nothing else: it cannot read your screen, and it '
-              'does not see what you type.',
+              context.l10n.accessibilityDialogPara2,
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
             Text(
-              'Settings › Accessibility › Remote Link › turn it on. Some '
-              'phones refuse the read even then — if nothing arrives after '
-              'enabling it, yours is one of them.',
-              style: TextStyle(fontWeight: FontWeight.w600),
+              context.l10n.accessibilityDialogPara3,
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ],
         ),
@@ -1347,7 +1337,7 @@ class _BackgroundClipboardDialog extends ConsumerWidget {
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Not now'),
+          child: Text(context.l10n.notNow),
         ),
         FilledButton(
           onPressed: () async {
@@ -1357,12 +1347,13 @@ class _BackgroundClipboardDialog extends ConsumerWidget {
             Navigator.of(context).pop();
             if (opened) return;
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Could not open Accessibility settings.'),
+              SnackBar(
+                content: Text(context.l10n.couldNotOpenAccessibility),
               ),
             );
           },
-          child: Text(enabled ? 'Open settings' : 'Turn it on'),
+          child:
+              Text(enabled ? context.l10n.openSettings : context.l10n.turnItOn),
         ),
       ],
     );
@@ -1382,41 +1373,37 @@ class _BatteryGuidanceDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return AlertDialog(
-      title: const Text('If Remote Link keeps disconnecting'),
-      content: const SingleChildScrollView(
+      title: Text(context.l10n.batteryGuidanceTitle),
+      content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Android stops apps it thinks you are not using, and some phones '
-              'are stricter than others. Remote Link asks to keep running, but '
-              'only you can grant it.',
+              context.l10n.batteryGuidancePara1,
             ),
-            SizedBox(height: 16),
-            Text('On any phone', style: TextStyle(fontWeight: FontWeight.w600)),
-            SizedBox(height: 4),
-            Text('Allow unrestricted battery use for Remote Link.'),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
+            Text(context.l10n.batteryGuidanceAnyPhone,
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            Text(context.l10n.batteryGuidanceAnyPhoneDesc),
+            const SizedBox(height: 16),
             Text(
-              'Xiaomi, Redmi and POCO',
-              style: TextStyle(fontWeight: FontWeight.w600),
+              context.l10n.batteryGuidanceXiaomi,
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
-            SizedBox(height: 4),
+            const SizedBox(height: 4),
             Text(
-              'Settings › Apps › Remote Link: turn on Autostart, and set '
-              'Battery saver to No restrictions. Then hold Remote Link in the '
-              'recent-apps list and tap the lock.',
+              context.l10n.batteryGuidanceXiaomiDesc,
             ),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             Text(
-              'Huawei, Oppo, vivo and OnePlus',
-              style: TextStyle(fontWeight: FontWeight.w600),
+              context.l10n.batteryGuidanceOther,
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
-            SizedBox(height: 4),
+            const SizedBox(height: 4),
             Text(
-              'Add Remote Link to the protected or auto-launch list in your '
-              'battery settings.',
+              context.l10n.batteryGuidanceOtherDesc,
             ),
           ],
         ),
@@ -1424,7 +1411,7 @@ class _BatteryGuidanceDialog extends ConsumerWidget {
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Close'),
+          child: Text(context.l10n.closeButton),
         ),
         FilledButton(
           onPressed: () async {
@@ -1434,15 +1421,14 @@ class _BatteryGuidanceDialog extends ConsumerWidget {
             Navigator.of(context).pop();
             if (opened) return;
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
+              SnackBar(
                 content: Text(
-                  'This phone has no battery settings screen to open. Look '
-                  'under Settings › Apps › Remote Link.',
+                  context.l10n.noBatterySettingsScreen,
                 ),
               ),
             );
           },
-          child: const Text('Open battery settings'),
+          child: Text(context.l10n.openBatterySettings),
         ),
       ],
     );
@@ -1474,24 +1460,23 @@ class _AppleWatchSection extends ConsumerWidget {
     final (icon, headline, detail) = switch (availability) {
       WatchAvailability(paired: false) => (
           AppIcons.settings,
-          'No Apple Watch paired',
-          'Pair a watch with this iPhone and Remote Link appears on it.',
+          context.l10n.noWatchPaired,
+          context.l10n.noWatchPairedDesc,
         ),
       WatchAvailability(installed: false) => (
           AppIcons.settings,
-          'Not installed on your watch',
-          'Install Remote Link from the Watch app on this iPhone.',
+          context.l10n.watchNotInstalled,
+          context.l10n.watchNotInstalledDesc,
         ),
       WatchAvailability(reachable: false) => (
           AppIcons.settings,
-          'Watch out of range',
-          'The watch controls the pointer whenever it can reach this iPhone.',
+          context.l10n.watchOutOfRange,
+          context.l10n.watchOutOfRangeDesc,
         ),
       _ => (
           AppIcons.settings,
-          'Ready on your wrist',
-          'Drag on the watch to move the pointer, tap to click, and turn the '
-              'Digital Crown to scroll.',
+          context.l10n.watchReady,
+          context.l10n.watchReadyDesc,
         ),
     };
 
@@ -1503,7 +1488,7 @@ class _AppleWatchSection extends ConsumerWidget {
           children: <Widget>[
             _SectionHeader(
               icon: AppIcons.settings,
-              title: 'Apple Watch',
+              title: context.l10n.appleWatchTitle,
               color: colorScheme.primary,
             ),
             const SizedBox(height: 10),
@@ -1513,7 +1498,7 @@ class _AppleWatchSection extends ConsumerWidget {
               title: Text(headline),
               subtitle: Text(detail),
               trailing: IconButton(
-                tooltip: 'Check again',
+                tooltip: context.l10n.checkAgain,
                 icon: const AppIcon(AppIcons.settings),
                 onPressed: () => ref.invalidate(watchAvailabilityProvider),
               ),
@@ -1541,12 +1526,13 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
   LogLevel? _selectedLevel;
 
   String _formatRoute(
+    BuildContext context,
     DiscoveryBackend? discovery,
     ConnectionTarget? target,
     bool isConnected,
   ) {
     if (!isConnected || target == null) {
-      return 'Not connected';
+      return context.l10n.notConnected;
     }
 
     if (discovery is CompositeDiscoveryBackend) {
@@ -1564,24 +1550,24 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
           }
         }
       }
-      if (inBonjour && inUdp) return 'Bonjour & UDP beacon';
-      if (inBonjour) return 'Bonjour (mDNS / DNS-SD)';
-      if (inUdp) return 'UDP beacon (Multicast)';
+      if (inBonjour && inUdp) return context.l10n.routeBonjourUdp;
+      if (inBonjour) return context.l10n.routeBonjour;
+      if (inUdp) return context.l10n.routeUdp;
     } else if (discovery is BonjourDiscoveryBackend) {
       if (discovery.current.any((d) =>
           (target.deviceId != null && d.id == target.deviceId) ||
           d.address == target.host)) {
-        return 'Bonjour (mDNS / DNS-SD)';
+        return context.l10n.routeBonjour;
       }
     } else if (discovery != null) {
       if (discovery.current.any((d) =>
           (target.deviceId != null && d.id == target.deviceId) ||
           d.address == target.host)) {
-        return 'UDP beacon (Multicast)';
+        return context.l10n.routeUdp;
       }
     }
 
-    return 'Manual address / Stored';
+    return context.l10n.routeManual;
   }
 
   void _exportLogs(
@@ -1627,8 +1613,8 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
     final messenger = ScaffoldMessenger.of(context);
     messenger.clearSnackBars();
     messenger.showSnackBar(
-      const SnackBar(
-        content: Text('Logs copied to clipboard'),
+      SnackBar(
+        content: Text(context.l10n.logsCopiedToClipboard),
       ),
     );
   }
@@ -1652,19 +1638,20 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
     final rttText = isConnected && quality != null
         ? '${quality.roundTripMillis.toStringAsFixed(0)} ms'
         : isConnected
-            ? 'Measuring…'
-            : 'Not connected';
+            ? context.l10n.measuring
+            : context.l10n.notConnected;
 
-    final discoveryRoute = _formatRoute(discovery, client?.target, isConnected);
+    final discoveryRoute =
+        _formatRoute(context, discovery, client?.target, isConnected);
 
     final stateLabel = switch (clientState) {
-      ClientState.connected => 'Connected',
-      ClientState.connecting => 'Connecting…',
-      ClientState.reconnecting => 'Reconnecting…',
-      ClientState.pairing => 'Pairing…',
-      ClientState.awaitingApproval => 'Waiting to be let in…',
-      ClientState.failed => 'Connection failed',
-      ClientState.idle => 'Idle (Not connected)',
+      ClientState.connected => context.l10n.stateConnected,
+      ClientState.connecting => context.l10n.stateConnecting,
+      ClientState.reconnecting => context.l10n.stateReconnecting,
+      ClientState.pairing => context.l10n.statePairing,
+      ClientState.awaitingApproval => context.l10n.stateAwaitingApproval,
+      ClientState.failed => context.l10n.stateFailed,
+      ClientState.idle => context.l10n.stateIdle,
     };
 
     final stateColor = switch (clientState) {
@@ -1685,23 +1672,23 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
           children: <Widget>[
             _SectionHeader(
               icon: AppIcons.analytics,
-              title: 'Diagnostics',
+              title: context.l10n.sectionDiagnostics,
               color: colorScheme.primary,
             ),
             const SizedBox(height: 10),
             _DiagnosticRow(
-              label: 'Connection state',
+              label: context.l10n.connectionStateLabel,
               value: stateLabel,
               valueColor: stateColor,
             ),
             const SizedBox(height: 6),
             _DiagnosticRow(
-              label: 'Round-trip time',
+              label: context.l10n.roundTripTimeLabel,
               value: rttText,
             ),
             const SizedBox(height: 6),
             _DiagnosticRow(
-              label: 'Discovery route',
+              label: context.l10n.discoveryRouteLabel,
               value: discoveryRoute,
             ),
             const Divider(height: 14),
@@ -1716,7 +1703,7 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
                 Text(
-                  'Log filter:',
+                  context.l10n.logFilter,
                   style: theme.textTheme.labelMedium?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -1725,24 +1712,24 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
                   value: _selectedLevel,
                   underline: const SizedBox.shrink(),
                   onChanged: (level) => setState(() => _selectedLevel = level),
-                  items: const <DropdownMenuItem<LogLevel?>>[
+                  items: <DropdownMenuItem<LogLevel?>>[
                     DropdownMenuItem<LogLevel?>(
                       value: null,
-                      child: Text('All Levels'),
+                      child: Text(context.l10n.allLevels),
                     ),
-                    DropdownMenuItem<LogLevel?>(
+                    const DropdownMenuItem<LogLevel?>(
                       value: LogLevel.debug,
                       child: Text('Debug (≥ debug)'),
                     ),
-                    DropdownMenuItem<LogLevel?>(
+                    const DropdownMenuItem<LogLevel?>(
                       value: LogLevel.info,
                       child: Text('Info (≥ info)'),
                     ),
-                    DropdownMenuItem<LogLevel?>(
+                    const DropdownMenuItem<LogLevel?>(
                       value: LogLevel.warn,
                       child: Text('Warn (≥ warn)'),
                     ),
-                    DropdownMenuItem<LogLevel?>(
+                    const DropdownMenuItem<LogLevel?>(
                       value: LogLevel.error,
                       child: Text('Error (≥ error)'),
                     ),
@@ -1756,13 +1743,13 @@ class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
                     crashHandler.lastReport,
                   ),
                   icon: const AppIcon(AppIcons.clipboard, size: 16),
-                  label: const Text('Export Logs'),
+                  label: Text(context.l10n.exportLogs),
                 ),
               ],
             ),
             const SizedBox(height: 6),
             Text(
-              '${memorySink.records.length} log records stored in memory',
+              context.l10n.logRecordsStored(memorySink.records.length),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
@@ -1839,7 +1826,7 @@ class _AboutSection extends StatelessWidget {
           children: <Widget>[
             _SectionHeader(
               icon: AppIcons.settings,
-              title: 'About',
+              title: context.l10n.sectionAbout,
               color: colorScheme.primary,
             ),
             const SizedBox(height: 8),
@@ -1847,14 +1834,14 @@ class _AboutSection extends StatelessWidget {
               contentPadding: EdgeInsets.zero,
               leading: const BrandMark(size: 40),
               title: const Text(kProductName),
-              subtitle: const Text('Version $kAppVersion'),
+              subtitle: Text(context.l10n.version(kAppVersion)),
               trailing: OutlinedButton(
                 onPressed: () => showLicensePage(
                   context: context,
                   applicationName: kProductName,
                   applicationVersion: kAppVersion,
                 ),
-                child: const Text('Licenses'),
+                child: Text(context.l10n.licensesButton),
               ),
             ),
           ],

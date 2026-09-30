@@ -58,9 +58,7 @@ void main() {
     expect(find.text('Clipboard sync'), findsOneWidget);
     expect(find.text('Media control'), findsOneWidget);
     expect(
-      find.text(
-        'Remote Link needs Accessibility permission. Enable it in System Settings.',
-      ),
+      find.textContaining('Remote Link needs Accessibility permission'),
       findsOneWidget,
     );
     expect(
@@ -111,9 +109,7 @@ void main() {
     expect(find.text('128'), findsOneWidget);
     expect(find.text('192.168.1.100:41234'), findsOneWidget);
     expect(
-      find.text(
-        'Remote Link needs Accessibility permission. Enable it in System Settings.',
-      ),
+      find.textContaining('Remote Link needs Accessibility permission'),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);

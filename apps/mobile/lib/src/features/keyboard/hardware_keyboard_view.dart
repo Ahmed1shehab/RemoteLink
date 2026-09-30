@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart' as proto;
 
+import '../../app/l10n.dart';
 import '../../app/theme.dart';
 
 /// What a key does when pressed.
@@ -69,52 +70,63 @@ final class KeyCap {
   /// So the printed label and the spoken label are separate strings by design.
   /// Anything already a word speaks for itself; everything below is a glyph or
   /// an abbreviation that does not.
-  String get semanticLabel => spokenLabel ?? spokenKeyLabel(label);
+  String semanticLabel(AppLocalizations l10n) => spokenLabel == null
+      ? spokenKeyLabel(label, l10n)
+      : spokenKeyLabel(spokenLabel!, l10n);
 }
 
-/// The spoken form of a printed key label.
-String spokenKeyLabel(String label) => _spokenKeyLabels[label] ?? label;
-
-const Map<String, String> _spokenKeyLabels = <String, String>{
-  // Glyphs. Each is a real Unicode character with a real Unicode name, and
-  // none of those names is the name of the key.
-  '⌫': 'Backspace',
-  '⌨': 'Switch to the phone keyboard',
-  '◀': 'Left arrow',
-  '▲': 'Up arrow',
-  '▼': 'Down arrow',
-  '▶': 'Right arrow',
-  '⌘': 'Command',
-  '⌥': 'Option',
-  '⌃': 'Control',
-  ' ': 'Space',
-  // Abbreviations. Read aloud, "esc" and "del" are noises.
-  'esc': 'Escape',
-  'del': 'Delete',
-  'tab': 'Tab',
-  'caps': 'Caps lock',
-  'return': 'Return',
-  'shift': 'Shift',
-  'ctrl': 'Control',
-  'alt': 'Alt',
-  'alt gr': 'Alt Gr',
-  'CMD': 'Command',
-  'WIN': 'Windows',
-  'META': 'Meta',
-  // Punctuation. Announced inconsistently between platforms and voices, and
-  // silently by several when punctuation reading is off — the iOS default.
-  '`': 'Backtick',
-  '-': 'Minus',
-  '=': 'Equals',
-  '[': 'Left bracket',
-  ']': 'Right bracket',
-  r'\': 'Backslash',
-  ';': 'Semicolon',
-  "'": 'Apostrophe',
-  ',': 'Comma',
-  '.': 'Full stop',
-  '/': 'Slash',
-};
+String spokenKeyLabel(String label, AppLocalizations l10n) => switch (label) {
+      '⌫' => l10n.keyBackspace,
+      '⌨' => l10n.keySwitchToThePhoneKeyboard,
+      '◀' => l10n.keyLeftArrow,
+      '▲' => l10n.keyUpArrow,
+      '▼' => l10n.keyDownArrow,
+      '▶' => l10n.keyRightArrow,
+      '⌘' => l10n.keyCommand,
+      '⌥' => l10n.keyOption,
+      '⌃' => l10n.keyControl,
+      ' ' => l10n.keySpace,
+      'esc' => l10n.keyEscape,
+      'del' => l10n.keyDelete,
+      'tab' => l10n.keyTab,
+      'caps' => l10n.keyCapsLock,
+      'return' => l10n.keyReturn,
+      'shift' => l10n.keyShift,
+      'ctrl' => l10n.keyControl,
+      'alt' => l10n.keyAlt,
+      'alt gr' => l10n.keyAltGr,
+      'CMD' => l10n.keyCommand,
+      'WIN' => l10n.keyWindows,
+      'META' => l10n.keyMeta,
+      '`' => l10n.keyBacktick,
+      '-' => l10n.keyMinus,
+      '=' => l10n.keyEquals,
+      '[' => l10n.keyLeftBracket,
+      ']' => l10n.keyRightBracket,
+      r'\' => l10n.keyBackslash,
+      ';' => l10n.keySemicolon,
+      "'" => l10n.keyApostrophe,
+      ',' => l10n.keyComma,
+      '.' => l10n.keyFullStop,
+      '/' => l10n.keySlash,
+      'Home' => l10n.keyHome,
+      'End' => l10n.keyEnd,
+      'PgUp' => l10n.keyPageUp,
+      'PgDn' => l10n.keyPageDown,
+      '←' => l10n.keyLeftArrow,
+      '↑' => l10n.keyUpArrow,
+      '↓' => l10n.keyDownArrow,
+      '→' => l10n.keyRightArrow,
+      'Esc' => l10n.keyEscape,
+      'Tab' => l10n.keyTab,
+      'Enter' => l10n.keyEnter,
+      'Del' => l10n.keyDelete,
+      'Ctrl' => l10n.keyControl,
+      'Shift' => l10n.keyShift,
+      'Alt' => l10n.keyAlt,
+      'Cmd' => l10n.keyCommand,
+      _ => label,
+    };
 
 /// A rendered hardware keyboard.
 ///
@@ -394,31 +406,34 @@ class HardwareKeyboardView extends StatelessWidget {
 
           final keyboard = Padding(
             padding: const EdgeInsets.all(spacing),
-            child: Column(
-              children: <Widget>[
-                for (final row in rows) ...<Widget>[
-                  SizedBox(
-                    height: rowHeight,
-                    child: Row(
-                      children: <Widget>[
-                        for (final cap in row) ...<Widget>[
-                          Expanded(
-                            flex: (cap.flex * 10).round(),
-                            child: _Key(
-                              cap: cap,
-                              active: _isActive(cap),
-                              enabled: enabled,
-                              onPressed: () => _press(cap),
+            child: Directionality(
+              textDirection: TextDirection.ltr,
+              child: Column(
+                children: <Widget>[
+                  for (final row in rows) ...<Widget>[
+                    SizedBox(
+                      height: rowHeight,
+                      child: Row(
+                        children: <Widget>[
+                          for (final cap in row) ...<Widget>[
+                            Expanded(
+                              flex: (cap.flex * 10).round(),
+                              child: _Key(
+                                cap: cap,
+                                active: _isActive(cap),
+                                enabled: enabled,
+                                onPressed: () => _press(cap),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: spacing),
+                            const SizedBox(width: spacing),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: spacing),
+                    const SizedBox(height: spacing),
+                  ],
                 ],
-              ],
+              ),
             ),
           );
 
@@ -454,7 +469,7 @@ class _Key extends StatelessWidget {
     return Semantics(
       button: true,
       enabled: enabled,
-      label: cap.semanticLabel,
+      label: cap.semanticLabel(context.l10n),
       // A held modifier is the one piece of keyboard state whose consequences
       // are invisible: Shift stuck on produces baffling results three
       // keystrokes later. Sighted users get the colour change; `toggled` is how

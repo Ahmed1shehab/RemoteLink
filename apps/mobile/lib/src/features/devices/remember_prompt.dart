@@ -6,6 +6,7 @@ import 'package:rl_core/rl_core.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
+import '../../app/l10n.dart';
 import '../../app/providers.dart';
 
 /// The question this phone is putting to its user about a connected device.
@@ -242,33 +243,32 @@ class RememberDeviceDialog extends StatelessWidget {
   final String peerName;
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Remember this connection?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'Remote Link can reconnect to $peerName by itself next time — no '
-              'code to scan, and nobody asked to allow it.',
-            ),
-            const SizedBox(height: 12),
-            Text(
-              '$peerName is being asked the same thing. Both devices have to '
-              'agree, and either one can change its mind later.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Not now'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Remember'),
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return AlertDialog(
+      title: Text(l10n.rememberConnectionTitle),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(l10n.rememberConnectionMessage(peerName)),
+          const SizedBox(height: 12),
+          Text(
+            l10n.rememberConnectionExplanation(peerName),
+            style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
-      );
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(l10n.notNow),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(l10n.remember),
+        ),
+      ],
+    );
+  }
 }

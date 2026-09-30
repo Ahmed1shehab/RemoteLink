@@ -1,0 +1,1138 @@
+{
+  "@@locale": "en",
+  "appTitle": "Remote Link",
+  "cancel": "Cancel",
+  "save": "Save",
+  "done": "Done",
+  "undo": "Undo",
+  "clear": "Clear",
+  "clearAll": "Clear all",
+  "settings": "Settings",
+  "searchAgain": "Search again",
+  "scanCode": "Scan code",
+  "notConnected": "Not connected",
+  "notConnectedPeriod": "Not connected.",
+  "connected": "Connected",
+  "reconnecting": "Reconnecting",
+  "connecting": "Connecting",
+  "pairing": "Pairing",
+  "waitingToBeLetIn": "Waiting to be let in",
+  "connectionFailed": "Connection failed",
+  "connectionStatusLabel": "Connection status: {status}",
+  "@connectionStatusLabel": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "shareSent": "Sent {description} to {peerName}.",
+  "@shareSent": {
+    "placeholders": {
+      "description": {
+        "type": "String"
+      },
+      "peerName": {
+        "type": "String"
+      }
+    }
+  },
+  "shareWaiting": "Holding {description} until your computer is back.",
+  "@shareWaiting": {
+    "placeholders": {
+      "description": {
+        "type": "String"
+      }
+    }
+  },
+  "shareFailed": "Could not send that: {reason}",
+  "@shareFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "devicesTitle": "Devices",
+  "reconnectingTo": "Reconnecting to {name}",
+  "@reconnectingTo": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "chooseDifferentComputer": "Choose a different computer",
+  "deviceConnectedSubtitle": "Connected",
+  "tapForControls": " · tap for the controls",
+  "deviceAccessRevoked": "This computer removed your access",
+  "pairedTapToScan": "Paired · tap to scan its code",
+  "pairedWithAddress": "Paired · {host}",
+  "@pairedWithAddress": {
+    "placeholders": {
+      "host": {
+        "type": "String"
+      }
+    }
+  },
+  "pairedNotSeen": "Paired · not seen right now · {host}",
+  "@pairedNotSeen": {
+    "placeholders": {
+      "host": {
+        "type": "String"
+      }
+    }
+  },
+  "tapToPair": "Tap to pair · {host}",
+  "@tapToPair": {
+    "placeholders": {
+      "host": {
+        "type": "String"
+      }
+    }
+  },
+  "pairAgain": "Pair again",
+  "disconnect": "Disconnect",
+  "renameComputer": "Rename computer",
+  "computerName": "Computer name",
+  "invalidComputerName": "Invalid name: 1–64 characters, no control codes or line breaks.",
+  "switchComputersTitle": "Switch computers?",
+  "switchComputersMessage": "This phone talks to one computer at a time, so connecting to {name} will disconnect the one you are on. Anything still transferring will stop.",
+  "@switchComputersMessage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "stay": "Stay",
+  "switchToComputer": "Switch to {name}",
+  "@switchToComputer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceCantSearch": "This device can’t search automatically",
+  "lookingForComputers": "Looking for computers",
+  "noComputersFound": "No computers found",
+  "deviceCantSearchExplanation": "iPhones need a special Apple permission to search the local network, and some Wi-Fi networks block it entirely.\n\nScan the code your computer shows instead — it carries the address, so searching is not needed. Everything else works exactly the same.",
+  "lookingForComputersExplanation": "Make sure Remote Link is running on your computer and both devices are on the same Wi-Fi network.",
+  "noComputersFoundExplanation": "Check that Remote Link is running on your computer and that both devices are on the same Wi-Fi.\n\nSome networks — guest Wi-Fi in particular — block the traffic that finds computers automatically. If yours does, click “Pair a phone” on the computer and scan the code it shows. It is remembered afterwards.",
+  "platformMac": "Mac",
+  "platformWindows": "Windows PC",
+  "platformLinux": "Linux computer",
+  "platformComputer": "Computer",
+  "tabTouchpad": "Touchpad",
+  "tabKeyboard": "Keyboard",
+  "tabMedia": "Media",
+  "tabClipboard": "Clipboard",
+  "tabSend": "Send",
+  "tooltipShowTabs": "Show the tabs again",
+  "tooltipExpandGesture": "Expand the gesture area",
+  "tooltipScreenStream": "Screen Stream",
+  "clipboardSyncTitle": "Clipboard sync",
+  "clipboardConnectedActive": "Connected and active",
+  "clipboardSyncPaused": "Sync is paused",
+  "clipboardReadyToSync": "Ready to sync",
+  "clipboardFromComputer": "From {name}",
+  "@clipboardFromComputer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "clipboardFromYourComputer": "From your computer",
+  "clipboardFromThisPhone": "From this phone",
+  "clipboardPlaceholder": "Your latest clipboard item will appear here.",
+  "clipboardSendButton": "Send",
+  "clipboardGetButton": "Get",
+  "historyTitle": "History",
+  "historySubtitle": "Tap an item to copy it again",
+  "unpin": "Unpin",
+  "pin": "Pin",
+  "remove": "Remove",
+  "deletedFromHistory": "Deleted from history",
+  "copied": "Copied.",
+  "itemCantBeCopied": "That item can’t be copied here.",
+  "pinLimitReached": "{count, plural, =1{You can pin up to 1 item. Unpin one first.} other{You can pin up to {count} items. Unpin one first.}}",
+  "@pinLimitReached": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "systemBatteryCharging": "Computer battery {percent} percent, charging",
+  "@systemBatteryCharging": {
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "systemBattery": "Computer battery {percent} percent",
+  "@systemBattery": {
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "systemProcessor": "Processor {percent} percent",
+  "@systemProcessor": {
+    "placeholders": {
+      "percent": {
+        "type": "String"
+      }
+    }
+  },
+  "systemMemory": "Memory {percent} percent",
+  "@systemMemory": {
+    "placeholders": {
+      "percent": {
+        "type": "String"
+      }
+    }
+  },
+  "systemUptime": "Up {uptime}",
+  "@systemUptime": {
+    "placeholders": {
+      "uptime": {
+        "type": "String"
+      }
+    }
+  },
+  "touchpadLabel": "Touchpad",
+  "touchpadHint": "Drag to move the pointer. Double tap to click. Swipe with three fingers to scroll. Directional controls are available below.",
+  "touchpadWatermarkHint": "Drag to move · Tap to click\nTwo fingers to scroll or right-click\nHold to drag\n\nAdjust sensitivity anytime in Settings",
+  "sensitivityBannerTitle": "Pointer Sensitivity",
+  "sensitivityBannerSubtitle": "Tap for tutorial or adjust in Settings",
+  "adjust": "Adjust",
+  "dismissHint": "Dismiss hint",
+  "pointerControlsTitle": "Pointer controls",
+  "hidePointerControls": "Hide pointer controls",
+  "showPointerControls": "Show pointer controls",
+  "stepSizeAnnouncement": "Step size, currently {stepName}",
+  "@stepSizeAnnouncement": {
+    "placeholders": {
+      "stepName": {
+        "type": "String"
+      }
+    }
+  },
+  "stepFine": "Fine",
+  "stepNormal": "Normal",
+  "stepCoarse": "Coarse",
+  "stepTooltip": "{stepName} — {pixels, plural, =1{1 pixel per press} other{{pixels} pixels per press}}",
+  "@stepTooltip": {
+    "placeholders": {
+      "stepName": {
+        "type": "String"
+      },
+      "pixels": {
+        "type": "int"
+      }
+    }
+  },
+  "movePointerLeft": "{pixels, plural, =1{Move pointer left 1 pixel} other{Move pointer left {pixels} pixels}}",
+  "@movePointerLeft": {
+    "placeholders": {
+      "pixels": {
+        "type": "int"
+      }
+    }
+  },
+  "movePointerRight": "{pixels, plural, =1{Move pointer right 1 pixel} other{Move pointer right {pixels} pixels}}",
+  "@movePointerRight": {
+    "placeholders": {
+      "pixels": {
+        "type": "int"
+      }
+    }
+  },
+  "movePointerUp": "{pixels, plural, =1{Move pointer up 1 pixel} other{Move pointer up {pixels} pixels}}",
+  "@movePointerUp": {
+    "placeholders": {
+      "pixels": {
+        "type": "int"
+      }
+    }
+  },
+  "movePointerDown": "{pixels, plural, =1{Move pointer down 1 pixel} other{Move pointer down {pixels} pixels}}",
+  "@movePointerDown": {
+    "placeholders": {
+      "pixels": {
+        "type": "int"
+      }
+    }
+  },
+  "leftClick": "Left click",
+  "rightClick": "Right click",
+  "middleClick": "Middle click",
+  "scrollUp": "Scroll up",
+  "scrollDown": "Scroll down",
+  "padButtonLeft": "Left",
+  "padButtonMid": "Mid",
+  "padButtonRight": "Right",
+  "sensitivityTutorialTooltip": "Pointer sensitivity tutorial",
+  "tutorialTitle": "Pointer sensitivity",
+  "tutorialMessage": "Moving the cursor feels natural when the sensitivity matches your screen resolution.\n\nAdjust it at any time in Settings › Touchpad to match your preference.",
+  "openSettingsButton": "Open Settings",
+  "gotItButton": "Got it",
+  "unmute": "Unmute",
+  "mute": "Mute",
+  "volume": "Volume",
+  "volumePercent": "Volume {percent} percent",
+  "@volumePercent": {
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "display": "Display",
+  "screenBrightnessPercent": "Screen brightness {percent} percent",
+  "@screenBrightnessPercent": {
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "nothingPlaying": "Nothing playing",
+  "mediaControls": "Media controls",
+  "playSomethingHint": "Play something and it will appear here. Controls work with any app, including browsers.",
+  "trackDetailsUnavailable": "Track details are unavailable on this computer. Playback and volume controls still work.",
+  "previousTrack": "Previous track",
+  "play": "Play",
+  "pause": "Pause",
+  "nextTrack": "Next track",
+  "mediaControlUnavailable": "Media control isn’t available",
+  "mediaControlUnavailableExplanation": "This computer didn’t offer media control. It is implemented on macOS; Windows support is still to come.",
+  "sendToSubtitleNoDevice": "No device connected",
+  "sendToSubtitleSingle": "to {name}",
+  "@sendToSubtitleSingle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "sendToSubtitleMultiple": "to {name}, of {total}",
+  "@sendToSubtitleMultiple": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "nowhereToSendYet": "Nowhere to send yet",
+  "nowhereToSendExplanation": "Connect to a computer, or open Remote Link on another phone on the same Wi-Fi and it will appear here.",
+  "addMedia": "Add media",
+  "media": "Media",
+  "addFiles": "Add files",
+  "files": "Files",
+  "pickedFilesCount": "{count, plural, =1{1 item · {size}} other{{count} items · {size}}}",
+  "@pickedFilesCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "removeFileTooltip": "Remove {name}",
+  "@removeFileTooltip": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "deletedFromSelection": "Deleted from selection",
+  "chooseSomethingToSend": "Choose something to send first.",
+  "filesNoLongerAvailable": "{count, plural, =1{{name} is no longer available. Choose it again.} other{{count} files are no longer available. Choose them again.}}",
+  "@filesNoLongerAvailable": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "offeredItems": "{count, plural, =1{Offered 1 item to {target}.} other{Offered {count} items to {target}.}}",
+  "@offeredItems": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "target": {
+        "type": "String"
+      }
+    }
+  },
+  "couldNotRetry": "Could not retry: {error}",
+  "@couldNotRetry": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "transferDeleted": "Transfer deleted",
+  "connectToDeviceToSend": "Connect to a device to send.",
+  "chooseMediaOrFilesAbove": "Choose media or files above.",
+  "previewFile": "Preview {name}",
+  "@previewFile": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "transferFromPeer": "From {name}",
+  "@transferFromPeer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "transferToPeer": "To {name}",
+  "@transferToPeer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "transferFileItemCount": "{count, plural, =1{1 item · {size}} other{{count} items · {size}}}",
+  "@transferFileItemCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "deleteTransfer": "Delete transfer",
+  "fileNoLongerStored": "This file is no longer stored on your phone.",
+  "openFile": "Open {name}",
+  "@openFile": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "shareFile": "Share {name}",
+  "@shareFile": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "sendFailed": "Send failed: {error}",
+  "@sendFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "dismiss": "Dismiss",
+  "transferEta": "ETA: {eta}",
+  "@transferEta": {
+    "placeholders": {
+      "eta": {
+        "type": "String"
+      }
+    }
+  },
+  "statusWaitingForYou": "Waiting for you",
+  "statusAwaitingResponse": "Awaiting response",
+  "statusOffered": "Offered",
+  "statusTransferring": "Transferring",
+  "statusCompleted": "Completed",
+  "statusCancelled": "Cancelled",
+  "statusDeclined": "Declined",
+  "statusFailed": "Failed",
+  "retry": "Retry",
+  "keyboardModeText": "Text",
+  "keyboardModeKeys": "Keys",
+  "modifierLockedOn": "{name}, locked on",
+  "@modifierLockedOn": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "sentToComputer": "Sent to your computer",
+  "clearTranscript": "Clear the transcript",
+  "tapHereThenType": "Tap here, then type.",
+  "sectionShortcuts": "Shortcuts",
+  "sectionModifiers": "Modifiers",
+  "sectionKeys": "Keys",
+  "shortcutCopy": "Copy",
+  "shortcutPaste": "Paste",
+  "shortcutCut": "Cut",
+  "shortcutUndo": "Undo",
+  "shortcutRedo": "Redo",
+  "shortcutSelectAll": "Select all",
+  "shortcutSave": "Save",
+  "shortcutFind": "Find",
+  "shortcutSwitchApp": "Switch app",
+  "shortcutCloseTab": "Close tab",
+  "shortcutRefresh": "Refresh",
+  "shortcutTaskManager": "Task manager",
+  "scanCodeToPair": "Scan code to pair",
+  "scanCodeInstructions": "Point your camera at the code on your computer's screen.",
+  "verifyingSecurityCode": "Verifying security code…",
+  "pairingFailed": "Pairing failed: {reason}",
+  "@pairingFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "securityCodeMatchesPrompt": "Compare the code below with the one shown on “{name}”:",
+  "@securityCodeMatchesPrompt": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "securityCodeDoesNotMatch": "Codes do not match",
+  "securityCodeMatches": "Codes match",
+  "waitingForApproval": "Waiting for “{name}” to approve the connection…",
+  "@waitingForApproval": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "incomingConnectionRequest": "“{name}” is asking to connect",
+  "@incomingConnectionRequest": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "incomingConnectionExplanation": "Allow this device to interact with your phone?",
+  "allowButton": "Allow",
+  "declineButton": "Decline",
+  "incomingFilePrompt": "“{name}” wants to send you {count, plural, =1{1 file ({size})} other{{count} files ({size})}}",
+  "@incomingFilePrompt": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "connectionHoldWaiting": "Waiting for “{name}” to respond…",
+  "@connectionHoldWaiting": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "connectionHoldDeclined": "“{name}” declined the connection.",
+  "@connectionHoldDeclined": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "connectionHoldApproved": "Connected to “{name}”.",
+  "@connectionHoldApproved": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "sectionThisPhone": "This Phone",
+  "deviceName": "Device name",
+  "renameThisPhone": "Rename this phone",
+  "renamePhoneDialogTitle": "Rename this phone",
+  "deviceId": "Device ID",
+  "publicKeyFingerprint": "Public-key fingerprint",
+  "sectionAppearance": "Appearance",
+  "themeModeLabel": "Theme",
+  "themeModeSystem": "System",
+  "themeModeLight": "Light",
+  "themeModeDark": "Dark",
+  "sectionTouchpad": "Touchpad",
+  "pointerSpeed": "Pointer speed",
+  "pointerAcceleration": "Pointer acceleration",
+  "scrollSpeed": "Scroll speed",
+  "naturalScrolling": "Natural scrolling",
+  "naturalScrollingSubtitle": "Content moves in the direction of your fingers",
+  "hapticFeedback": "Haptic feedback",
+  "hapticFeedbackSubtitle": "Vibrate on clicks and gestures",
+  "sectionReceiving": "Receiving",
+  "allowFileTransfers": "Allow incoming transfers",
+  "allowFileTransfersSubtitle": "Prompt when nearby devices want to send files",
+  "sectionPairedComputers": "Paired Computers",
+  "noPairedComputers": "No paired computers yet",
+  "forgetDevice": "Forget",
+  "forgetDeviceConfirm": "Forget “{name}”? You will need to pair again to connect.",
+  "@forgetDeviceConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "sectionClipboard": "Clipboard",
+  "syncFromDesktop": "Sync from computer",
+  "syncFromDesktopSubtitle": "Automatically update phone clipboard when copying on computer",
+  "syncToDesktop": "Sync to computer",
+  "syncToDesktopSubtitle": "Send copied text to computer",
+  "sectionBackground": "Background",
+  "keepConnectionAlive": "Keep connection alive in background",
+  "keepConnectionAliveSubtitle": "Maintain link when app is minimised",
+  "sectionDiagnostics": "Diagnostics",
+  "exportLogs": "Export Logs",
+  "exportLogsSubtitle": "Share diagnostic logs for troubleshooting",
+  "logsExported": "Logs exported.",
+  "sectionAbout": "About",
+  "version": "Version {version}",
+  "@version": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "openSourceLicenses": "Open-source licenses",
+  "connectionDeclined": "{name} did not allow the connection.",
+  "@connectionDeclined": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "connectionTimedOut": "Nobody answered on {name}, so the connection was not allowed.",
+  "@connectionTimedOut": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tryAgain": "Try again",
+  "waitingToBeLetInTitle": "Waiting to be let in",
+  "waitingToBeLetInMessage": "{name} is asking whether to allow this connection.",
+  "@waitingToBeLetInMessage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "waitingToBeLetInInstructions": "Go to it and tap Allow. Nothing is sent until someone does.",
+  "stopWaiting": "Stop waiting",
+  "rememberConnectionTitle": "Remember this connection?",
+  "rememberConnectionMessage": "Remote Link can reconnect to {name} by itself next time — no code to scan, and nobody asked to allow it.",
+  "@rememberConnectionMessage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "rememberConnectionExplanation": "{name} is being asked the same thing. Both devices have to agree, and either one can change its mind later.",
+  "@rememberConnectionExplanation": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "notNow": "Not now",
+  "remember": "Remember",
+  "nothingCopiedYet": "Nothing copied yet",
+  "nothingCopiedYetExplanation": "Recent items appear here. Anything your password manager marks confidential is never recorded.",
+  "securityCodeSpoken": "Security code: {code}",
+  "@securityCodeSpoken": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "pairWithDevice": "Pair with {name}",
+  "@pairWithDevice": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "checkingTheCode": "Checking the code…",
+  "connectingSecurely": "Connecting securely…",
+  "checkDigitsPrompt": "Check that your computer is showing these digits",
+  "numbersDifferentWarning": "If the numbers are different, something is intercepting the connection. Cancel and try again on a network you trust.",
+  "theNumbersMatch": "The numbers match",
+  "notTheComputerOnCode": "This is not the computer on the code",
+  "notTheComputerOnCodeExplanation": "Something answered at that address with a different identity than the code showed. Remote Link did not pair with it and did not send it anything.\n\nOn a network you trust this should never happen. Show the code again on {name} and scan the new one.",
+  "@notTheComputerOnCodeExplanation": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "couldNotEstablishSecureConnection": "Could not establish a secure connection",
+  "pairingFailedRefusedOrMismatched": "The computer refused the connection, or its identity did not match what this phone had stored.",
+  "torchTooltip": "Torch",
+  "scannerInstructions": "On your computer, open Remote Link and click “Pair a phone”.",
+  "foreignCodeWarning": "That code is not from Remote Link.",
+  "cameraPermissionDeniedTitle": "Remote Link cannot use the camera",
+  "cameraPermissionDeniedDesc": "Turn the camera on for Remote Link in your device’s Settings, under Apps.\n\nYou can pair without it: go back, and the computer appears in the list on its own as long as both are on the same Wi-Fi.",
+  "cameraUnsupportedTitle": "This device has no camera to scan with",
+  "cameraUnsupportedDesc": "Go back — the computer appears in the list on its own as long as both are on the same Wi-Fi.",
+  "cameraErrorTitle": "The camera could not start",
+  "cameraErrorDesc": "Something stopped the camera from starting. Try again, or go back and pick the computer from the list.",
+  "incomingDevicePrompt": "A device wants to connect",
+  "pairingPromptHelp": "Connect only if the other device is showing these same six digits. If they differ, something else is answering — decline and try again.",
+  "codesMatch": "Codes match",
+  "allowDeviceToConnectTitle": "Allow this device to connect?",
+  "allowDeviceToConnectHelp": "You have paired with it before, so its identity is already checked. This is only about now — allow it if the device is in your hands, and turn it away if it is not.",
+  "allowDeviceToConnectRestartHelp": "You will not be asked about it again until Remote Link restarts.",
+  "rememberDevicePromptHelp": "Remote Link can let {name} straight in next time — no code to scan, and nobody asked to allow it.",
+  "@rememberDevicePromptHelp": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "rememberDevicePromptBothAgree": "{name} is being asked the same thing. Both devices have to agree, and either one can change its mind later.",
+  "@rememberDevicePromptBothAgree": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "incomingFileTitle": "{count, plural, zero{Incoming files} one{Incoming file} two{Incoming files} few{Incoming files} many{Incoming files} other{Incoming files}}",
+  "@incomingFileTitle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "incomingMoreFiles": "{count, plural, zero{and none more} one{and 1 more} two{and 2 more} few{and {count} more} many{and {count} more} other{and {count} more}}",
+  "@incomingMoreFiles": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "incomingDestinationExplanation": "Photos and videos are saved to your Photos library. Anything else opens the share sheet so you can choose where it goes. Recent arrivals stay openable from this list.",
+  "accept": "Accept",
+  "customiseCursorSpeed": "Customise cursor speed",
+  "tutorialIntro": "Cursor moving too fast or too slow? You can easily fine-tune pointer speed to suit your workflow:",
+  "tutorialStep1Title": "Open Settings",
+  "tutorialStep1Desc": "Tap the Settings gear icon in the top right corner of the app bar.",
+  "tutorialStep2Title": "Pointer Sensitivity",
+  "tutorialStep2Desc": "Under Touchpad, drag the sensitivity slider between 0.5x and 3.5x.",
+  "tutorialStep3Title": "Gestures & Scrolling",
+  "tutorialStep3Desc": "Toggle Natural Scrolling or Tap to Click to match your trackpad habits.",
+  "currentSensitivityLabel": "Current sensitivity: ",
+  "screenStreamTitle": "Screen Stream",
+  "startStream": "Start Streaming",
+  "stopStream": "Stop Streaming",
+  "stopSharing": "Stop Sharing",
+  "waitingForScreenFrames": "Waiting for screen frames...",
+  "screenSharingUnavailableTitle": "Screen sharing isn’t available",
+  "screenSharingUnavailableDesc": "This computer cannot share its screen. Screen capture is supported on macOS when Screen Recording permission is granted.",
+  "couldNotLoadIdentity": "Could not load device identity: {error}",
+  "@couldNotLoadIdentity": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "appleWatchTitle": "Apple Watch",
+  "noWatchPaired": "No Apple Watch paired",
+  "noWatchPairedDesc": "Pair a watch with this iPhone and Remote Link appears on it.",
+  "watchNotInstalled": "Not installed on your watch",
+  "watchNotInstalledDesc": "Install Remote Link from the Watch app on this iPhone.",
+  "watchOutOfRange": "Watch out of range",
+  "watchOutOfRangeDesc": "The watch controls the pointer whenever it can reach this iPhone.",
+  "watchReady": "Ready on your wrist",
+  "watchReadyDesc": "Drag on the watch to move the pointer, tap to click, and turn the Digital Crown to scroll.",
+  "checkAgain": "Check again",
+  "logsCopiedToClipboard": "Logs copied to clipboard",
+  "logFilter": "Log filter:",
+  "allLevels": "All Levels",
+  "logRecordsStored": "{count, plural, zero{0 log records stored in memory} one{1 log record stored in memory} two{2 log records stored in memory} few{{count} log records stored in memory} many{{count} log records stored in memory} other{{count} log records stored in memory}}",
+  "@logRecordsStored": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "connectionStateLabel": "Connection state",
+  "roundTripTimeLabel": "Round-trip time",
+  "discoveryRouteLabel": "Discovery route",
+  "measuring": "Measuring…",
+  "stateIdle": "Idle (Not connected)",
+  "letNearbyDevicesSendTitle": "Let nearby devices send to this phone",
+  "askBeforeConnectingTitle": "Ask before a paired device connects",
+  "waitBeforeConnectingSubtitle": "Wait for approval before connecting",
+  "connectAutomaticallySubtitle": "Connect automatically without asking",
+  "connectedNow": "{count, plural, zero{No devices connected now} one{1 connected now} two{2 connected now} few{{count} connected now} many{{count} connected now} other{{count} connected now}}",
+  "@connectedNow": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "permissionsFor": "Permissions for {name}",
+  "@permissionsFor": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "renameNamed": "Rename {name}",
+  "@renameNamed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "forgetNamed": "Forget {name}",
+  "@forgetNamed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "forgetNamedQuestion": "Forget {name}?",
+  "@forgetNamedQuestion": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "forgotNamed": "Forgot {name}",
+  "@forgotNamed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneName": "Phone name",
+  "lastSeen": "Last seen: {address}",
+  "@lastSeen": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "noAddressRecorded": "No address recorded",
+  "keepHistoryOnThisPhone": "Keep history on this phone",
+  "secureStorageUnavailable": "This phone’s secure storage is unavailable, so history stays in memory only.",
+  "whyPhoneOpenTitle": "Why does my phone need to be open?",
+  "whyPhoneOpenSubtitle": "OS security requires Remote Link to be open to read clipboard.",
+  "backgroundClipboardTitle": "Copying while Remote Link is closed",
+  "batteryGuidanceTitle": "If Remote Link keeps disconnecting",
+  "closeButton": "Close",
+  "openBatterySettings": "Open battery settings",
+  "turnItOn": "Turn it on",
+  "themeModeFollowSystem": "Follow the phone’s setting",
+  "themeModeAlwaysLight": "Always light",
+  "themeModeAlwaysDark": "Always dark",
+  "receivingVisibleWifi": "Visible on this Wi-Fi as “{name}”",
+  "@receivingVisibleWifi": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "receivingStarting": "Starting…",
+  "receivingHidden": "This phone will not appear on other devices",
+  "couldNotLoadPairedComputers": "Could not load paired computers: {error}",
+  "@couldNotLoadPairedComputers": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "noPairedComputersExplanation": "No paired computers yet. Pair with a computer on your Wi-Fi network to start.",
+  "pairedDevicesTitle": "Paired Devices",
+  "rememberAutoConnectTooltip": "{name} connects without being asked. Tap to start asking again.",
+  "@rememberAutoConnectTooltip": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "rememberAskFirstTooltip": "Tap to let {name} connect without being asked.",
+  "@rememberAskFirstTooltip": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "forgetComputerConfirmation": "This will remove this computer from your trusted list. You will need to pair again to reconnect.",
+  "renameComputerTitle": "Rename computer",
+  "invalidDeviceName": "Invalid name: 1–64 characters, no control codes or line breaks.",
+  "permissionsNamed": "Permissions · {name}",
+  "@permissionsNamed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "currentPermissionTier": "Current Permission Tier",
+  "requestHigherTier": "Request Higher Tier",
+  "whatTierAllows": "What {tier} allows:",
+  "@whatTierAllows": {
+    "placeholders": {
+      "tier": {
+        "type": "String"
+      }
+    }
+  },
+  "reasonJustificationOptional": "Reason / Justification (optional)",
+  "reasonHint": "e.g. Need to transfer files",
+  "requestElevation": "Request Elevation",
+  "tierReadOnlyTitle": "View Only",
+  "tierStandardTitle": "Standard",
+  "tierExtendedTitle": "Extended",
+  "tierAdminTitle": "Admin",
+  "tierReadOnlyDesc": "Allows viewing system status, media state, and screen stream.",
+  "tierStandardDesc": "Allows sending keyboard and mouse input, synchronizing clipboard, controlling media, viewing this screen, and transferring files.",
+  "tierExtendedDesc": "Allows launching applications and running pre-registered commands.",
+  "tierAdminDesc": "Allows controlling power (shutdown, restart, sleep, lock) and managing paired devices.",
+  "connectToRequestElevation": "Connect to {name} to request permission elevation.",
+  "@connectToRequestElevation": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "permissionRequestSent": "Permission request sent to {name}.",
+  "@permissionRequestSent": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "permissionRequestFailed": "Failed to send permission request.",
+  "pointerSensitivity": "Pointer sensitivity",
+  "naturalScrollingMatches": "Content direction matches finger movement",
+  "tapToClick": "Tap to click",
+  "tapToClickSubtitle": "One finger left-clicks, two fingers right-click",
+  "hapticFeedbackDetail": "Vibrate on gestures, keyboard taps, and buttons",
+  "syncFromDesktopDetail": "Automatically receive clipboard copied on your computer",
+  "syncToDesktopDetail": "Send phone clipboard when opening app or pressing Send",
+  "historyPersistentSubtitle": "Encrypted and saved securely on this device.",
+  "historyMemoryOnlySubtitle": "Off — the list is kept in memory and disappears when you close Remote Link.",
+  "stayConnectedBackground": "Stay connected in the background",
+  "stayConnectedBackgroundSubtitle": "Keeps transfers running when you switch apps. Shows a notification while connected.",
+  "keepsStoppingQuestion": "Remote Link keeps stopping?",
+  "keepsStoppingSubtitle": "Some phones close it anyway. Here is how to stop that.",
+  "copyInAnyApp": "Copy in any app, paste on your computer",
+  "backgroundClipboardOn": "On. What you copy anywhere goes to your computer.",
+  "backgroundClipboardOff": "Off. Android only allows this through Accessibility settings.",
+  "couldNotOpenAccessibility": "Could not open Accessibility settings.",
+  "openSettings": "Open settings",
+  "accessibilityDialogPara1": "Android does not let an app read the clipboard unless it is the app you are looking at. That is why copying in Chrome does not reach your computer on its own.",
+  "accessibilityDialogPara2": "The one exception is an accessibility service, which you turn on yourself in Android settings. Remote Link uses it for the clipboard and nothing else: it cannot read your screen, and it does not see what you type.",
+  "accessibilityDialogPara3": "Settings › Accessibility › Remote Link › turn it on. Some phones refuse the read even then — if nothing arrives after enabling it, yours is one of them.",
+  "batteryGuidancePara1": "Android stops apps it thinks you are not using, and some phones are stricter than others. Remote Link asks to keep running, but only you can grant it.",
+  "batteryGuidanceAnyPhone": "On any phone",
+  "batteryGuidanceAnyPhoneDesc": "Allow unrestricted battery use for Remote Link.",
+  "batteryGuidanceXiaomi": "Xiaomi, Redmi and POCO",
+  "batteryGuidanceXiaomiDesc": "Settings › Apps › Remote Link: turn on Autostart, and set Battery saver to No restrictions. Then hold Remote Link in the recent-apps list and tap the lock.",
+  "batteryGuidanceOther": "Huawei, Oppo, vivo and OnePlus",
+  "batteryGuidanceOtherDesc": "Add Remote Link to the protected or auto-launch list in your battery settings.",
+  "noBatterySettingsScreen": "This phone has no battery settings screen to open. Look under Settings › Apps › Remote Link.",
+  "stateConnected": "Connected",
+  "stateConnecting": "Connecting…",
+  "stateReconnecting": "Reconnecting…",
+  "statePairing": "Pairing…",
+  "stateAwaitingApproval": "Waiting to be let in…",
+  "stateFailed": "Connection failed",
+  "routeBonjourUdp": "Bonjour & UDP beacon",
+  "routeBonjour": "Bonjour (mDNS / DNS-SD)",
+  "routeUdp": "UDP beacon (Multicast)",
+  "routeManual": "Manual address / Stored",
+  "licensesButton": "Licenses",
+  "transferFailureTimedOut": "Transfer timed out",
+  "transferFailureHashMismatch": "File integrity hash mismatch",
+  "transferFailureNoSpace": "Not enough storage space",
+  "transferFailureNoSpaceOnPeer": "Not enough storage space on peer",
+  "transferFailureChunkRefused": "File chunk refused",
+  "transferFailureCancelledByPeer": "Cancelled by {peerName}",
+  "@transferFailureCancelledByPeer": {
+    "placeholders": {
+      "peerName": {
+        "type": "String"
+      }
+    }
+  },
+  "transferFailureCancelledByYou": "Cancelled by you",
+  "transferFailureDeclinedByPeer": "Declined by {peerName}",
+  "@transferFailureDeclinedByPeer": {
+    "placeholders": {
+      "peerName": {
+        "type": "String"
+      }
+    }
+  },
+  "transferFailureDeclinedByYou": "Declined by you",
+  "transferFailureConnectionLost": "Connection lost",
+  "transferFailureDeviceDisconnected": "Device disconnected",
+  "transferFailureIoError": "I/O error during transfer",
+  "transferFailureReceiverUnavailable": "Receiver unavailable",
+  "transferFailureStorageUnavailable": "Storage unavailable",
+  "transferFailureCouldNotComplete": "File could not be completed",
+  "transferFailureCouldNotAccept": "Could not accept transfer",
+  "transferFailureRetryFailed": "Retry failed",
+  "noTransfersYet": "No transfers yet",
+  "transfersEmptyExplanation": "Anything you send or receive will stay visible here.",
+  "pickerOpenFailed": "Could not open the picker: {error}",
+  "@pickerOpenFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "imageOpenFailed": "This image could not be opened.",
+  "connectedDeviceFallback": "Connected device",
+  "defaultAndroidPhoneName": "Android Phone",
+  "defaultPhoneName": "Phone",
+  "notificationConnectedTitle": "Connected to {name}",
+  "@notificationConnectedTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "notificationConnectedBody": "Remote Link is holding the connection open.",
+  "notificationWaitingTitle": "Waiting for {name}",
+  "@notificationWaitingTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "notificationWaitingBody": "Allow the connection on {name} to carry on.",
+  "@notificationWaitingBody": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "notificationReconnectingBody": "Remote Link lost the connection and is trying again.",
+  "notificationStop": "Stop",
+  "shareRefused": "The computer would not take it.",
+  "shareUnexpectedFailure": "The share could not be sent.",
+  "exportCancelled": "Not saved — you closed the share sheet.",
+  "exportPermissionDenied": "Remote Link cannot add to your photo library. Allow it under Settings › Remote Link › Photos, then send it again.",
+  "exportFailed": "Could not save this file to your phone.",
+  "startingService": "Starting the service…",
+  "keyBackspace": "Backspace",
+  "keySwitchToThePhoneKeyboard": "Switch to the phone keyboard",
+  "keyLeftArrow": "Left arrow",
+  "keyUpArrow": "Up arrow",
+  "keyDownArrow": "Down arrow",
+  "keyRightArrow": "Right arrow",
+  "keyCommand": "Command",
+  "keyOption": "Option",
+  "keyControl": "Control",
+  "keySpace": "Space",
+  "keyEscape": "Escape",
+  "keyDelete": "Delete",
+  "keyTab": "Tab",
+  "keyCapsLock": "Caps lock",
+  "keyReturn": "Return",
+  "keyShift": "Shift",
+  "keyAlt": "Alt",
+  "keyAltGr": "Alt Gr",
+  "keyWindows": "Windows",
+  "keyMeta": "Meta",
+  "keyBacktick": "Backtick",
+  "keyMinus": "Minus",
+  "keyEquals": "Equals",
+  "keyLeftBracket": "Left bracket",
+  "keyRightBracket": "Right bracket",
+  "keyBackslash": "Backslash",
+  "keySemicolon": "Semicolon",
+  "keyApostrophe": "Apostrophe",
+  "keyComma": "Comma",
+  "keyFullStop": "Full stop",
+  "keySlash": "Slash",
+  "keyHome": "Home",
+  "keyEnd": "End",
+  "keyPageUp": "Page up",
+  "keyPageDown": "Page down",
+  "keyEnter": "Enter",
+  "transfersTitle": "Transfers",
+  "shareTextDescription": "the text you shared",
+  "shareFilesDescription": "{count, plural, =0{no files} =1{one file} other{{count} files}}",
+  "@shareFilesDescription": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  }
+}

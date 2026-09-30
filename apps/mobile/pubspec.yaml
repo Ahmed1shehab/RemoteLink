@@ -25,6 +25,8 @@ dependencies:
   file_selector: ^1.0.3
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   flutter_riverpod: ^2.5.1
   flutter_secure_storage: ^9.2.2
   flutter_svg: ^2.0.17
@@ -40,6 +42,7 @@ dependencies:
   # instead would work, but it would show a file browser to someone who asked
   # for their camera roll.
   image_picker: ^1.1.2
+  intl: any
   meta: ^1.15.0
   # The QR scanner. Pairing by scanning the computer's code is the only way
   # in that works on a network where discovery is blocked, and it is the one
@@ -70,6 +73,7 @@ dev_dependencies:
   lints: ^5.0.0
 
 flutter:
+  generate: true
   uses-material-design: true
   assets:
     - assets/icons/

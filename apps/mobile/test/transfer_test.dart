@@ -123,8 +123,8 @@ void main() {
       await controller.cancelTransfer('stuck');
       expect(
           controller.state.transfers.single.status, TransferStatus.cancelled);
-      expect(
-          controller.state.transfers.single.errorMessage, 'Cancelled by you');
+      expect(controller.state.transfers.single.failure,
+          TransferFailure.cancelledByYou);
       expect(controller.removeTransfer('stuck'), isNotNull);
       expect(controller.state.transfers, isEmpty);
     } finally {

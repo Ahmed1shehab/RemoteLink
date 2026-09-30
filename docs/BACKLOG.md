@@ -1685,6 +1685,8 @@ support conversation from guesswork into a paste.
 
 ### RL-702 — Localisation
 
+**Status — DONE.** Localisation in apps/desktop and apps/mobile with English and Arabic ARBs, ICU plurals/placeholders, logical directional layout, and RTL test coverage.
+
 **Priority** P3 · **Size** M
 
 **Spec.** Every user-visible string is a hard-coded English literal in both

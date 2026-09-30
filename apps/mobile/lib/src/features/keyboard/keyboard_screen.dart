@@ -12,6 +12,7 @@ import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/app_icons.dart';
 import '../../app/haptics.dart';
+import '../../app/l10n.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
 import 'hardware_keyboard_view.dart';
@@ -241,16 +242,16 @@ class _KeyboardScreenState extends ConsumerState<KeyboardScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
           child: SegmentedButton<KeyboardMode>(
-            segments: const <ButtonSegment<KeyboardMode>>[
+            segments: <ButtonSegment<KeyboardMode>>[
               ButtonSegment<KeyboardMode>(
                 value: KeyboardMode.text,
-                icon: AppIcon(AppIcons.textSquare, size: 18),
-                label: Text('Text'),
+                icon: const AppIcon(AppIcons.textSquare, size: 18),
+                label: Text(context.l10n.keyboardModeText),
               ),
               ButtonSegment<KeyboardMode>(
                 value: KeyboardMode.keys,
-                icon: AppIcon(AppIcons.option, size: 18),
-                label: Text('Keys'),
+                icon: const AppIcon(AppIcons.option, size: 18),
+                label: Text(context.l10n.keyboardModeKeys),
               ),
             ],
             selected: <KeyboardMode>{_mode},
@@ -286,14 +287,16 @@ class _KeyboardScreenState extends ConsumerState<KeyboardScreen> {
                       ),
                       const SizedBox(height: 16),
                       _SectionLabel(
-                        label: connected ? 'Shortcuts' : 'Not connected',
+                        label: connected
+                            ? context.l10n.sectionShortcuts
+                            : context.l10n.notConnected,
                       ),
                       _ShortcutGrid(
                         enabled: connected,
                         onShortcut: _shortcut,
                       ),
                       const SizedBox(height: 16),
-                      const _SectionLabel(label: 'Modifiers'),
+                      _SectionLabel(label: context.l10n.sectionModifiers),
                       _ModifierRow(
                         modifiers: _modifiers,
                         locked: _locked,
@@ -301,7 +304,7 @@ class _KeyboardScreenState extends ConsumerState<KeyboardScreen> {
                         onToggle: _toggleModifier,
                       ),
                       const SizedBox(height: 16),
-                      const _SectionLabel(label: 'Keys'),
+                      _SectionLabel(label: context.l10n.sectionKeys),
                       _SpecialKeys(
                         enabled: connected,
                         onKey: (usage) => unawaited(_tapKey(usage)),
@@ -374,7 +377,7 @@ class _TypedEcho extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  'Sent to your computer',
+                  context.l10n.sentToComputer,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
@@ -383,7 +386,7 @@ class _TypedEcho extends StatelessWidget {
                 if (text.isNotEmpty)
                   Semantics(
                     button: true,
-                    label: 'Clear the transcript',
+                    label: context.l10n.clearTranscript,
                     // A bare `InkWell` is announced as text with a tap action
                     // rather than as a button, so it does not turn up when
                     // navigating by control.
@@ -397,7 +400,7 @@ class _TypedEcho extends StatelessWidget {
                         ),
                         child: ExcludeSemantics(
                           child: Text(
-                            'Clear',
+                            context.l10n.clear,
                             style: Theme.of(context)
                                 .textTheme
                                 .labelSmall
@@ -414,7 +417,7 @@ class _TypedEcho extends StatelessWidget {
               child: SingleChildScrollView(
                 controller: scrollController,
                 child: Text(
-                  text.isEmpty ? 'Tap here, then type.' : text,
+                  text.isEmpty ? context.l10n.tapHereThenType : text,
                   style: TextStyle(
                     fontFamily: 'monospace',
                     fontSize: 15,
@@ -461,31 +464,48 @@ class _ShortcutGrid extends StatelessWidget {
   /// The desktop resolves each to the right chord for its platform — Cmd+C on
   /// macOS, Ctrl+C on Windows — so this list ships once instead of branching
   /// per platform, and adding a shortcut needs no mobile release.
-  static const List<(proto.NamedShortcut, String, AppIconData)> _entries =
-      <(proto.NamedShortcut, String, AppIconData)>[
-    (proto.NamedShortcut.copy, 'Copy', AppIcons.clipboard),
-    (proto.NamedShortcut.paste, 'Paste', AppIcons.settings),
-    (proto.NamedShortcut.cut, 'Cut', AppIcons.settings),
-    (proto.NamedShortcut.undo, 'Undo', AppIcons.settings),
-    (proto.NamedShortcut.redo, 'Redo', AppIcons.settings),
-    (proto.NamedShortcut.selectAll, 'Select all', AppIcons.settings),
-    (proto.NamedShortcut.save, 'Save', AppIcons.settings),
-    (proto.NamedShortcut.find, 'Find', AppIcons.settings),
-    (proto.NamedShortcut.switchApplication, 'Switch app', AppIcons.settings),
-    (proto.NamedShortcut.closeTab, 'Close tab', AppIcons.settings),
-    (proto.NamedShortcut.refresh, 'Refresh', AppIcons.settings),
-    (proto.NamedShortcut.taskManager, 'Task manager', AppIcons.monitorPlay),
+  static const List<(proto.NamedShortcut, AppIconData)> _entries =
+      <(proto.NamedShortcut, AppIconData)>[
+    (proto.NamedShortcut.copy, AppIcons.clipboard),
+    (proto.NamedShortcut.paste, AppIcons.settings),
+    (proto.NamedShortcut.cut, AppIcons.settings),
+    (proto.NamedShortcut.undo, AppIcons.settings),
+    (proto.NamedShortcut.redo, AppIcons.settings),
+    (proto.NamedShortcut.selectAll, AppIcons.settings),
+    (proto.NamedShortcut.save, AppIcons.settings),
+    (proto.NamedShortcut.find, AppIcons.settings),
+    (proto.NamedShortcut.switchApplication, AppIcons.settings),
+    (proto.NamedShortcut.closeTab, AppIcons.settings),
+    (proto.NamedShortcut.refresh, AppIcons.settings),
+    (proto.NamedShortcut.taskManager, AppIcons.monitorPlay),
   ];
+
+  String _labelFor(BuildContext context, proto.NamedShortcut shortcut) =>
+      switch (shortcut) {
+        proto.NamedShortcut.copy => context.l10n.shortcutCopy,
+        proto.NamedShortcut.paste => context.l10n.shortcutPaste,
+        proto.NamedShortcut.cut => context.l10n.shortcutCut,
+        proto.NamedShortcut.undo => context.l10n.shortcutUndo,
+        proto.NamedShortcut.redo => context.l10n.shortcutRedo,
+        proto.NamedShortcut.selectAll => context.l10n.shortcutSelectAll,
+        proto.NamedShortcut.save => context.l10n.shortcutSave,
+        proto.NamedShortcut.find => context.l10n.shortcutFind,
+        proto.NamedShortcut.switchApplication => context.l10n.shortcutSwitchApp,
+        proto.NamedShortcut.closeTab => context.l10n.shortcutCloseTab,
+        proto.NamedShortcut.refresh => context.l10n.shortcutRefresh,
+        proto.NamedShortcut.taskManager => context.l10n.shortcutTaskManager,
+        _ => '',
+      };
 
   @override
   Widget build(BuildContext context) => Wrap(
         spacing: 8,
         runSpacing: 8,
         children: <Widget>[
-          for (final (shortcut, label, icon) in _entries)
+          for (final (shortcut, icon) in _entries)
             ActionChip(
               avatar: AppIcon(icon, size: 18),
-              label: Text(label),
+              label: Text(_labelFor(context, shortcut)),
               onPressed: enabled ? () => onShortcut(shortcut) : null,
             ),
         ],
@@ -505,18 +525,18 @@ class _ModifierRow extends StatelessWidget {
   final bool enabled;
   final void Function(int bit) onToggle;
 
-  static const List<(int, String, String)> _entries = <(int, String, String)>[
-    (proto.Modifiers.leftControl, 'Ctrl', 'Control'),
-    (proto.Modifiers.leftShift, 'Shift', 'Shift'),
-    (proto.Modifiers.leftAlt, 'Alt', 'Alt'),
-    (proto.Modifiers.leftMeta, 'Cmd', 'Command'),
+  static const List<(int, String)> _entries = <(int, String)>[
+    (proto.Modifiers.leftControl, 'Ctrl'),
+    (proto.Modifiers.leftShift, 'Shift'),
+    (proto.Modifiers.leftAlt, 'Alt'),
+    (proto.Modifiers.leftMeta, 'Cmd'),
   ];
 
   @override
   Widget build(BuildContext context) => Wrap(
         spacing: 8,
         children: <Widget>[
-          for (final (bit, label, spoken) in _entries)
+          for (final (bit, label) in _entries)
             FilterChip(
               // The lock state goes in the chip's own label rather than in a
               // wrapping `Semantics`: wrapping and excluding would take the
@@ -529,8 +549,10 @@ class _ModifierRow extends StatelessWidget {
               // and have no way to find out.
               label: Text(
                 label,
-                semanticsLabel:
-                    locked & bit != 0 ? '$spoken, locked on' : spoken,
+                semanticsLabel: locked & bit != 0
+                    ? context.l10n
+                        .modifierLockedOn(spokenKeyLabel(label, context.l10n))
+                    : spokenKeyLabel(label, context.l10n),
               ),
               selected: modifiers.has(bit),
               // A locked modifier is visually distinct from a one-shot one,
@@ -558,27 +580,27 @@ class _SpecialKeys extends StatelessWidget {
   /// '⌫' comes out as "erase to the left", '←' as "leftwards arrow", 'PgDn' as
   /// a nonsense word. Carrying both means the key can stay narrow — there are
   /// twenty of them on a phone screen — without being silent.
-  static const List<(int, String, String)> _entries = <(int, String, String)>[
-    (proto.HidKey.escape, 'Esc', 'Escape'),
-    (proto.HidKey.tab, 'Tab', 'Tab'),
-    (proto.HidKey.enter, 'Enter', 'Enter'),
-    (proto.HidKey.backspace, '⌫', 'Backspace'),
-    (proto.HidKey.delete, 'Del', 'Delete'),
-    (proto.HidKey.home, 'Home', 'Home'),
-    (proto.HidKey.end, 'End', 'End'),
-    (proto.HidKey.pageUp, 'PgUp', 'Page up'),
-    (proto.HidKey.pageDown, 'PgDn', 'Page down'),
-    (proto.HidKey.arrowLeft, '←', 'Left arrow'),
-    (proto.HidKey.arrowUp, '↑', 'Up arrow'),
-    (proto.HidKey.arrowDown, '↓', 'Down arrow'),
-    (proto.HidKey.arrowRight, '→', 'Right arrow'),
-    (proto.HidKey.f1, 'F1', 'F1'),
-    (proto.HidKey.f2, 'F2', 'F2'),
-    (proto.HidKey.f3, 'F3', 'F3'),
-    (proto.HidKey.f4, 'F4', 'F4'),
-    (proto.HidKey.f5, 'F5', 'F5'),
-    (proto.HidKey.f11, 'F11', 'F11'),
-    (proto.HidKey.f12, 'F12', 'F12'),
+  static const List<(int, String)> _entries = <(int, String)>[
+    (proto.HidKey.escape, 'Esc'),
+    (proto.HidKey.tab, 'Tab'),
+    (proto.HidKey.enter, 'Enter'),
+    (proto.HidKey.backspace, '⌫'),
+    (proto.HidKey.delete, 'Del'),
+    (proto.HidKey.home, 'Home'),
+    (proto.HidKey.end, 'End'),
+    (proto.HidKey.pageUp, 'PgUp'),
+    (proto.HidKey.pageDown, 'PgDn'),
+    (proto.HidKey.arrowLeft, '←'),
+    (proto.HidKey.arrowUp, '↑'),
+    (proto.HidKey.arrowDown, '↓'),
+    (proto.HidKey.arrowRight, '→'),
+    (proto.HidKey.f1, 'F1'),
+    (proto.HidKey.f2, 'F2'),
+    (proto.HidKey.f3, 'F3'),
+    (proto.HidKey.f4, 'F4'),
+    (proto.HidKey.f5, 'F5'),
+    (proto.HidKey.f11, 'F11'),
+    (proto.HidKey.f12, 'F12'),
   ];
 
   @override
@@ -586,7 +608,7 @@ class _SpecialKeys extends StatelessWidget {
         spacing: 8,
         runSpacing: 8,
         children: <Widget>[
-          for (final (usage, label, spoken) in _entries)
+          for (final (usage, label) in _entries)
             SizedBox(
               // Widens with the text setting. At a fixed 68 the longer labels
               // ('PgDn', 'Home') were clipped by the time text reached 130%,
@@ -597,7 +619,8 @@ class _SpecialKeys extends StatelessWidget {
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
-                child: Text(label, semanticsLabel: spoken),
+                child: Text(label,
+                    semanticsLabel: spokenKeyLabel(label, context.l10n)),
               ),
             ),
         ],
