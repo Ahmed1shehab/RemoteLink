@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:remotelink_desktop/main.dart';
 import 'package:remotelink_desktop/src/app/brand.dart';
 import 'package:remotelink_desktop/src/app/providers.dart';
 import 'package:remotelink_desktop/src/ui/home_screen.dart';
@@ -13,8 +14,12 @@ void main() {
       (tester) async {
     await tester.pumpWidget(
       ProviderScope(
-        overrides: desktopHomeOverrides,
-        child: const MaterialApp(home: HomeScreen()),
+        overrides: <Override>[
+          ...desktopHomeOverrides,
+          desktopServiceProvider
+              .overrideWith((ref) => createFakeDesktopService()),
+        ],
+        child: const RemoteLinkDesktopApp(),
       ),
     );
     await tester.pump();

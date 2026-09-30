@@ -132,6 +132,8 @@ These are not features. They are things that are currently wrong.
 
 ### RL-000 — Replace the stale scaffolding widget tests
 
+**Status — DONE.** Both app roots have widget coverage; the desktop root uses an inert `DesktopService` provider override in `apps/desktop/test/support/fakes.dart`.
+
 **Priority** P0 · **Size** S · **Blocks** RL-001
 
 **Files**
@@ -710,6 +712,8 @@ timing the read against a local no-op move first.
 ---
 
 ### RL-108 — Test coverage for the untested surface
+
+**Status — DONE.** Trust, pairing, discovery, clipboard, and the exhaustive dispatcher tier matrix have tests; the discovery query test also caught and fixed replies sent to the wrong UDP port.
 
 **Priority** P1 · **Size** M · **Blocked by** RL-000
 
