@@ -41,6 +41,11 @@ const fakeDiagnostics = DiagnosticsInfo(
       unavailableReason: 'Media control is not supported on this platform',
     ),
   ),
+  beacon: DiscoveryBeaconDiagnostic(
+    isAdvertising: true,
+    interfaces: <String>['en0', 'lo0'],
+    lastError: null,
+  ),
   devices: <DeviceDiagnostic>[
     DeviceDiagnostic(
       id: 'test-phone-1',

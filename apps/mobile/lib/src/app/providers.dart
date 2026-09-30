@@ -60,6 +60,7 @@ const String _deviceNameKey = 'remotelink.device.name';
 const String _pointerSettingsKey = 'remotelink.settings.pointer';
 const String _clipboardSettingsKey = 'remotelink.settings.clipboard';
 const String _appearanceKey = 'remotelink.settings.appearance';
+const String _hapticsKey = 'remotelink.settings.haptics';
 const String _sensitivityTutorialSeenKey =
     'remotelink.tutorial.sensitivity_seen';
 
@@ -726,6 +727,42 @@ const ThemeMode kDefaultThemeMode = ThemeMode.dark;
 
 final themeModeProvider = StateNotifierProvider<ThemeModeNotifier, ThemeMode>(
   ThemeModeNotifier.new,
+);
+
+/// Whether haptic feedback is triggered on gestures, keyboard taps, and buttons.
+///
+/// Persisted in [IdentityStore]. Defaults to true so touch interactions feel
+/// responsive out of the box.
+final class HapticsNotifier extends StateNotifier<bool> {
+  HapticsNotifier(this._ref) : super(true) {
+    unawaited(_load());
+  }
+
+  @visibleForTesting
+  HapticsNotifier.forTesting(super.initial) : _ref = null;
+
+  final Ref? _ref;
+
+  Future<void> _load() async {
+    if (_ref == null) return;
+    final storage = await _ref.read(identityStoreProvider.future);
+    final raw = await storage.read(_hapticsKey);
+    if (raw != null) {
+      state = raw != 'false';
+    }
+  }
+
+  Future<void> setEnabled(bool enabled) async {
+    state = enabled;
+    if (_ref != null) {
+      final storage = await _ref.read(identityStoreProvider.future);
+      await storage.write(_hapticsKey, enabled ? 'true' : 'false');
+    }
+  }
+}
+
+final hapticsProvider = StateNotifierProvider<HapticsNotifier, bool>(
+  HapticsNotifier.new,
 );
 
 /// Whether the user has seen or dismissed the pointer sensitivity tutorial.

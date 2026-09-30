@@ -1,12 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/app_icons.dart';
+import '../../app/haptics.dart';
 import '../../app/modern_ui.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
@@ -78,7 +78,7 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
     final client = ref.read(clientProvider).valueOrNull;
     if (client == null) return;
     await client.send(message);
-    unawaited(HapticFeedback.selectionClick());
+    unawaited(ref.read(appHapticsProvider).selectionClick());
   }
 
   @override

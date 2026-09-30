@@ -1641,6 +1641,8 @@ reasoning is in `Release.entitlements`.
 
 ### RL-700 — Mobile settings screen
 
+**Status — DONE.** Implemented in `apps/mobile/lib/src/features/settings/settings_screen.dart` with device identity, paired computer management, touchpad, haptics, clipboard, diagnostics, and about sections.
+
 **Priority** P2 · **Size** M
 
 **Spec.** There is no settings screen at all. Needed: rename this phone · view
@@ -1654,6 +1656,8 @@ second preferences mechanism.
 ---
 
 ### RL-701 — Desktop diagnostics panel
+
+**Status — DONE.** Implemented in `apps/desktop/lib/src/ui/diagnostics_screen.dart` with dispatcher counters, connection metrics, discovery beacon state, backend availability reasons, and filtered log viewer.
 
 **Priority** P2 · **Size** S
 
@@ -1726,6 +1730,8 @@ currently an admitted gap in a document whose whole purpose is not having any.
 all-rights-reserved by default regardless of intent. Add `CONTRIBUTING.md`
 covering the workspace layout, the strict one-way dependency direction, the
 append-only wire-code rule, and the requirement that packages stay Flutter-free.
+
+**Status — DONE.** LICENSE and CONTRIBUTING.md created at repo root, and GitHub issue templates (bug report, feature request, config.yml) added under `.github/ISSUE_TEMPLATE/`.
 
 **RL-802** — Re-verify `docs/RUNNING.md` against the current code, particularly
 the four silently-failing permissions and the iOS multicast entitlement note,

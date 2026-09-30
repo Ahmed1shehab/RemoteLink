@@ -70,6 +70,7 @@ List<Override> mobileSettingsOverrides({
   PointerSettings? pointerSettings,
   ClipboardSettings? clipboardSettings,
   String? deviceName,
+  bool? haptics,
   MemoryLogSink? memoryLogSink,
 }) {
   final storage = identityStore ?? InMemoryIdentityStore();
@@ -101,6 +102,12 @@ List<Override> mobileSettingsOverrides({
       clipboardSettingsProvider.overrideWith((ref) {
         final notifier = ClipboardSettingsNotifier(ref);
         notifier.state = clipboardSettings;
+        return notifier;
+      }),
+    if (haptics != null)
+      hapticsProvider.overrideWith((ref) {
+        final notifier = HapticsNotifier(ref);
+        notifier.state = haptics;
         return notifier;
       }),
     if (deviceName != null)

@@ -31,9 +31,13 @@ final class BonjourAdvertiser {
 
   BonsoirBroadcast? _broadcast;
   bool _failed = false;
+  String? _lastError;
 
   /// Whether the advertisement is live.
   bool get isAdvertising => _broadcast != null;
+
+  /// Most recent error encountered during Bonjour advertisement, if any.
+  String? get lastError => _lastError;
 
   Future<void> start() async {
     if (_broadcast != null || _failed) return;
@@ -75,6 +79,7 @@ final class BonjourAdvertiser {
       // Never fatal. Losing Bonjour costs iPhones their automatic discovery;
       // taking the whole service down over it would cost everyone everything.
       _failed = true;
+      _lastError = e.toString();
       _log.warn(
         'Bonjour advertising unavailable; the UDP beacon still runs',
         error: e,
@@ -96,6 +101,7 @@ final class BonjourAdvertiser {
   Future<void> stop() async {
     final broadcast = _broadcast;
     _broadcast = null;
+    _lastError = null;
     if (broadcast == null) return;
     try {
       await broadcast.stop();
