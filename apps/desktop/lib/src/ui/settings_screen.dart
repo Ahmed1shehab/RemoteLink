@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:rl_core/rl_core.dart';
 
 import '../app/app_icons.dart';
 import '../app/brand.dart';
@@ -274,7 +275,11 @@ class _ThisComputerSection extends ConsumerWidget {
       builder: (context) => _RenameComputerDialog(current: current),
     );
     if (chosen == null) return;
-    ref.read(deviceNameProvider.notifier).state = chosen;
+    final sanitised = sanitiseDeviceName(chosen);
+    if (sanitised == null) return;
+    ref.read(deviceNameProvider.notifier).state = sanitised;
+    final service = ref.read(desktopServiceProvider).valueOrNull;
+    if (service != null) await service.announceOwnName(sanitised);
   }
 }
 

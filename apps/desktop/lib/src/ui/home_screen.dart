@@ -680,7 +680,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (_isPermissionRequestShowing) return;
     _isPermissionRequestShowing = true;
 
-    final approved = await showDialog<bool>(
+    final grantSeconds = await showDialog<int>(
       context: context,
       barrierDismissible: false,
       builder: (context) => PermissionRequestDialog(
@@ -697,8 +697,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final service = ref.read(desktopServiceProvider).valueOrNull;
     if (service == null) return;
 
-    if (approved ?? false) {
-      await service.approvePermissionRequest(request);
+    if (grantSeconds != null) {
+      await service.approvePermissionRequest(
+        request,
+        expiresInSeconds: grantSeconds == 0 ? null : grantSeconds,
+      );
     } else {
       await service.declinePermissionRequest(request);
     }
@@ -1726,7 +1729,7 @@ class _IncomingTransferDialog extends StatelessWidget {
       );
 }
 
-class PermissionRequestDialog extends StatelessWidget {
+class PermissionRequestDialog extends StatefulWidget {
   const PermissionRequestDialog({
     required this.peerName,
     required this.requestedTier,
@@ -1739,6 +1742,39 @@ class PermissionRequestDialog extends StatelessWidget {
   final PermissionTier requestedTier;
   final PermissionTier currentTier;
   final String? justification;
+
+  @override
+  State<PermissionRequestDialog> createState() =>
+      _PermissionRequestDialogState();
+}
+
+class _PermissionRequestDialogState extends State<PermissionRequestDialog> {
+  static const int _timeoutSeconds = 60;
+  static const int _temporarySeconds = 30 * 60;
+  int _remainingSeconds = _timeoutSeconds;
+  bool _temporary = true;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    // The phone must never retain an unanswered security prompt indefinitely.
+    // A periodic tick also makes the deadline visible to the desktop user.
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      if (_remainingSeconds <= 1) {
+        Navigator.of(context).pop();
+      } else {
+        setState(() => _remainingSeconds--);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
 
   static String _tierTitle(PermissionTier tier) => switch (tier) {
         PermissionTier.readOnly => 'View Only',
@@ -1784,15 +1820,15 @@ class PermissionRequestDialog extends StatelessWidget {
                 style: theme.textTheme.bodyMedium,
                 children: <TextSpan>[
                   TextSpan(
-                    text: peerName,
+                    text: widget.peerName,
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   const TextSpan(text: ' is requesting '),
                   TextSpan(
-                    text: _tierTitle(requestedTier),
+                    text: _tierTitle(widget.requestedTier),
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: requestedTier == PermissionTier.admin
+                      color: widget.requestedTier == PermissionTier.admin
                           ? colorScheme.error
                           : colorScheme.primary,
                     ),
@@ -1820,13 +1856,14 @@ class PermissionRequestDialog extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _tierExplanation(requestedTier),
+                    _tierExplanation(widget.requestedTier),
                     style: theme.textTheme.bodySmall,
                   ),
                 ],
               ),
             ),
-            if (justification != null && justification!.isNotEmpty) ...<Widget>[
+            if (widget.justification != null &&
+                widget.justification!.isNotEmpty) ...<Widget>[
               const SizedBox(height: 16),
               Text(
                 'Message from device:',
@@ -1845,14 +1882,14 @@ class PermissionRequestDialog extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  '“$justification”',
+                  '“${widget.justification}”',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontStyle: FontStyle.italic,
                   ),
                 ),
               ),
             ],
-            if (requestedTier == PermissionTier.admin) ...<Widget>[
+            if (widget.requestedTier == PermissionTier.admin) ...<Widget>[
               const SizedBox(height: 16),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1874,6 +1911,18 @@ class PermissionRequestDialog extends StatelessWidget {
                 ],
               ),
             ],
+            const SizedBox(height: 16),
+            Text('Automatically denied in $_remainingSeconds seconds'),
+            SegmentedButton<bool>(
+              segments: const <ButtonSegment<bool>>[
+                ButtonSegment<bool>(
+                    value: true, label: Text('Temporary · 30 minutes')),
+                ButtonSegment<bool>(value: false, label: Text('Permanent')),
+              ],
+              selected: <bool>{_temporary},
+              onSelectionChanged: (selected) =>
+                  setState(() => _temporary = selected.single),
+            ),
           ],
         ),
       ),
@@ -1881,11 +1930,12 @@ class PermissionRequestDialog extends StatelessWidget {
         // Deny holds initial focus so pressing Enter/Space denies by default.
         TextButton(
           autofocus: true,
-          onPressed: () => Navigator.of(context).pop(false),
+          onPressed: () => Navigator.of(context).pop(),
           child: const Text('Deny'),
         ),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
+          onPressed: () =>
+              Navigator.of(context).pop(_temporary ? _temporarySeconds : 0),
           child: const Text('Approve'),
         ),
       ],

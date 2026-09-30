@@ -603,7 +603,8 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     );
     if (newName == null || !context.mounted) return;
 
-    // 1. Persist new name in mobile's trust store.
+    // A computer alias belongs to this phone's trust store. DeviceRename
+    // instead describes the sender's own name, so it must not be sent here.
     final trustStore = await ref.read(trustStoreProvider.future);
     final peer = await trustStore.findById(peerId);
     if (peer != null) {
@@ -613,19 +614,6 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
         await ref.read(identityStoreProvider.future),
       );
       ref.invalidate(trustedPeersProvider);
-    }
-
-    // 2. If connected to this peer, send DeviceRename message to the desktop.
-    final client = ref.read(clientProvider).valueOrNull;
-    if (client != null && client.session?.isEstablished == true) {
-      if (client.session?.peerId == peerId ||
-          client.target?.deviceId == peerId) {
-        try {
-          await client.session?.send(DeviceRename(newName));
-        } on TransportError {
-          // Connection in teardown, ignore.
-        }
-      }
     }
   }
 }

@@ -336,7 +336,9 @@ Future<void> setClipboardHistoryPersistence({
 final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
   final identity = await ref.watch(identityProvider.future);
   final trustStore = await ref.watch(trustStoreProvider.future);
-  final name = ref.watch(deviceNameProvider);
+  // A name edit must not recreate the server and disconnect every phone.
+  // Settings updates the running service through announceOwnName instead.
+  final name = ref.read(deviceNameProvider);
   final transferStore = await ref.watch(incomingTransferStoreProvider.future);
   final directory = await ref.watch(appDirectoryProvider.future);
   final history = await ref.watch(clipboardHistoryProvider.future);
@@ -364,6 +366,12 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
     );
 
   await service.start();
+  // Settings can change the name while startup is still binding sockets.
+  // In that window the UI has no service value to announce through yet.
+  final currentName = ref.read(deviceNameProvider);
+  if (service.deviceName != currentName) {
+    await service.announceOwnName(currentName);
+  }
   ref.onDispose(service.stop);
   return service;
 });
@@ -375,10 +383,11 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
 /// reach the service when the user invokes them, while passive rendering only
 /// depends on these inert values.
 final desktopStatusProvider = FutureProvider<DesktopStatus>((ref) async {
+  final name = ref.watch(deviceNameProvider);
   final service = await ref.watch(desktopServiceProvider.future);
   return DesktopStatus(
     isRunning: service.isRunning,
-    deviceName: service.deviceName,
+    deviceName: name,
     boundPort: service.boundPort,
     localAddresses: service.localAddresses,
     deviceId: service.identity.id.value,

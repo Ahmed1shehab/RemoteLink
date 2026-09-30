@@ -473,6 +473,40 @@ final desktopMessagesProvider = StreamProvider<Message>((ref) async* {
   yield* client.messages;
 });
 
+/// Keeps desktop self-renames even when the device list is off screen.
+/// The app root watches this for the lifetime of the connection supervisor;
+/// a screen-level listener would miss broadcast messages while controlling a
+/// computer and leave the two lists disagreeing until the next rename.
+final desktopRenameProvider = FutureProvider<void>((ref) async {
+  final client = await ref.watch(clientProvider.future);
+  await for (final message in client.messages) {
+    if (message is! DeviceRename) continue;
+    final peerId = client.session?.peerId;
+    if (peerId == null) continue;
+    final store = await ref.read(trustStoreProvider.future);
+    if (!await applyDesktopRename(store, peerId, message.name)) continue;
+    await persistTrustStore(
+        store, await ref.read(identityStoreProvider.future));
+    ref.invalidate(trustedPeersProvider);
+  }
+});
+
+/// Returns whether a validated rename changed a trusted record. Unknown peers
+/// cannot manufacture a new trust entry merely by sending a name.
+@visibleForTesting
+Future<bool> applyDesktopRename(
+  TrustStore store,
+  DeviceId peerId,
+  String rawName,
+) async {
+  final name = sanitiseDeviceName(rawName);
+  if (name == null) return false;
+  final peer = await store.findById(peerId);
+  if (peer == null || peer.name == name) return false;
+  await store.upsert(peer.copyWith(name: name));
+  return true;
+}
+
 /// Live permission tier of the current session, updated on [PermissionGrant] messages.
 final currentPermissionTierProvider =
     StreamProvider<PermissionTier?>((ref) async* {

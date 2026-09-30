@@ -351,7 +351,11 @@ final class DeviceInfoMessage extends Message {
   }
 }
 
-/// Renames the peer in the other side's device list.
+/// Announces the sender's own display name to the other side.
+///
+/// The receiver updates the sending peer's record. A local alias for that
+/// peer is never sent here: this message has no target ID and would otherwise
+/// rename the wrong device on receipt.
 @immutable
 final class DeviceRename extends Message {
   const DeviceRename(this.name);

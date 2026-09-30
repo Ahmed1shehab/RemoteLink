@@ -89,6 +89,9 @@ class RemoteLinkApp extends ConsumerWidget {
     // the next launch, and the connection it is about can come up on any
     // screen — or on none.
     ref.watch(rememberNegotiationProvider);
+    // Desktop renames arrive on a broadcast stream and must be persisted even
+    // while the user is on a control screen rather than the device list.
+    ref.watch(desktopRenameProvider);
     listenForRememberPrompts(ref, navigatorKey);
     // And the same again for shares: something has to be listening when the
     // system hands over a link the user shared into this app, whichever screen
