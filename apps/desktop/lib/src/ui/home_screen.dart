@@ -276,6 +276,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     child: _TransfersSection(
                       transfers: transfers,
                       onCancel: _cancelTransfer,
+                      onRemove: _removeTransfer,
                       onRetry: _retryTransfer,
                     ),
                   ),
@@ -324,10 +325,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   icon: AppIcons.monitorSmartphone,
                   label: 'Devices',
                 ),
-                DesktopNavDestination(
-                  icon: AppIcons.send,
-                  label: 'Send',
-                ),
+                DesktopNavDestination(icon: AppIcons.send, label: 'Send'),
                 DesktopNavDestination(
                   icon: AppIcons.receive,
                   label: 'Activity',
@@ -394,9 +392,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _openSettings() {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => const SettingsScreen(),
-      ),
+      MaterialPageRoute<void>(builder: (context) => const SettingsScreen()),
     );
   }
 
@@ -424,9 +420,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _openDiagnostics() {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => const DiagnosticsScreen(),
-      ),
+      MaterialPageRoute<void>(builder: (context) => const DiagnosticsScreen()),
     );
   }
 
@@ -473,6 +467,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     await service.cancelTransfer(transferId);
   }
 
+  Future<void> _removeTransfer(String transferId) async {
+    final service = await ref.read(desktopServiceProvider.future);
+    service.removeTransfer(transferId);
+  }
+
   Future<void> _retryTransfer(String transferId) async {
     final service = await ref.read(desktopServiceProvider.future);
     try {
@@ -482,9 +481,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       // the phone went away, or the offer is no longer held — and a button
       // that appears to do nothing is the worst way to report it.
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not retry: ${e.message}')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not retry: ${e.message}')));
     }
   }
 
@@ -584,9 +583,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         final allowed = await showDialog<bool>(
           context: context,
           barrierDismissible: false,
-          builder: (context) => ConnectionRequestDialog(
-            peerName: next.peerName,
-          ),
+          builder: (context) =>
+              ConnectionRequestDialog(peerName: next.peerName),
         );
 
         if (!mounted) return;
@@ -744,8 +742,9 @@ class _SendCardState extends ConsumerState<_SendCard> {
     // takes down this whole card, and with it the send controls, the transfer
     // list, and the clipboard panel below. Holding a stale id is the normal
     // course of events: devices come and go while this window stays open.
-    final selectedStillPresent =
-        availableDevices.any((d) => d.id.value == _selectedDeviceId);
+    final selectedStillPresent = availableDevices.any(
+      (d) => d.id.value == _selectedDeviceId,
+    );
     if (!selectedStillPresent) {
       _selectedDeviceId =
           availableDevices.isEmpty ? null : availableDevices.first.id.value;
@@ -841,9 +840,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
                   onDragExited: (_) => setState(() => _isDraggingOver = false),
                   onDragDone: (details) => _addDropped(details.files),
                   child: AnimatedContainer(
-                    duration: context.motion(
-                      const Duration(milliseconds: 180),
-                    ),
+                    duration: context.motion(const Duration(milliseconds: 180)),
                     curve: Curves.easeOutCubic,
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -873,10 +870,10 @@ class _SendCardState extends ConsumerState<_SendCard> {
                         const SizedBox(height: 8),
                         Text(
                           'Drag and drop files here to send',
-                          style:
-                              Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 12),
                         OutlinedButton.icon(
@@ -923,15 +920,13 @@ class _SendCardState extends ConsumerState<_SendCard> {
                             child: Text(
                               file.uri.pathSegments.last,
                               overflow: TextOverflow.ellipsis,
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w500),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ),
                           IconButton(
-                            icon: const AppIcon(
-                              AppIcons.delete,
-                              size: 20,
-                            ),
+                            icon: const AppIcon(AppIcons.delete, size: 20),
                             tooltip: 'Remove ${file.uri.pathSegments.last}',
                             onPressed: () =>
                                 setState(() => _picked.remove(file)),
@@ -1106,11 +1101,13 @@ class _TransfersSection extends StatelessWidget {
   const _TransfersSection({
     required this.transfers,
     required this.onCancel,
+    required this.onRemove,
     required this.onRetry,
   });
 
   final List<TransferRecord> transfers;
   final ValueChanged<String> onCancel;
+  final ValueChanged<String> onRemove;
   final ValueChanged<String> onRetry;
 
   @override
@@ -1135,6 +1132,7 @@ class _TransfersSection extends StatelessWidget {
               _TransferTile(
                 transfer: transfer,
                 onCancel: () => onCancel(transfer.transferId),
+                onRemove: () => onRemove(transfer.transferId),
                 onRetry: () => onRetry(transfer.transferId),
               ),
         ],
@@ -1145,11 +1143,13 @@ class _TransferTile extends StatelessWidget {
   const _TransferTile({
     required this.transfer,
     required this.onCancel,
+    required this.onRemove,
     required this.onRetry,
   });
 
   final TransferRecord transfer;
   final VoidCallback onCancel;
+  final VoidCallback onRemove;
   final VoidCallback onRetry;
 
   @override
@@ -1273,9 +1273,13 @@ class _TransferTile extends StatelessWidget {
                     onPressed: onCancel,
                     icon: const AppIcon(AppIcons.delete, size: 18),
                     label: const Text('Cancel'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: scheme.error,
-                    ),
+                    style: TextButton.styleFrom(foregroundColor: scheme.error),
+                  ),
+                if (transfer.canRemove)
+                  TextButton.icon(
+                    onPressed: onRemove,
+                    icon: const AppIcon(AppIcons.delete, size: 18),
+                    label: const Text('Remove'),
                   ),
                 if (transfer.canRetry)
                   FilledButton.tonalIcon(
@@ -1706,11 +1710,7 @@ class _StatusCard extends StatelessWidget {
                 color: statusColor.withValues(alpha: 0.11),
                 borderRadius: BorderRadius.circular(18),
               ),
-              child: AppIcon(
-                AppIcons.airdrop,
-                size: 24,
-                color: statusColor,
-              ),
+              child: AppIcon(AppIcons.airdrop, size: 24, color: statusColor),
             ),
             const SizedBox(width: 18),
             Expanded(
@@ -1738,9 +1738,9 @@ class _StatusCard extends StatelessWidget {
                       status.localAddresses
                           .map((address) => '$address:${status.boundPort}')
                           .join('  ·  '),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            fontFamily: 'monospace',
-                          ),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
                     ),
                   const SizedBox(height: 2),
                   // The device ID is shown because it is the only thing a
@@ -1748,9 +1748,9 @@ class _StatusCard extends StatelessWidget {
                   // computers on one network.
                   SelectableText(
                     status.deviceId,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontFamily: 'monospace',
-                        ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
                   ),
                   // Screen sharing is started from the phone and has no
                   // control on this window at all, so with the permission
@@ -1789,8 +1789,10 @@ class _StatusCard extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: statusColor.withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(999),
@@ -1869,8 +1871,10 @@ class _ScreenSharingBanner extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Row(
           children: <Widget>[
-            AppIcon(AppIcons.materialMonitorPlay,
-                color: scheme.onErrorContainer),
+            AppIcon(
+              AppIcons.materialMonitorPlay,
+              color: scheme.onErrorContainer,
+            ),
             const SizedBox(width: 16),
             Expanded(
               // Announced as its own live region: a screen-reader user gets no
@@ -1944,10 +1948,7 @@ class _PermissionBanner extends StatelessWidget {
             AppIcon(icon, color: foreground),
             const SizedBox(width: 16),
             Expanded(
-              child: Text(
-                reason,
-                style: TextStyle(color: foreground),
-              ),
+              child: Text(reason, style: TextStyle(color: foreground)),
             ),
             const SizedBox(width: 16),
             // The banner clears itself within a couple of seconds of the grant,
@@ -1999,8 +2000,9 @@ class _DeviceTile extends StatelessWidget {
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color:
-                Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
+            color: Theme.of(
+              context,
+            ).colorScheme.primary.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(14),
           ),
           child: AppIcon(
@@ -2099,8 +2101,9 @@ class _RenameDeviceDialog extends StatefulWidget {
 }
 
 class _RenameDeviceDialogState extends State<_RenameDeviceDialog> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.initialName);
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialName,
+  );
   String? _error;
 
   @override
@@ -2146,10 +2149,7 @@ class _RenameDeviceDialogState extends State<_RenameDeviceDialog> {
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Cancel'),
           ),
-          FilledButton(
-            onPressed: _submit,
-            child: const Text('Save'),
-          ),
+          FilledButton(onPressed: _submit, child: const Text('Save')),
         ],
       );
 }
@@ -2194,8 +2194,7 @@ class PairingDialog extends StatelessWidget {
             // This computer cannot tell the two cases apart from here, so it
             // shows the digits either way and the copy below names both.
             Center(
-              child: PairingCodeDisplay(digits: shortAuthenticationString),
-            ),
+                child: PairingCodeDisplay(digits: shortAuthenticationString)),
             const SizedBox(height: 20),
             Text(
               'Approve only if your phone is showing exactly these six '

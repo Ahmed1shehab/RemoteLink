@@ -64,9 +64,21 @@ class MobileTransferController extends StateNotifier<TransferState> {
   final IncomingTransferStore? _customTransferStore;
   final Log _log = Log.scoped('mobile.transfer');
 
+  /// Receiver cleanup is serialized with disk writes. Keep its failure from
+  /// becoming an unhandled asynchronous error after the row is terminal.
+  void _abortReceiver(FileTransferReceiver receiver, FileAbort abort) {
+    unawaited(receiver.abort(abort, tier: PermissionTier.extended).onError(
+      (Object error, StackTrace stackTrace) {
+        _log.warn('Could not clean up aborted transfer: $error');
+      },
+    ));
+  }
+
   StreamSubscription<Message>? _messageSubscription;
   StreamSubscription<ClientState>? _stateSubscription;
   StreamSubscription<InboundMessage>? _inboundSubscription;
+  StreamSubscription<List<InboundLink>>? _hostLinksSubscription;
+  Set<String> _hostPeerIds = <String>{};
 
   final Map<String, FileTransferReceiver> _receivers =
       <String, FileTransferReceiver>{};
@@ -79,6 +91,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
       <String, Completer<void>>{};
 
   IncomingTransferStore? _store;
+  DeviceId? _clientPeerId;
 
   void _init() {
     unawaited(_listen());
@@ -96,13 +109,13 @@ class MobileTransferController extends StateNotifier<TransferState> {
   /// afterwards from whatever happens to be connected.
   Future<void> _listen() async {
     final client = await _ref.read(clientProvider.future);
-    _messageSubscription = client.messages.listen(
-      (message) {
-        final session = client.session;
-        if (session != null) unawaited(_onMessage(session, message));
-      },
-      cancelOnError: false,
-    );
+    _messageSubscription = client.messages.listen((message) {
+      final session = client.session;
+      if (session != null) {
+        _clientPeerId = session.peerId;
+        unawaited(_onMessage(session, message));
+      }
+    }, cancelOnError: false);
     _stateSubscription = client.states.listen(
       _onClientStateChange,
       cancelOnError: false,
@@ -126,6 +139,20 @@ class MobileTransferController extends StateNotifier<TransferState> {
         (inbound) => unawaited(_onMessage(inbound.session, inbound.message)),
         cancelOnError: false,
       );
+      _hostPeerIds = host.links.map((link) => link.peerId.value).toSet();
+      _hostLinksSubscription = host.linkChanges.listen((links) {
+        final connected = links.map((link) => link.peerId.value).toSet();
+        for (final peerId in _hostPeerIds.difference(connected)) {
+          for (final transfer in state.transfers) {
+            if (transfer.peerId.value == peerId && transfer.isActive) {
+              _failTransfer(transfer.transferId, 'Connection lost');
+            }
+          }
+          final receiver = _receivers.remove(peerId);
+          if (receiver != null) unawaited(receiver.dispose());
+        }
+        _hostPeerIds = connected;
+      });
     } on Object catch (error) {
       _log.warn('not listening for nearby devices', error: error);
     }
@@ -153,31 +180,67 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
   void _onClientStateChange(ClientState clientState) {
     if (clientState != ClientState.connected) {
-      // Clean up in-memory receivers when disconnected
-      for (final receiver in _receivers.values) {
-        unawaited(receiver.dispose());
+      // Client sessions carry phone-originated sends to the PC. End their
+      // rows before clearing receivers so a vanished PC cannot strand them.
+      final clientPeer = _clientPeerId;
+      if (clientPeer != null) {
+        for (final transfer in state.transfers) {
+          if (transfer.peerId == clientPeer && transfer.isActive) {
+            _failTransfer(transfer.transferId, 'Connection lost');
+          }
+        }
       }
-      _receivers.clear();
+      // Inbound host links can stay alive when the outbound PC link drops.
+      // Only its receiver belongs to this client session.
+      if (clientPeer != null) {
+        final receiver = _receivers.remove(clientPeer.value);
+        if (receiver != null) unawaited(receiver.dispose());
+      }
+      _clientPeerId = null;
     }
   }
 
   Future<void> _onMessage(Session session, Message message) async {
     final peerId = session.peerId;
     final peerName = _nameFor(peerId);
-
-    switch (message) {
-      case FileOffer():
-        await _handleFileOffer(message, session, peerId, peerName);
-      case FileAccept():
-        await _handleFileAccept(message, session);
-      case FileChunk():
-        await _handleFileChunk(message, session, peerId);
-      case FileComplete():
-        await _handleFileComplete(message, session, peerId);
-      case FileAbort():
-        await _handleFileAbort(message, session, peerId);
-      default:
-        break;
+    try {
+      switch (message) {
+        case FileOffer():
+          await _handleFileOffer(message, session, peerId, peerName);
+        case FileAccept():
+          await _handleFileAccept(message, session);
+        case FileChunk():
+          await _handleFileChunk(message, session, peerId);
+        case FileComplete():
+          await _handleFileComplete(message, session, peerId);
+        case FileAbort():
+          await _handleFileAbort(message, session, peerId);
+        default:
+          break;
+      }
+    } on Object catch (error) {
+      final transferId = switch (message) {
+        FileOffer(:final transferId) ||
+        FileAccept(:final transferId) ||
+        FileChunk(:final transferId) ||
+        FileComplete(:final transferId) ||
+        FileAbort(:final transferId) =>
+          transferId,
+        _ => null,
+      };
+      if (transferId == null) return;
+      _log.warn('Incoming file transfer failed: $error');
+      _failTransfer(transferId, 'I/O error during transfer');
+      if (session.isEstablished) {
+        try {
+          await session.send(FileAbort(
+            transferId: transferId,
+            reason: FileAbortReason.ioError,
+          ));
+        } on Object {
+          // The local row is already terminal if the link disappeared.
+        }
+      }
     }
   }
 
@@ -201,6 +264,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
     if (outbound != null &&
         outbound.peerId == peerId &&
         outbound.isEstablished) {
+      _clientPeerId = peerId;
       return outbound;
     }
 
@@ -279,6 +343,13 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
   /// Explicitly accepts an incoming transfer. Never called automatically.
   Future<void> acceptIncomingTransfer(PendingIncomingTransfer request) async {
+    if (state.transfers
+            .where((t) => t.transferId == request.transferId)
+            .firstOrNull
+            ?.isActive !=
+        true) {
+      return;
+    }
     final session = _sessionFor(request.peerId);
     if (session == null) {
       _failTransfer(request.transferId, 'Connection lost');
@@ -291,13 +362,11 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
     final store = _store;
     if (store == null) {
-      await session.send(
-        FileAbort(
-          transferId: request.transferId,
-          reason: FileAbortReason.ioError,
-        ),
-      );
       _failTransfer(request.transferId, 'Storage unavailable');
+      await session.send(FileAbort(
+        transferId: request.transferId,
+        reason: FileAbortReason.ioError,
+      ));
       return;
     }
 
@@ -315,6 +384,13 @@ class MobileTransferController extends StateNotifier<TransferState> {
         request.offer,
         tier: PermissionTier.extended,
       );
+      if (state.transfers
+              .where((t) => t.transferId == request.transferId)
+              .firstOrNull
+              ?.isActive !=
+          true) {
+        return;
+      }
 
       await session.send(decision.accept);
       if (decision.abort case final abort?) {
@@ -326,7 +402,16 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
       final updated = _updateTransfer(
         request.transferId,
-        (t) => t.copyWith(status: TransferStatus.inProgress),
+        (t) => t.isActive
+            ? t.copyWith(
+                status: decision.abort == null
+                    ? TransferStatus.inProgress
+                    : TransferStatus.failed,
+                errorMessage:
+                    decision.abort == null ? null : 'Could not accept transfer',
+                completedAt: decision.abort == null ? null : DateTime.now(),
+              )
+            : t,
       );
 
       state = state.copyWith(
@@ -336,18 +421,33 @@ class MobileTransferController extends StateNotifier<TransferState> {
       );
     } catch (e) {
       _log.error('Failed to accept offer: $e');
-      await session.send(
-        FileAbort(
-          transferId: request.transferId,
-          reason: FileAbortReason.ioError,
-        ),
-      );
       _failTransfer(request.transferId, e.toString());
+      if (session.isEstablished) {
+        try {
+          await session.send(FileAbort(
+            transferId: request.transferId,
+            reason: FileAbortReason.ioError,
+          ));
+        } on Object {
+          // The local failure remains visible after a broken send.
+        }
+      }
     }
   }
 
   /// Explicitly declines an incoming transfer and sends FileAbort.
   Future<void> declineIncomingTransfer(PendingIncomingTransfer request) async {
+    final updated = _updateTransfer(
+      request.transferId,
+      (t) => t.isActive
+          ? t.copyWith(
+              status: TransferStatus.declined,
+              errorMessage: 'Declined by you',
+              completedAt: DateTime.now(),
+            )
+          : t,
+    );
+    state = state.copyWith(transfers: updated, pendingIncoming: () => null);
     final session = _sessionFor(request.peerId);
     if (session != null) {
       try {
@@ -359,19 +459,6 @@ class MobileTransferController extends StateNotifier<TransferState> {
         );
       } catch (_) {}
     }
-
-    final updated = _updateTransfer(
-      request.transferId,
-      (t) => t.copyWith(
-        status: TransferStatus.declined,
-        completedAt: DateTime.now(),
-      ),
-    );
-
-    state = state.copyWith(
-      transfers: updated,
-      pendingIncoming: () => null,
-    );
   }
 
   Future<void> _handleFileChunk(
@@ -379,8 +466,13 @@ class MobileTransferController extends StateNotifier<TransferState> {
     Session session,
     DeviceId peerId,
   ) async {
+    final current = state.transfers
+        .where((t) => t.transferId == chunk.transferId)
+        .firstOrNull;
+    if (current == null || !current.isActive) return;
     final receiver = _receivers[peerId.value];
     if (receiver == null) {
+      _failTransfer(chunk.transferId, 'Receiver unavailable');
       await session.send(
         FileAbort(
           transferId: chunk.transferId,
@@ -397,17 +489,19 @@ class MobileTransferController extends StateNotifier<TransferState> {
     );
 
     if (result == ChunkDisposition.refused) {
+      _failTransfer(chunk.transferId, 'File chunk refused');
       await session.send(
         FileAbort(
           transferId: chunk.transferId,
           fileId: chunk.fileId,
-          reason: FileAbortReason.declined,
+          reason: FileAbortReason.ioError,
         ),
       );
       return;
     }
 
     if (result == ChunkDisposition.corrupt) {
+      _failTransfer(chunk.transferId, 'File integrity hash mismatch');
       await session.send(
         FileAbort(
           transferId: chunk.transferId,
@@ -421,7 +515,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
     final record = state.transfers
         .where((t) => t.transferId == chunk.transferId)
         .firstOrNull;
-    if (record == null) return;
+    if (record == null || !record.isActive) return;
 
     final tracker = _speedTrackers.putIfAbsent(
       chunk.transferId,
@@ -432,15 +526,19 @@ class MobileTransferController extends StateNotifier<TransferState> {
     if (fileIndex == -1) return;
 
     final file = record.files[fileIndex];
-    final newFileTransferred =
-        (chunk.offset + chunk.bytes.length).clamp(0, file.totalBytes);
+    final newFileTransferred = (chunk.offset + chunk.bytes.length).clamp(
+      0,
+      file.totalBytes,
+    );
     final updatedFile = file.copyWith(transferredBytes: newFileTransferred);
 
     final updatedFiles = List<TransferFileProgress>.from(record.files);
     updatedFiles[fileIndex] = updatedFile;
 
-    final totalTransferred =
-        updatedFiles.fold(0, (sum, f) => sum + f.transferredBytes);
+    final totalTransferred = updatedFiles.fold(
+      0,
+      (sum, f) => sum + f.transferredBytes,
+    );
     tracker.record(totalTransferred);
 
     final speed = tracker.calculateSpeed();
@@ -469,8 +567,46 @@ class MobileTransferController extends StateNotifier<TransferState> {
     Session session,
     DeviceId peerId,
   ) async {
+    final current = state.transfers
+        .where((t) => t.transferId == complete.transferId)
+        .firstOrNull;
+    if (current == null || !current.isActive) return;
+    if (current.direction == TransferDirection.outgoing) {
+      if (current.status != TransferStatus.inProgress) return;
+      final fileIndex = current.files.indexWhere(
+        (file) => file.fileId == complete.fileId,
+      );
+      if (fileIndex == -1) return;
+      final files = List<TransferFileProgress>.from(current.files);
+      files[fileIndex] = files[fileIndex].copyWith(
+        transferredBytes: files[fileIndex].totalBytes,
+        isComplete: true,
+      );
+      final allDone = files.every((file) => file.isComplete);
+      state = state.copyWith(
+          transfers: _updateTransfer(
+        complete.transferId,
+        (record) => record.copyWith(
+          files: files,
+          transferredBytes: files.fold<int>(
+              0, (total, file) => total + file.transferredBytes),
+          status:
+              allDone ? TransferStatus.completed : TransferStatus.inProgress,
+          completedAt: allDone ? DateTime.now() : null,
+        ),
+      ));
+      return;
+    }
     final receiver = _receivers[peerId.value];
-    if (receiver == null) return;
+    if (receiver == null) {
+      _failTransfer(complete.transferId, 'Receiver unavailable');
+      await session.send(FileAbort(
+        transferId: complete.transferId,
+        fileId: complete.fileId,
+        reason: FileAbortReason.ioError,
+      ));
+      return;
+    }
 
     final result = await receiver.complete(
       complete,
@@ -478,7 +614,9 @@ class MobileTransferController extends StateNotifier<TransferState> {
     );
 
     if (result == CompletionDisposition.hashMismatch ||
-        result == CompletionDisposition.incomplete) {
+        result == CompletionDisposition.incomplete ||
+        result == CompletionDisposition.refused) {
+      _failTransfer(complete.transferId, 'File could not be completed');
       await session.send(
         FileAbort(
           transferId: complete.transferId,
@@ -488,21 +626,28 @@ class MobileTransferController extends StateNotifier<TransferState> {
               : FileAbortReason.ioError,
         ),
       );
-      _failTransfer(complete.transferId, 'Integrity verification failed');
       return;
     }
 
     final record = state.transfers
         .where((t) => t.transferId == complete.transferId)
         .firstOrNull;
-    if (record == null) return;
+    if (record == null || !record.isActive) return;
+    // Confirm after storage succeeds and before committing the local terminal
+    // row, so a broken acknowledgement still follows the failure path.
+    await session.send(complete);
+    final latest = state.transfers
+        .where((t) => t.transferId == complete.transferId)
+        .firstOrNull;
+    if (latest == null || !latest.isActive) return;
 
-    final fileIndex =
-        record.files.indexWhere((f) => f.fileId == complete.fileId);
+    final fileIndex = latest.files.indexWhere(
+      (f) => f.fileId == complete.fileId,
+    );
     if (fileIndex == -1) return;
 
     final store = _store;
-    final updatedFiles = List<TransferFileProgress>.from(record.files);
+    final updatedFiles = List<TransferFileProgress>.from(latest.files);
     updatedFiles[fileIndex] = updatedFiles[fileIndex].copyWith(
       transferredBytes: updatedFiles[fileIndex].totalBytes,
       isComplete: true,
@@ -518,8 +663,10 @@ class MobileTransferController extends StateNotifier<TransferState> {
     );
 
     final allComplete = updatedFiles.every((f) => f.isComplete);
-    final totalTransferred =
-        updatedFiles.fold(0, (sum, f) => sum + f.transferredBytes);
+    final totalTransferred = updatedFiles.fold(
+      0,
+      (sum, f) => sum + f.transferredBytes,
+    );
 
     final updated = _updateTransfer(
       complete.transferId,
@@ -540,10 +687,10 @@ class MobileTransferController extends StateNotifier<TransferState> {
     Session session,
     DeviceId peerId,
   ) async {
-    final receiver = _receivers[peerId.value];
-    if (receiver != null) {
-      await receiver.abort(abort, tier: PermissionTier.extended);
-    }
+    final record = state.transfers
+        .where((t) => t.transferId == abort.transferId)
+        .firstOrNull;
+    if (record == null || !record.isActive) return;
 
     final completer = _activeSendCompleters.remove(abort.transferId);
     if (completer != null && !completer.isCompleted) {
@@ -552,7 +699,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
     final reasonStr = switch (abort.reason) {
       FileAbortReason.declined => 'Transfer declined by peer',
-      FileAbortReason.cancelled => 'Transfer cancelled',
+      FileAbortReason.cancelled => 'Cancelled by ${record.peerName}',
       FileAbortReason.hashMismatch => 'File integrity hash mismatch',
       FileAbortReason.tooLarge => 'Not enough storage space on peer',
       FileAbortReason.timeout => 'Transfer timed out',
@@ -564,7 +711,11 @@ class MobileTransferController extends StateNotifier<TransferState> {
     final updated = _updateTransfer(
       abort.transferId,
       (t) => t.copyWith(
-        status: isDeclined ? TransferStatus.declined : TransferStatus.cancelled,
+        status: isDeclined
+            ? TransferStatus.declined
+            : abort.reason == FileAbortReason.cancelled
+                ? TransferStatus.cancelled
+                : TransferStatus.failed,
         errorMessage: reasonStr,
         completedAt: DateTime.now(),
       ),
@@ -576,9 +727,20 @@ class MobileTransferController extends StateNotifier<TransferState> {
           ? () => null
           : null,
     );
+    final receiver = _receivers[peerId.value];
+    if (receiver != null) {
+      _abortReceiver(receiver, abort);
+    }
   }
 
   Future<void> _handleFileAccept(FileAccept accept, Session session) async {
+    if (state.transfers
+            .where((t) => t.transferId == accept.transferId)
+            .firstOrNull
+            ?.isActive !=
+        true) {
+      return;
+    }
     final sources = _outgoingSources[accept.transferId];
     final offer = _outgoingOffers[accept.transferId];
     if (sources == null || offer == null) return;
@@ -598,122 +760,129 @@ class MobileTransferController extends StateNotifier<TransferState> {
     );
     state = state.copyWith(transfers: updated);
 
-    unawaited(
-      () async {
-        try {
-          await sender.sendAccepted(
-            offer: offer,
-            accept: accept,
-            sources: sources,
-            sendChunk: (chunk) async {
-              if (sendCompleter.isCompleted) {
-                throw StateError('Transfer was cancelled');
-              }
-              await session.send(chunk);
+    unawaited(() async {
+      try {
+        await sender.sendAccepted(
+          offer: offer,
+          accept: accept,
+          sources: sources,
+          sendChunk: (chunk) async {
+            if (sendCompleter.isCompleted) {
+              throw StateError('Transfer was cancelled');
+            }
+            await session.send(chunk);
 
-              final rec = state.transfers
-                  .where((t) => t.transferId == accept.transferId)
-                  .firstOrNull;
-              if (rec != null) {
-                final fileIdx =
-                    rec.files.indexWhere((f) => f.fileId == chunk.fileId);
-                if (fileIdx != -1) {
-                  final f = rec.files[fileIdx];
-                  final newBytes = (chunk.offset + chunk.bytes.length)
-                      .clamp(0, f.totalBytes);
-                  final updatedF = f.copyWith(transferredBytes: newBytes);
-                  final uFiles = List<TransferFileProgress>.from(rec.files);
-                  uFiles[fileIdx] = updatedF;
-                  final totalTr = uFiles.fold(
-                      0, (sum, item) => sum + item.transferredBytes);
+            final rec = state.transfers
+                .where((t) => t.transferId == accept.transferId)
+                .firstOrNull;
+            if (rec != null && rec.isActive) {
+              final fileIdx = rec.files.indexWhere(
+                (f) => f.fileId == chunk.fileId,
+              );
+              if (fileIdx != -1) {
+                final f = rec.files[fileIdx];
+                final newBytes = (chunk.offset + chunk.bytes.length).clamp(
+                  0,
+                  f.totalBytes,
+                );
+                final updatedF = f.copyWith(transferredBytes: newBytes);
+                final uFiles = List<TransferFileProgress>.from(rec.files);
+                uFiles[fileIdx] = updatedF;
+                final totalTr = uFiles.fold(
+                  0,
+                  (sum, item) => sum + item.transferredBytes,
+                );
 
-                  tracker.record(totalTr);
-                  final speed = tracker.calculateSpeed();
-                  final eta = tracker.calculateEta(
-                    rec.totalBytes,
-                    totalTr,
-                    speed,
-                  );
+                tracker.record(totalTr);
+                final speed = tracker.calculateSpeed();
+                final eta = tracker.calculateEta(
+                  rec.totalBytes,
+                  totalTr,
+                  speed,
+                );
 
-                  state = state.copyWith(
-                    transfers: _updateTransfer(
-                      accept.transferId,
-                      (t) => t.copyWith(
-                        files: uFiles,
-                        transferredBytes: totalTr,
-                        speedBytesPerSecond: speed,
-                        eta: eta,
-                      ),
+                state = state.copyWith(
+                  transfers: _updateTransfer(
+                    accept.transferId,
+                    (t) => t.copyWith(
+                      files: uFiles,
+                      transferredBytes: totalTr,
+                      speedBytesPerSecond: speed,
+                      eta: eta,
                     ),
-                  );
-                }
+                  ),
+                );
               }
-            },
-            sendComplete: (complete) async {
-              if (sendCompleter.isCompleted) {
-                throw StateError('Transfer was cancelled');
-              }
-              await session.send(complete);
+            }
+          },
+          sendComplete: (complete) async {
+            if (sendCompleter.isCompleted) {
+              throw StateError('Transfer was cancelled');
+            }
+            await session.send(complete);
 
-              final rec = state.transfers
-                  .where((t) => t.transferId == accept.transferId)
-                  .firstOrNull;
-              if (rec != null) {
-                final fileIdx =
-                    rec.files.indexWhere((f) => f.fileId == complete.fileId);
-                if (fileIdx != -1) {
-                  final uFiles = List<TransferFileProgress>.from(rec.files);
-                  uFiles[fileIdx] = uFiles[fileIdx].copyWith(
-                    transferredBytes: uFiles[fileIdx].totalBytes,
-                    isComplete: true,
-                  );
-                  final allDone = uFiles.every((f) => f.isComplete);
-                  final totalTr = uFiles.fold(
-                      0, (sum, item) => sum + item.transferredBytes);
+            final rec = state.transfers
+                .where((t) => t.transferId == accept.transferId)
+                .firstOrNull;
+            if (rec != null && rec.isActive) {
+              final fileIdx = rec.files.indexWhere(
+                (f) => f.fileId == complete.fileId,
+              );
+              if (fileIdx != -1) {
+                final uFiles = List<TransferFileProgress>.from(rec.files);
+                uFiles[fileIdx] = uFiles[fileIdx].copyWith(
+                  transferredBytes: uFiles[fileIdx].totalBytes,
+                );
+                final totalTr = uFiles.fold(
+                  0,
+                  (sum, item) => sum + item.transferredBytes,
+                );
 
-                  state = state.copyWith(
-                    transfers: _updateTransfer(
-                      accept.transferId,
-                      (t) => t.copyWith(
-                        files: uFiles,
-                        transferredBytes: totalTr,
-                        status: allDone
-                            ? TransferStatus.completed
-                            : TransferStatus.inProgress,
-                        completedAt: allDone ? DateTime.now() : null,
-                      ),
+                state = state.copyWith(
+                  transfers: _updateTransfer(
+                    accept.transferId,
+                    (t) => t.copyWith(
+                      files: uFiles,
+                      transferredBytes: totalTr,
+                      status: TransferStatus.inProgress,
                     ),
-                  );
-                }
+                  ),
+                );
               }
-            },
-          );
+            }
+          },
+        );
 
-          if (!sendCompleter.isCompleted) {
-            sendCompleter.complete();
-          }
-
-          state = state.copyWith(
-            transfers: _updateTransfer(
-              accept.transferId,
-              (t) => t.copyWith(
-                status: TransferStatus.completed,
-                transferredBytes: t.totalBytes,
-                completedAt: DateTime.now(),
-              ),
-            ),
-          );
-        } catch (e) {
-          if (!sendCompleter.isCompleted) {
-            sendCompleter.completeError(e);
-          }
-          _log.warn('Outgoing transfer failed: $e');
-          _failTransfer(accept.transferId, e.toString());
-        } finally {
-          _activeSendCompleters.remove(accept.transferId);
+        if (!sendCompleter.isCompleted) {
+          sendCompleter.complete();
         }
-      }(),
-    );
+
+        // FileComplete echoed by the receiver is the completion signal.
+      } catch (e) {
+        final active = state.transfers
+                .where((t) => t.transferId == accept.transferId)
+                .firstOrNull
+                ?.isActive ==
+            true;
+        if (!sendCompleter.isCompleted) {
+          sendCompleter.completeError(e);
+        }
+        _log.warn('Outgoing transfer failed: $e');
+        _failTransfer(accept.transferId, e.toString());
+        if (active && session.isEstablished) {
+          try {
+            await session.send(FileAbort(
+              transferId: accept.transferId,
+              reason: FileAbortReason.ioError,
+            ));
+          } on Object {
+            // The local failure remains visible when the link closes.
+          }
+        }
+      } finally {
+        _activeSendCompleters.remove(accept.transferId);
+      }
+    }());
   }
 
   /// Sends a bare string (URL or snippet) to [targetPeerId].
@@ -753,9 +922,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
       files: <OfferedFile>[offeredFile],
     );
 
-    final sources = <String, OutgoingFile>{
-      fileId: MemoryOutgoingFile(bytes),
-    };
+    final sources = <String, OutgoingFile>{fileId: MemoryOutgoingFile(bytes)};
 
     _outgoingSources[transferId] = sources;
     _outgoingOffers[transferId] = offer;
@@ -824,10 +991,10 @@ class MobileTransferController extends StateNotifier<TransferState> {
         (s) => s.isNotEmpty,
         orElse: () => 'file_${i + 1}.dat',
       );
-      final fileName = safeOutgoingFileName(
-        <String?>[fileNames?[i], pathName],
-        fallback: 'file_${i + 1}.dat',
-      );
+      final fileName = safeOutgoingFileName(<String?>[
+        fileNames?[i],
+        pathName,
+      ], fallback: 'file_${i + 1}.dat');
       final length = file.lengthSync();
       final stat = file.statSync();
       final fileType = mimeTypeForFileName(fileName);
@@ -844,10 +1011,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
       sources[fileId] = FileBackedOutgoingFile(file, length);
     }
 
-    final offer = FileOffer(
-      transferId: transferId,
-      files: offeredFiles,
-    );
+    final offer = FileOffer(transferId: transferId, files: offeredFiles);
 
     _outgoingSources[transferId] = sources;
     _outgoingOffers[transferId] = offer;
@@ -888,37 +1052,45 @@ class MobileTransferController extends StateNotifier<TransferState> {
     // missing session only costs the notification.
     final record =
         state.transfers.where((t) => t.transferId == transferId).firstOrNull;
-    final session = record == null ? null : _sessionFor(record.peerId);
+    if (record == null || !record.isActive) return;
+    final session = _sessionFor(record.peerId);
 
-    if (session != null) {
-      try {
-        await session.send(
-          FileAbort(
-            transferId: transferId,
-            reason: FileAbortReason.cancelled,
-          ),
-        );
-      } catch (_) {}
-    }
+    // The local decision is visible even when sending the abort blocks on a
+    // broken link. A later send completion must not revive this row.
+    state = state.copyWith(
+      transfers: _updateTransfer(
+        transferId,
+        (t) => t.copyWith(
+          status: TransferStatus.cancelled,
+          errorMessage: 'Cancelled by you',
+          completedAt: DateTime.now(),
+        ),
+      ),
+      pendingIncoming:
+          state.pendingIncoming?.transferId == transferId ? () => null : null,
+    );
 
     final sendCompleter = _activeSendCompleters.remove(transferId);
     if (sendCompleter != null && !sendCompleter.isCompleted) {
       sendCompleter.completeError(StateError('Transfer cancelled by user'));
     }
+    if (record.direction == TransferDirection.incoming) {
+      final receiver = _receivers[record.peerId.value];
+      if (receiver != null) {
+        _abortReceiver(
+            receiver,
+            FileAbort(
+                transferId: transferId, reason: FileAbortReason.cancelled));
+      }
+    }
 
-    final updated = _updateTransfer(
-      transferId,
-      (t) => t.copyWith(
-        status: TransferStatus.cancelled,
-        completedAt: DateTime.now(),
-      ),
-    );
-
-    state = state.copyWith(
-      transfers: updated,
-      pendingIncoming:
-          state.pendingIncoming?.transferId == transferId ? () => null : null,
-    );
+    if (session != null) {
+      try {
+        await session.send(
+          FileAbort(transferId: transferId, reason: FileAbortReason.cancelled),
+        );
+      } catch (_) {}
+    }
   }
 
   /// Retries a failed or cancelled transfer.
@@ -993,8 +1165,9 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
   void restoreTransfer(TransferRecord record) {
     if (record.isActive ||
-        state.transfers
-            .any((transfer) => transfer.transferId == record.transferId)) {
+        state.transfers.any(
+          (transfer) => transfer.transferId == record.transferId,
+        )) {
       return;
     }
     state = state.copyWith(
@@ -1013,11 +1186,13 @@ class MobileTransferController extends StateNotifier<TransferState> {
   void _failTransfer(String transferId, String message) {
     final updated = _updateTransfer(
       transferId,
-      (t) => t.copyWith(
-        status: TransferStatus.failed,
-        errorMessage: message,
-        completedAt: DateTime.now(),
-      ),
+      (t) => t.isActive
+          ? t.copyWith(
+              status: TransferStatus.failed,
+              errorMessage: message,
+              completedAt: DateTime.now(),
+            )
+          : t,
     );
     state = state.copyWith(
       transfers: updated,
@@ -1029,6 +1204,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
   @override
   void dispose() {
     unawaited(_inboundSubscription?.cancel());
+    unawaited(_hostLinksSubscription?.cancel());
     _messageSubscription?.cancel();
     _stateSubscription?.cancel();
     for (final receiver in _receivers.values) {
@@ -1119,8 +1295,9 @@ final transferFilePickerProvider = Provider<TransferFilePicker>(
 /// and everything in it has already been delivered somewhere that will not
 /// vanish. A half-written partial left by an app that was killed mid-transfer
 /// is likewise the OS's to collect rather than something the user has to find.
-final mobileTransferStoreProvider =
-    FutureProvider<IncomingTransferStore>((ref) async {
+final mobileTransferStoreProvider = FutureProvider<IncomingTransferStore>((
+  ref,
+) async {
   final base = await getApplicationCacheDirectory();
   final destination = Directory('${base.path}/incoming');
   return MobileTransferStore(destination);

@@ -110,6 +110,8 @@ final class TransferRecord {
 
   bool get canCancel => isActive;
 
+  bool get canRemove => !isActive;
+
   /// Whether this computer can start this transfer again.
   ///
   /// Only outgoing ones. Retrying means re-sending the offer, and the offer
@@ -132,6 +134,7 @@ final class TransferRecord {
     Duration? eta,
     DateTime? completedAt,
     String? errorMessage,
+    bool clearErrorMessage = false,
   }) =>
       TransferRecord(
         transferId: transferId,
@@ -146,7 +149,8 @@ final class TransferRecord {
         eta: eta ?? this.eta,
         createdAt: createdAt,
         completedAt: completedAt ?? this.completedAt,
-        errorMessage: errorMessage ?? this.errorMessage,
+        errorMessage:
+            clearErrorMessage ? null : errorMessage ?? this.errorMessage,
       );
 }
 

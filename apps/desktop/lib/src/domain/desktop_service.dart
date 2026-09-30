@@ -111,8 +111,9 @@ Capabilities buildCapabilities({
 /// deserves to know why it is greyed out. "Not available" with no explanation
 /// reads as a bug, and on an iPhone this is not a bug and will not be fixed.
 String? phoneControlBlockedReason(ConnectedDevice device) {
-  if (!device.serverSession.handshake.capabilities
-      .has(Capabilities.phoneControl)) {
+  if (!device.serverSession.handshake.capabilities.has(
+    Capabilities.phoneControl,
+  )) {
     return 'Controlling a phone from this computer is not available. iPhones '
         'offer no way to allow it at all, Android needs a service this build '
         'does not include, and there is no viewer here yet.';
@@ -771,10 +772,12 @@ final class DesktopService {
     _server = server;
     await instanceLock?.claim(port: server.boundPort);
 
-    _acceptedSubscription =
-        server.accepted.listen((session) => unawaited(_onAccepted(session)));
-    _endedSubscription =
-        server.ended.listen((session) => unawaited(_onEnded(session)));
+    _acceptedSubscription = server.accepted.listen(
+      (session) => unawaited(_onAccepted(session)),
+    );
+    _endedSubscription = server.ended.listen(
+      (session) => unawaited(_onEnded(session)),
+    );
 
     clipboard.start();
     _clipboardSubscription = clipboard.outbound.listen(
@@ -902,6 +905,9 @@ final class DesktopService {
   Future<void> registerSessionForTesting(ServerSession session) =>
       _onAccepted(session);
 
+  @visibleForTesting
+  Future<void> endSessionForTesting(ServerSession session) => _onEnded(session);
+
   Future<void> _onAccepted(ServerSession session) async {
     final peer = await trustStore.findByPublicKey(
       session.handshake.peerStaticPublicKey,
@@ -986,8 +992,11 @@ final class DesktopService {
         await _admit(session, tier);
         return;
       }
-      await _hold(session, peer?.name ?? session.peerId.short,
-          peer?.platform ?? PlatformKind.unknown);
+      await _hold(
+        session,
+        peer?.name ?? session.peerId.short,
+        peer?.platform ?? PlatformKind.unknown,
+      );
       return;
     }
 
@@ -1162,9 +1171,7 @@ final class DesktopService {
     if (!agreement.recordMine(agreed: agreed)) return;
 
     try {
-      await request.session.session.send(
-        RememberConnection(agreed: agreed),
-      );
+      await request.session.session.send(RememberConnection(agreed: agreed));
     } on TransportError {
       // The link went while the question was on screen. The local half of the
       // answer is still worth keeping — a no stays a no — and the settle below
@@ -1305,6 +1312,19 @@ final class DesktopService {
     await _messageSubscriptions.remove(session.peerId.value)?.cancel();
     _stopScreenStream(session.peerId.value);
     _devices.remove(session.peerId.value);
+    for (final record in _transfers.values.toList()) {
+      if (record.peerId == session.peerId && record.isActive) {
+        _finishTransfer(
+          record.transferId,
+          TransferStatus.failed,
+          errorMessage: 'Connection lost',
+        );
+        final sender = _activeSendCompleters.remove(record.transferId);
+        if (sender != null && !sender.isCompleted) {
+          sender.completeError(StateError('Connection lost'));
+        }
+      }
+    }
     await _transferReceivers.remove(session.peerId.value)?.dispose();
     _publishDevices();
 
@@ -1365,17 +1385,14 @@ final class DesktopService {
       'paired',
       fields: <String, Object?>{
         'peer': request.peerId.value,
-        'tier': tier.name
+        'tier': tier.name,
       },
     );
   }
 
   /// Declines a pending pairing request.
   Future<void> declinePairing(PendingPairing request) async {
-    _pairing.reject(
-      peerId: request.peerId,
-      reason: PairRejectReason.declined,
-    );
+    _pairing.reject(peerId: request.peerId, reason: PairRejectReason.declined);
     await request.session.session.close(reason: CloseReason.userRequested);
   }
 
@@ -1567,21 +1584,61 @@ final class DesktopService {
     }
   }
 
+  /// A queued disk operation may finish after an abort or a disconnect. The
+  /// record is the authority for whether that late result can change the UI.
+  void _finishTransfer(
+    String transferId,
+    TransferStatus status, {
+    String? errorMessage,
+  }) {
+    final record = _transfers[transferId];
+    if (record == null || !record.isActive) return;
+    _transfers[transferId] = record.copyWith(
+      status: status,
+      errorMessage: errorMessage,
+      completedAt: DateTime.now(),
+    );
+    _publishTransfers();
+  }
+
+  String _abortMessage(FileAbortReason reason, String peerName) =>
+      switch (reason) {
+        FileAbortReason.cancelled => 'Cancelled by $peerName',
+        FileAbortReason.declined => 'Declined by $peerName',
+        FileAbortReason.ioError => 'I/O error during transfer',
+        FileAbortReason.hashMismatch => 'File integrity hash mismatch',
+        FileAbortReason.tooLarge => 'Not enough storage space',
+        FileAbortReason.timeout => 'Transfer timed out',
+      };
+
+  /// Cleanup can wait behind a disk write and must not block the UI update.
+  /// Report a failed delete without creating an unhandled future error.
+  void _abortReceiver(
+    FileTransferReceiver receiver,
+    FileAbort abort,
+    PermissionTier tier,
+  ) {
+    unawaited(receiver.abort(abort, tier: tier).onError(
+      (Object error, StackTrace stackTrace) {
+        _log.warn('Could not clean up aborted transfer', error: error);
+      },
+    ));
+  }
+
   Future<void> _handleFileTransferMessage(
     DeviceId peerId,
     Message message,
   ) async {
     final device = _devices[peerId.value];
     final receiver = _transferReceivers[peerId.value];
-    if (device == null || receiver == null) {
-      if (message is FileOffer && device != null) {
-        await device.serverSession.session.send(
-          FileAbort(
-            transferId: message.transferId,
-            reason: FileAbortReason.ioError,
-          ),
-        );
-      }
+    if (device == null) return;
+    if (receiver == null && message is FileOffer) {
+      await device.serverSession.session.send(
+        FileAbort(
+          transferId: message.transferId,
+          reason: FileAbortReason.ioError,
+        ),
+      );
       return;
     }
 
@@ -1639,6 +1696,7 @@ final class DesktopService {
           _incomingTransferRequests.add(request);
 
         case FileAccept():
+          if (_transfers[message.transferId]?.isActive != true) return;
           final sources = _outgoingSources[message.transferId];
           final offer = _outgoingOffers[message.transferId];
           if (sources != null && offer != null) {
@@ -1654,134 +1712,164 @@ final class DesktopService {
 
             final existing = _transfers[message.transferId];
             if (existing != null) {
-              _transfers[message.transferId] =
-                  existing.copyWith(status: TransferStatus.inProgress);
+              _transfers[message.transferId] = existing.copyWith(
+                status: TransferStatus.inProgress,
+              );
               _publishTransfers();
             }
 
-            unawaited(
-              () async {
-                try {
-                  await sender.sendAccepted(
-                    offer: offer,
-                    accept: message,
-                    sources: sources,
-                    sendChunk: (chunk) async {
-                      if (sendCompleter.isCompleted) {
-                        throw StateError('Transfer cancelled');
-                      }
-                      await device.serverSession.session.send(chunk);
-                      final rec = _transfers[message.transferId];
-                      if (rec != null) {
-                        final fileIdx = rec.files
-                            .indexWhere((f) => f.fileId == chunk.fileId);
-                        if (fileIdx != -1) {
-                          final f = rec.files[fileIdx];
-                          final newBytes = (chunk.offset + chunk.bytes.length)
-                              .clamp(0, f.totalBytes);
-                          final updatedF =
-                              f.copyWith(transferredBytes: newBytes);
-                          final uFiles =
-                              List<TransferFileProgress>.from(rec.files);
-                          uFiles[fileIdx] = updatedF;
-                          final totalTr = uFiles.fold(
-                              0, (sum, item) => sum + item.transferredBytes);
+            unawaited(() async {
+              try {
+                await sender.sendAccepted(
+                  offer: offer,
+                  accept: message,
+                  sources: sources,
+                  sendChunk: (chunk) async {
+                    if (sendCompleter.isCompleted) {
+                      throw StateError('Transfer cancelled');
+                    }
+                    await device.serverSession.session.send(chunk);
+                    final rec = _transfers[message.transferId];
+                    if (rec != null && rec.isActive) {
+                      final fileIdx = rec.files.indexWhere(
+                        (f) => f.fileId == chunk.fileId,
+                      );
+                      if (fileIdx != -1) {
+                        final f = rec.files[fileIdx];
+                        final newBytes = (chunk.offset + chunk.bytes.length)
+                            .clamp(0, f.totalBytes);
+                        final updatedF = f.copyWith(transferredBytes: newBytes);
+                        final uFiles = List<TransferFileProgress>.from(
+                          rec.files,
+                        );
+                        uFiles[fileIdx] = updatedF;
+                        final totalTr = uFiles.fold(
+                          0,
+                          (sum, item) => sum + item.transferredBytes,
+                        );
 
-                          tracker.record(totalTr);
-                          final speed = tracker.calculateSpeed();
-                          final eta = tracker.calculateEta(
-                              rec.totalBytes, totalTr, speed);
+                        tracker.record(totalTr);
+                        final speed = tracker.calculateSpeed();
+                        final eta = tracker.calculateEta(
+                          rec.totalBytes,
+                          totalTr,
+                          speed,
+                        );
 
-                          _transfers[message.transferId] = rec.copyWith(
-                            files: uFiles,
-                            transferredBytes: totalTr,
-                            speedBytesPerSecond: speed,
-                            eta: eta,
-                            status: TransferStatus.inProgress,
-                          );
-                          _publishTransfers();
-                        }
+                        _transfers[message.transferId] = rec.copyWith(
+                          files: uFiles,
+                          transferredBytes: totalTr,
+                          speedBytesPerSecond: speed,
+                          eta: eta,
+                          status: TransferStatus.inProgress,
+                        );
+                        _publishTransfers();
                       }
-                    },
-                    sendComplete: (complete) async {
-                      if (sendCompleter.isCompleted) {
-                        throw StateError('Transfer cancelled');
-                      }
-                      await device.serverSession.session.send(complete);
-                      final rec = _transfers[message.transferId];
-                      if (rec != null) {
-                        final fileIdx = rec.files
-                            .indexWhere((f) => f.fileId == complete.fileId);
-                        if (fileIdx != -1) {
-                          final uFiles =
-                              List<TransferFileProgress>.from(rec.files);
-                          uFiles[fileIdx] = uFiles[fileIdx].copyWith(
-                            transferredBytes: uFiles[fileIdx].totalBytes,
-                            isComplete: true,
-                          );
-                          final allDone = uFiles.every((f) => f.isComplete);
-                          final totalTr = uFiles.fold(
-                              0, (sum, item) => sum + item.transferredBytes);
+                    }
+                  },
+                  sendComplete: (complete) async {
+                    if (sendCompleter.isCompleted) {
+                      throw StateError('Transfer cancelled');
+                    }
+                    await device.serverSession.session.send(complete);
+                    final rec = _transfers[message.transferId];
+                    if (rec != null && rec.isActive) {
+                      final fileIdx = rec.files.indexWhere(
+                        (f) => f.fileId == complete.fileId,
+                      );
+                      if (fileIdx != -1) {
+                        final uFiles = List<TransferFileProgress>.from(
+                          rec.files,
+                        );
+                        uFiles[fileIdx] = uFiles[fileIdx].copyWith(
+                          transferredBytes: uFiles[fileIdx].totalBytes,
+                        );
+                        final totalTr = uFiles.fold(
+                          0,
+                          (sum, item) => sum + item.transferredBytes,
+                        );
 
-                          _transfers[message.transferId] = rec.copyWith(
-                            files: uFiles,
-                            transferredBytes: totalTr,
-                            status: allDone
-                                ? TransferStatus.completed
-                                : TransferStatus.inProgress,
-                            completedAt: allDone ? DateTime.now() : null,
-                          );
-                          _publishTransfers();
-                        }
+                        _transfers[message.transferId] = rec.copyWith(
+                          files: uFiles,
+                          transferredBytes: totalTr,
+                          status: TransferStatus.inProgress,
+                        );
+                        _publishTransfers();
                       }
-                    },
-                  );
-                  if (!sendCompleter.isCompleted) {
-                    sendCompleter.complete();
-                  }
-                  final rec = _transfers[message.transferId];
-                  if (rec != null) {
-                    _transfers[message.transferId] = rec.copyWith(
-                      status: TransferStatus.completed,
-                      transferredBytes: rec.totalBytes,
-                      completedAt: DateTime.now(),
-                    );
-                    _publishTransfers();
-                  }
-                } catch (e) {
-                  if (!sendCompleter.isCompleted) {
-                    sendCompleter.completeError(e);
-                  }
-                  final rec = _transfers[message.transferId];
-                  if (rec != null) {
-                    _transfers[message.transferId] = rec.copyWith(
-                      status: TransferStatus.failed,
-                      errorMessage: e.toString(),
-                      completedAt: DateTime.now(),
-                    );
-                    _publishTransfers();
-                  }
-                } finally {
-                  _activeSendCompleters.remove(message.transferId);
+                    }
+                  },
+                );
+                if (!sendCompleter.isCompleted) {
+                  sendCompleter.complete();
                 }
-              }(),
-            );
+                // Completion is confirmed by the receiver echoing FileComplete.
+                // Until then a hash or disk error can still arrive as FileAbort.
+              } catch (e) {
+                if (!sendCompleter.isCompleted) {
+                  sendCompleter.completeError(e);
+                }
+                final rec = _transfers[message.transferId];
+                if (rec != null && rec.isActive) {
+                  _transfers[message.transferId] = rec.copyWith(
+                    status: TransferStatus.failed,
+                    errorMessage: e.toString(),
+                    completedAt: DateTime.now(),
+                  );
+                  _publishTransfers();
+                }
+                if (rec?.isActive == true &&
+                    device.serverSession.session.isEstablished) {
+                  try {
+                    await device.serverSession.session.send(FileAbort(
+                      transferId: message.transferId,
+                      reason: FileAbortReason.ioError,
+                    ));
+                  } on Object {
+                    // The local row is already failed if the link vanished.
+                  }
+                }
+              } finally {
+                _activeSendCompleters.remove(message.transferId);
+              }
+            }());
           }
 
         case FileChunk():
-          final result =
-              await receiver.receiveChunk(message, tier: device.tier);
+          if (_transfers[message.transferId]?.isActive != true) return;
+          if (receiver == null) {
+            _finishTransfer(message.transferId, TransferStatus.failed,
+                errorMessage: 'Receiver unavailable');
+            await device.serverSession.session.send(FileAbort(
+              transferId: message.transferId,
+              reason: FileAbortReason.ioError,
+            ));
+            return;
+          }
+          final result = await receiver.receiveChunk(
+            message,
+            tier: device.tier,
+          );
           if (result == ChunkDisposition.refused) {
+            _finishTransfer(
+              message.transferId,
+              TransferStatus.failed,
+              errorMessage: 'File chunk refused',
+            );
             await device.serverSession.session.send(
               FileAbort(
                 transferId: message.transferId,
                 fileId: message.fileId,
-                reason: FileAbortReason.declined,
+                reason: FileAbortReason.ioError,
               ),
             );
             return;
           }
           if (result == ChunkDisposition.corrupt) {
+            _finishTransfer(
+              message.transferId,
+              TransferStatus.failed,
+              errorMessage: 'File integrity hash mismatch',
+            );
             await device.serverSession.session.send(
               FileAbort(
                 transferId: message.transferId,
@@ -1793,27 +1881,35 @@ final class DesktopService {
           }
 
           final record = _transfers[message.transferId];
-          if (record != null) {
+          if (record != null && record.isActive) {
             final tracker = _speedTrackers.putIfAbsent(
               message.transferId,
               TransferSpeedTracker.new,
             );
-            final fileIdx =
-                record.files.indexWhere((f) => f.fileId == message.fileId);
+            final fileIdx = record.files.indexWhere(
+              (f) => f.fileId == message.fileId,
+            );
             if (fileIdx != -1) {
               final file = record.files[fileIdx];
-              final newBytes = (message.offset + message.bytes.length)
-                  .clamp(0, file.totalBytes);
+              final newBytes = (message.offset + message.bytes.length).clamp(
+                0,
+                file.totalBytes,
+              );
               final updatedFile = file.copyWith(transferredBytes: newBytes);
               final uFiles = List<TransferFileProgress>.from(record.files);
               uFiles[fileIdx] = updatedFile;
-              final totalTr =
-                  uFiles.fold(0, (sum, f) => sum + f.transferredBytes);
+              final totalTr = uFiles.fold(
+                0,
+                (sum, f) => sum + f.transferredBytes,
+              );
 
               tracker.record(totalTr);
               final speed = tracker.calculateSpeed();
-              final eta =
-                  tracker.calculateEta(record.totalBytes, totalTr, speed);
+              final eta = tracker.calculateEta(
+                record.totalBytes,
+                totalTr,
+                speed,
+              );
 
               _transfers[message.transferId] = record.copyWith(
                 files: uFiles,
@@ -1827,9 +1923,52 @@ final class DesktopService {
           }
 
         case FileComplete():
+          if (_transfers[message.transferId]?.isActive != true) return;
+          final outgoing = _transfers[message.transferId];
+          if (outgoing?.direction == TransferDirection.outgoing) {
+            if (outgoing!.status != TransferStatus.inProgress) return;
+            final fileIdx = outgoing.files.indexWhere(
+              (file) => file.fileId == message.fileId,
+            );
+            if (fileIdx == -1) return;
+            final files = List<TransferFileProgress>.from(outgoing.files);
+            files[fileIdx] = files[fileIdx].copyWith(
+              transferredBytes: files[fileIdx].totalBytes,
+              isComplete: true,
+            );
+            final allDone = files.every((file) => file.isComplete);
+            _transfers[message.transferId] = outgoing.copyWith(
+              files: files,
+              transferredBytes: files.fold<int>(
+                  0, (total, file) => total + file.transferredBytes),
+              status: allDone
+                  ? TransferStatus.completed
+                  : TransferStatus.inProgress,
+              completedAt: allDone ? DateTime.now() : null,
+            );
+            _publishTransfers();
+            return;
+          }
+          if (receiver == null) {
+            _finishTransfer(message.transferId, TransferStatus.failed,
+                errorMessage: 'Receiver unavailable');
+            await device.serverSession.session.send(FileAbort(
+              transferId: message.transferId,
+              reason: FileAbortReason.ioError,
+            ));
+            return;
+          }
           final result = await receiver.complete(message, tier: device.tier);
           if (result == CompletionDisposition.hashMismatch ||
-              result == CompletionDisposition.incomplete) {
+              result == CompletionDisposition.incomplete ||
+              result == CompletionDisposition.refused) {
+            _finishTransfer(
+              message.transferId,
+              TransferStatus.failed,
+              errorMessage: result == CompletionDisposition.hashMismatch
+                  ? 'File integrity hash mismatch'
+                  : 'File could not be completed',
+            );
             await device.serverSession.session.send(
               FileAbort(
                 transferId: message.transferId,
@@ -1839,24 +1978,21 @@ final class DesktopService {
                     : FileAbortReason.ioError,
               ),
             );
-            final record = _transfers[message.transferId];
-            if (record != null) {
-              _transfers[message.transferId] = record.copyWith(
-                status: TransferStatus.failed,
-                errorMessage: 'Integrity verification failed',
-                completedAt: DateTime.now(),
-              );
-              _publishTransfers();
-            }
             return;
           }
 
           final record = _transfers[message.transferId];
-          if (record != null) {
-            final fileIdx =
-                record.files.indexWhere((f) => f.fileId == message.fileId);
+          if (record != null && record.isActive) {
+            // A failed acknowledgement leaves this row failed through the
+            // catch handler, rather than completed while the sender waits.
+            await device.serverSession.session.send(message);
+            final current = _transfers[message.transferId];
+            if (current == null || !current.isActive) return;
+            final fileIdx = current.files.indexWhere(
+              (f) => f.fileId == message.fileId,
+            );
             if (fileIdx != -1) {
-              final uFiles = List<TransferFileProgress>.from(record.files);
+              final uFiles = List<TransferFileProgress>.from(current.files);
               uFiles[fileIdx] = uFiles[fileIdx].copyWith(
                 transferredBytes: uFiles[fileIdx].totalBytes,
                 isComplete: true,
@@ -1873,10 +2009,12 @@ final class DesktopService {
                     : null,
               );
               final allDone = uFiles.every((f) => f.isComplete);
-              final totalTr =
-                  uFiles.fold(0, (sum, f) => sum + f.transferredBytes);
+              final totalTr = uFiles.fold(
+                0,
+                (sum, f) => sum + f.transferredBytes,
+              );
 
-              _transfers[message.transferId] = record.copyWith(
+              _transfers[message.transferId] = current.copyWith(
                 files: uFiles,
                 transferredBytes: totalTr,
                 status: allDone
@@ -1889,24 +2027,30 @@ final class DesktopService {
           }
 
         case FileAbort():
-          await receiver.abort(message, tier: device.tier);
+          final record = _transfers[message.transferId];
+          _finishTransfer(
+            message.transferId,
+            message.reason == FileAbortReason.declined
+                ? TransferStatus.declined
+                : message.reason == FileAbortReason.cancelled
+                    ? TransferStatus.cancelled
+                    : TransferStatus.failed,
+            errorMessage: _abortMessage(
+              message.reason,
+              record?.peerName ?? device.name,
+            ),
+          );
           final completer = _activeSendCompleters.remove(message.transferId);
           if (completer != null && !completer.isCompleted) {
-            completer
-                .completeError(StateError('Transfer aborted by remote peer'));
+            completer.completeError(
+              StateError('Transfer aborted by remote peer'),
+            );
           }
 
-          final isDeclined = message.reason == FileAbortReason.declined;
-          final record = _transfers[message.transferId];
-          if (record != null) {
-            _transfers[message.transferId] = record.copyWith(
-              status: isDeclined
-                  ? TransferStatus.declined
-                  : TransferStatus.cancelled,
-              errorMessage: message.reason.name,
-              completedAt: DateTime.now(),
-            );
-            _publishTransfers();
+          // Storage cleanup uses the receiver's serial queue and can wait for
+          // a slow write; it must never hold up the visible terminal state.
+          if (receiver != null) {
+            _abortReceiver(receiver, message, device.tier);
           }
 
         default:
@@ -1927,16 +2071,20 @@ final class DesktopService {
           transferId,
         _ => null,
       };
+      if (transferId != null) {
+        _finishTransfer(
+          transferId,
+          TransferStatus.failed,
+          errorMessage: 'I/O error during transfer',
+        );
+      }
       if (transferId != null && device.serverSession.session.isEstablished) {
         try {
           await device.serverSession.session.send(
-            FileAbort(
-              transferId: transferId,
-              reason: FileAbortReason.ioError,
-            ),
+            FileAbort(transferId: transferId, reason: FileAbortReason.ioError),
           );
         } on TransportError {
-          // The session is already closing; the partial remains resumable.
+          // The session is already closing; the local row is terminal regardless.
         }
       }
     }
@@ -1944,6 +2092,7 @@ final class DesktopService {
 
   /// Approves a pending incoming file transfer.
   Future<void> approveIncomingTransfer(PendingIncomingTransfer request) async {
+    if (_transfers[request.transferId]?.isActive != true) return;
     final device = _devices[request.peerId.value];
     final receiver = _transferReceivers[request.peerId.value];
     if (device == null || receiver == null) {
@@ -1961,24 +2110,39 @@ final class DesktopService {
 
     _knownPeersWithTransfers.add(request.peerId.value);
 
-    final decision =
-        await receiver.acceptOffer(request.offer, tier: device.tier);
-    await device.serverSession.session.send(decision.accept);
-    if (decision.abort case final abort?) {
-      await device.serverSession.session.send(abort);
-    }
-
-    final record = _transfers[request.transferId];
-    if (record != null) {
-      _transfers[request.transferId] = record.copyWith(
-        status: TransferStatus.inProgress,
+    try {
+      final decision = await receiver.acceptOffer(
+        request.offer,
+        tier: device.tier,
       );
-      _publishTransfers();
+      if (_transfers[request.transferId]?.isActive != true) return;
+      await device.serverSession.session.send(decision.accept);
+      if (decision.abort case final abort?) {
+        await device.serverSession.session.send(abort);
+      }
+
+      final record = _transfers[request.transferId];
+      if (record != null && record.isActive) {
+        _transfers[request.transferId] = record.copyWith(
+          status: decision.abort == null
+              ? TransferStatus.inProgress
+              : TransferStatus.failed,
+          errorMessage: decision.abort == null
+              ? null
+              : _abortMessage(decision.abort!.reason, device.name),
+        );
+        _publishTransfers();
+      }
+    } on Object {
+      _finishTransfer(request.transferId, TransferStatus.failed,
+          errorMessage: 'Could not accept transfer');
     }
   }
 
   /// Declines a pending incoming file transfer.
   Future<void> declineIncomingTransfer(PendingIncomingTransfer request) async {
+    _finishTransfer(request.transferId, TransferStatus.declined,
+        errorMessage: 'Declined by you');
     final device = _devices[request.peerId.value];
     if (device != null && device.serverSession.session.isEstablished) {
       try {
@@ -1989,15 +2153,6 @@ final class DesktopService {
           ),
         );
       } catch (_) {}
-    }
-
-    final record = _transfers[request.transferId];
-    if (record != null) {
-      _transfers[request.transferId] = record.copyWith(
-        status: TransferStatus.declined,
-        completedAt: DateTime.now(),
-      );
-      _publishTransfers();
     }
   }
 
@@ -2040,10 +2195,7 @@ final class DesktopService {
       sources[fileId] = FileBackedOutgoingFile(file, length);
     }
 
-    final offer = FileOffer(
-      transferId: transferId,
-      files: offeredFiles,
-    );
+    final offer = FileOffer(transferId: transferId, files: offeredFiles);
 
     _outgoingSources[transferId] = sources;
     _outgoingOffers[transferId] = offer;
@@ -2113,9 +2265,7 @@ final class DesktopService {
       files: <OfferedFile>[offeredFile],
     );
 
-    final sources = <String, OutgoingFile>{
-      fileId: MemoryOutgoingFile(bytes),
-    };
+    final sources = <String, OutgoingFile>{fileId: MemoryOutgoingFile(bytes)};
 
     _outgoingSources[transferId] = sources;
     _outgoingOffers[transferId] = offer;
@@ -2151,8 +2301,28 @@ final class DesktopService {
   /// Cancels an in-progress transfer and sends FileAbort.
   Future<void> cancelTransfer(String transferId) async {
     final record = _transfers[transferId];
-    if (record != null) {
+    if (record != null && record.isActive) {
+      _finishTransfer(
+        transferId,
+        TransferStatus.cancelled,
+        errorMessage: 'Cancelled by you',
+      );
       final device = _devices[record.peerId.value];
+      final completer = _activeSendCompleters.remove(transferId);
+      if (completer != null && !completer.isCompleted) {
+        completer.completeError(StateError('Transfer cancelled by user'));
+      }
+      if (record.direction == TransferDirection.incoming) {
+        final receiver = _transferReceivers[record.peerId.value];
+        if (receiver != null) {
+          _abortReceiver(
+            receiver,
+            FileAbort(
+                transferId: transferId, reason: FileAbortReason.cancelled),
+            device?.tier ?? PermissionTier.extended,
+          );
+        }
+      }
       if (device != null && device.serverSession.session.isEstablished) {
         try {
           await device.serverSession.session.send(
@@ -2163,18 +2333,21 @@ final class DesktopService {
           );
         } catch (_) {}
       }
-
-      final completer = _activeSendCompleters.remove(transferId);
-      if (completer != null && !completer.isCompleted) {
-        completer.completeError(StateError('Transfer cancelled by user'));
-      }
-
-      _transfers[transferId] = record.copyWith(
-        status: TransferStatus.cancelled,
-        completedAt: DateTime.now(),
-      );
-      _publishTransfers();
     }
+  }
+
+  /// Removes a terminal row and its retry sources. Active work must first be
+  /// cancelled so no network operation becomes invisible to the user.
+  bool removeTransfer(String transferId) {
+    final record = _transfers[transferId];
+    if (record == null || record.isActive) return false;
+    _transfers.remove(transferId);
+    _outgoingOffers.remove(transferId);
+    _outgoingSources.remove(transferId);
+    _outgoingPeerIds.remove(transferId);
+    _speedTrackers.remove(transferId);
+    _publishTransfers();
+    return true;
   }
 
   /// Retries a failed or cancelled transfer.
@@ -2195,7 +2368,7 @@ final class DesktopService {
 
     _transfers[transferId] = record.copyWith(
       status: TransferStatus.offered,
-      errorMessage: null,
+      clearErrorMessage: true,
     );
     _publishTransfers();
 
@@ -2221,10 +2394,7 @@ final class DesktopService {
 
     _log.info(
       'peer renamed',
-      fields: <String, Object?>{
-        'peer': peerId.value,
-        'name': newName,
-      },
+      fields: <String, Object?>{'peer': peerId.value, 'name': newName},
     );
   }
 
@@ -2378,8 +2548,10 @@ final class DesktopService {
     // native API, because the platform utilities already handle the parts that
     // matter: warning about unsaved work, notifying other applications, and
     // respecting group policy.
-    final (executable, arguments) =
-        switch ((NativeBackends.currentPlatform, command.action)) {
+    final (executable, arguments) = switch ((
+      NativeBackends.currentPlatform,
+      command.action,
+    )) {
       (PlatformKind.windows, PowerAction.shutdown) => (
           'shutdown',
           <String>['/s', '/t', '${command.delaySeconds}'],
