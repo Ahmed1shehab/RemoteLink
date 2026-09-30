@@ -230,6 +230,70 @@ than the 10⁻⁴ a 32-bit source would give.
 
 ---
 
+## 6.1 Session resumption
+
+A trusted, admitted session receives `ResumptionTicket` (`0x0009`) inside the
+encrypted session. The payload is a length-prefixed opaque ticket followed by
+`lifetimeSeconds` (varuint, currently 7200). The client retains the ticket
+**and** that session's 32-byte `resumptionSecret`, indexed by the verified
+server static key. The server sends a fresh ticket after each successful
+resumption. Pairing and admission must complete before the first ticket is
+issued.
+
+The server's in-memory ticket key is 32 random bytes. It rotates hourly and
+keeps the previous generation for one further hour; restarting loses both
+keys. A ticket is `generation (uint64) || nonce (12 bytes) || ciphertext ||
+tag (16 bytes)`. ChaCha20-Poly1305 seals a fixed 89-byte plaintext: client
+static public key (32), granted tier (uint8), UTC issue time (uint64 Unix
+milliseconds), resumption secret (32), random ticket ID (16). The 8-byte
+big-endian generation is AEAD associated data. Server implementations reject
+unknown generations, a failed tag, future issue times, age over 24 hours, an
+already consumed ID, and a peer that is absent, revoked, or whose current tier
+differs. The 24-hour limit is an absolute ceiling; normal key rotation makes
+tickets usable for at most two hours. Consumed IDs are kept for the current
+and previous generations. A ticket is consumed once its proof and current
+trust record verify.
+
+A client begins a reconnect with `ResumeSession` (`0x000A`) instead of
+`ClientHello`. Its payload is a length-prefixed ticket, a random 32-byte
+client nonce, `HMAC-SHA256(resumptionSecret, ticket || clientNonce)`, an
+appended 32-byte X25519 client ephemeral public key, and the client's current
+capability mask (uint64). The client MUST use a
+fresh ephemeral on every attempt. The server returns one `handshakeFinish`
+frame whose 72-byte payload is its fresh X25519 ephemeral public key, the
+negotiated capability mask (uint64, client mask AND current server mask), and
+`HMAC-SHA256(resumptionSecret, transcript || "server")`. The transcript
+and key schedule are:
+
+```text
+transcript = SHA-256("rl1 resume" || ticket || clientNonce || e_c || e_s || negotiatedCapabilities_be64)
+shared     = X25519(e_c, e_s)
+ikm        = resumptionSecret || shared
+c2s        = HKDF-SHA256(ikm, transcript, "rl1 resume c2s")
+s2c        = HKDF-SHA256(ikm, transcript, "rl1 resume s2c")
+next       = HKDF-SHA256(ikm, transcript, "rl1 resume next")
+exporter   = HKDF-SHA256(ikm, transcript, "rl1 resume exporter")
+```
+
+Here `e_c` and `e_s` in the transcript are the public keys. Binding the
+capability intersection into the proof prevents an on-path peer from enabling
+a feature the two endpoints did not both advertise. The salt freezes
+at this one point on both sides. The client checks the server proof before
+accepting encrypted application records; a peer with only the ticket cannot
+produce the request proof, and possession of only the resumption secret does
+not reveal session keys without the ephemeral exchange. The server static key
+was verified when the ticket was first received, and the client indexes the
+secret by that key; an attacker substituting a different server cannot open
+the ticket or produce the server proof. A stolen ticket **and** stolen secret
+can impersonate the client until that ticket is consumed or expires. This
+scheme does not defend against compromise of live client memory.
+
+On any ticket rejection the server sends an ordinary `ServerHello`. The client
+then sends a fresh `ClientHello` on the same connection and runs the complete
+five-record handshake. No resume rejection is surfaced as a failed connection.
+
+---
+
 ## 6a. Admission
 
 The handshake answers *who is calling*. It does not answer *whether they may
@@ -635,3 +699,54 @@ hasMaxHeight       uint8 (bool)
 hasMonitorId       uint8 (bool)
   [monitorId]      varuint (if present)
 ```
+
+---
+
+## 12. File transfer
+
+File transfer uses subsystem `0x07xx` within an authenticated, encrypted
+session. The sender offers a batch; the receiver accepts selected files, gives
+each one a fresh token and a first missing offset, then checks each chunk and
+final whole-file digest. A peer needs at least `standard` permission. The
+receiver's application storage owns path resolution and must keep files within
+the designated download directory after canonical path checks.
+
+| Type | Code | Direction | Payload fields in wire order |
+|---|---|---|---|
+| `FileOffer` | `0x0701` | sender → receiver | transfer ID string, file count varuint, then each file's ID string, NFC filename string, size uint64, MIME string, flags uint8, optional SHA-256 (32 bytes), optional modified and accessed UTC microseconds (uint64 each) |
+| `FileAccept` | `0x0702` | receiver → sender | transfer ID string, session ID string, accepted count varuint, then accepted file ID and token strings |
+| `FileChunk` | `0x0703` | sender → receiver | transfer ID, session ID, file ID, token (strings), offset uint64, length-prefixed sealed bytes, CRC-32C uint32 of those bytes |
+| `FileComplete` | `0x0704` | sender → receiver | transfer ID string, file ID string, final SHA-256 (32 bytes) |
+| `FileAbort` | `0x0705` | either → either | transfer ID string, optional file ID string, reason uint8 |
+
+The offer flags are bit 0 for SHA-256, bit 1 for modification time, and bit 2
+for access time. Counts above 1024, names over 255 UTF-8 bytes, and chunks
+over 1 MiB are rejected during decoding. Filenames are single path components:
+separators, absolute or drive paths, literal or percent-encoded traversal,
+Windows reserved device names, trailing dots or spaces, and control characters
+are rejected; accepted names are normalised to NFC. An offer may omit its
+SHA-256; `FileComplete` may not. Unknown abort reasons decode as `cancelled`.
+Known values are 1 declined, 2 cancelled, 3 I/O error, 4 hash mismatch, 5 too
+large, 6 timeout. An absent `FileAbort.fileId` aborts the entire batch.
+
+The receiver returns only selected file IDs in `FileAccept`; omission declines
+one file. Its token syntax is `<random>.<chunkSize>.<firstGap>`. The random
+part is 24 random bytes encoded for transport, `chunkSize` defaults to 256 KiB,
+and `firstGap` is the first byte not covered by persisted received ranges.
+The `sessionId` is fresh for each acceptance. The sender resumes at each
+accepted file's `firstGap`; the receiver checks session ID, token, size, and
+offset against its active acceptance. Complete ranges received twice are
+idempotent duplicates.
+
+Each transfer uses `HKDF-SHA256(session exporter, empty salt,
+"rl1 file " || transferId)` as a 32-byte content key. Each chunk's bytes field
+contains `ChaCha20-Poly1305(plaintext)` with nonce `uint32_be(fileIndex) ||
+uint64_be(offset)` and associated data the UTF-8 string
+`transferId || NUL || fileId || NUL || decimal(offset)`. `fileIndex` is the
+file's zero-based order in the offer. The outer CRC-32C checks the sealed bytes
+before storage; it is not an authentication tag. The receiver verifies the
+AEAD, writes the range, and persists its range manifest before acknowledging.
+It commits only after all ranges are present and SHA-256 of the received bytes
+matches `FileComplete.sha256` and any hash supplied in `FileOffer`. A mismatch
+deletes the partial. The sender computes `FileComplete` over the entire source
+file and limits bytes in flight to 4 MiB.

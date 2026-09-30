@@ -132,6 +132,7 @@ final class Session {
     required this.capabilities,
     required this.isServer,
     bool requiresPairing = false,
+    this.wasResumed = false,
     List<Uint8List> initialRecords = const <Uint8List>[],
   })  : _connection = connection,
         _keys = keys,
@@ -199,6 +200,9 @@ final class Session {
 
   /// True on the desktop. Determines which direction key is used for sending.
   final bool isServer;
+
+  /// True when this session used the abbreviated ephemeral exchange.
+  final bool wasResumed;
 
   final Log _log = Log.scoped('transport.session');
 
@@ -276,6 +280,16 @@ final class Session {
 
   /// A defensive copy of the handshake exporter for session-bound features.
   Uint8List get exporterSecret => Uint8List.fromList(_keys.exporterSecret);
+
+  /// Copied only for attaching the next server-issued ticket.
+  Uint8List get resumptionSecret => Uint8List.fromList(_keys.resumptionSecret);
+
+  /// Retained because a ticket may arrive before the reconnect supervisor
+  /// attaches its application-message listener.
+  ResumptionTicket? latestResumptionTicket;
+  final StreamController<ResumptionTicket> _resumptionTickets =
+      StreamController<ResumptionTicket>.broadcast();
+  Stream<ResumptionTicket> get resumptionTickets => _resumptionTickets.stream;
 
   /// Snapshot of current health.
   ConnectionQuality get currentQuality => ConnectionQuality(
@@ -522,6 +536,12 @@ final class Session {
       return;
     }
 
+    if (message is ResumptionTicket) {
+      latestResumptionTicket = message;
+      if (!_resumptionTickets.isClosed) _resumptionTickets.add(message);
+      return;
+    }
+
     if (frame.flags.needsAck) {
       unawaited(
         _writeNow(
@@ -703,6 +723,7 @@ final class Session {
     }
 
     await _subscription.cancel();
+    await _resumptionTickets.close();
     await _connection.close();
 
     _keys.dispose();

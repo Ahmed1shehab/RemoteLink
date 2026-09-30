@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -99,12 +100,17 @@ final class RemoteLinkClient {
     required Clock clock,
     this.backoff = BackoffPolicy.responsive,
     Random? random,
+    this.onResumption,
+    this.loadResumption,
   })  : _clock = clock,
         _random = random ?? Random();
 
   final DeviceIdentity identity;
   final Capabilities capabilities;
   final BackoffPolicy backoff;
+  final Future<void> Function(Uint8List serverKey, ClientResumption value)?
+      onResumption;
+  final Future<ClientResumption?> Function(Uint8List serverKey)? loadResumption;
 
   final Clock _clock;
   final Random _random;
@@ -120,6 +126,7 @@ final class RemoteLinkClient {
   ConnectionTarget? _target;
   Session? _session;
   StreamSubscription<Message>? _messageSubscription;
+  StreamSubscription<ResumptionTicket>? _ticketSubscription;
   StreamSubscription<SessionState>? _sessionStateSubscription;
 
   ClientState _state = ClientState.idle;
@@ -201,6 +208,32 @@ final class RemoteLinkClient {
   PermissionTier? get grantedTier => _grantedTier;
 
   PermissionTier? _grantedTier;
+  final Map<String, ClientResumption> _resumptions =
+      <String, ClientResumption>{};
+  final Set<String> _badStoredResumptions = <String>{};
+
+  /// App storage can snapshot this opaque pair under the verified server key.
+  ClientResumption? resumptionFor(Uint8List serverKey) =>
+      _resumptions[base64.encode(serverKey)];
+
+  void restoreResumption(Uint8List serverKey, ClientResumption value) {
+    final id = base64.encode(serverKey);
+    _resumptions[id] = value;
+    _badStoredResumptions.remove(id);
+  }
+
+  void _rememberTicket(
+      Uint8List serverKey, ResumptionTicket ticket, Session session) {
+    final value = ClientResumption(
+        ticket: ticket.ticket, secret: session.resumptionSecret);
+    restoreResumption(serverKey, value);
+    final persist = onResumption;
+    if (persist != null) {
+      unawaited(persist(serverKey, value).catchError((Object error) {
+        _log.warn('could not persist a resumption ticket', error: error);
+      }));
+    }
+  }
 
   bool get isConnected => _state == ClientState.connected;
 
@@ -367,6 +400,14 @@ final class RemoteLinkClient {
         _failWaiters(e);
         return;
       } on TransportError catch (e) {
+        if (e.code == 'resume_proof_failed') {
+          final key = _target?.serverPublicKey;
+          if (key != null) {
+            final id = base64.encode(key);
+            _resumptions.remove(id);
+            _badStoredResumptions.add(id);
+          }
+        }
         if (!e.retryable) {
           _log.error('connection failed permanently', error: e);
           _terminalFailure = e;
@@ -381,6 +422,20 @@ final class RemoteLinkClient {
 
   Future<void> _attemptConnection(ConnectionTarget target) async {
     _connectionAttemptCount++;
+    final serverKey = target.serverPublicKey;
+    if (serverKey != null &&
+        resumptionFor(serverKey) == null &&
+        !_badStoredResumptions.contains(base64.encode(serverKey))) {
+      final load = loadResumption;
+      if (load != null) {
+        try {
+          final saved = await load(serverKey);
+          if (saved != null) restoreResumption(serverKey, saved);
+        } on Object catch (error) {
+          _log.warn('could not load a resumption ticket', error: error);
+        }
+      }
+    }
     final connection = await FramedConnection.connect(target.host, target.port);
 
     final session = await HandshakeDriver.runClient(
@@ -390,9 +445,16 @@ final class RemoteLinkClient {
       clock: _clock,
       expectedServerKey: target.serverPublicKey,
       expectedServerId: target.isTrusted ? target.deviceId : null,
+      resumption: target.serverPublicKey == null
+          ? null
+          : resumptionFor(target.serverPublicKey!),
     );
 
     _session = session;
+    final earlyTicket = session.latestResumptionTicket;
+    if (earlyTicket != null && target.serverPublicKey != null) {
+      _rememberTicket(target.serverPublicKey!, earlyTicket, session);
+    }
     _attempt = 0;
     _setState(
       session.state == SessionState.pairing
@@ -402,6 +464,13 @@ final class RemoteLinkClient {
 
     if (!_sessions.isClosed) _sessions.add(session);
     _resolveWaiters(session);
+
+    _ticketSubscription = session.resumptionTickets.listen((ticket) {
+      final serverKey = target.serverPublicKey;
+      if (serverKey != null) {
+        _rememberTicket(serverKey, ticket, session);
+      }
+    });
 
     _messageSubscription = session.messages.listen(
       (message) {
@@ -530,6 +599,8 @@ final class RemoteLinkClient {
   }
 
   Future<void> _detachSession() async {
+    await _ticketSubscription?.cancel();
+    _ticketSubscription = null;
     await _messageSubscription?.cancel();
     _messageSubscription = null;
     await _sessionStateSubscription?.cancel();

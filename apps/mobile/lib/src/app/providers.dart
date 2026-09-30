@@ -56,6 +56,7 @@ const Capabilities kMobileCapabilities = Capabilities(
 
 const String _identityKey = 'remotelink.identity.private';
 const String _trustKey = 'remotelink.trust.peers';
+const String _resumePrefix = 'remotelink.resume.';
 const String _deviceNameKey = 'remotelink.device.name';
 const String _pointerSettingsKey = 'remotelink.settings.pointer';
 const String _clipboardSettingsKey = 'remotelink.settings.clipboard';
@@ -354,6 +355,36 @@ final clientProvider = FutureProvider<RemoteLinkClient>((ref) async {
     identity: identity,
     capabilities: mobileCapabilities(ref.watch(phoneControlBackendProvider)),
     clock: ref.watch(clockProvider),
+    onResumption: (serverKey, value) async {
+      final storage = await ref.read(identityStoreProvider.future);
+      await storage.write(
+        '$_resumePrefix${base64UrlEncode(serverKey)}',
+        jsonEncode(<String, String>{
+          'ticket': base64Encode(value.ticket),
+          'secret': base64Encode(value.secret),
+        }),
+      );
+    },
+    loadResumption: (serverKey) async {
+      final storage = await ref.read(identityStoreProvider.future);
+      final raw =
+          await storage.read('$_resumePrefix${base64UrlEncode(serverKey)}');
+      if (raw == null) return null;
+      try {
+        final value = jsonDecode(raw) as Map<String, dynamic>;
+        final ticket = base64Decode(value['ticket'] as String);
+        final secret = base64Decode(value['secret'] as String);
+        if (ticket.length != 125 || secret.length != 32) return null;
+        return ClientResumption(
+          ticket: Uint8List.fromList(ticket),
+          secret: Uint8List.fromList(secret),
+        );
+      } on FormatException {
+        return null;
+      } on TypeError {
+        return null;
+      }
+    },
   );
   ref.onDispose(client.dispose);
   return client;

@@ -398,6 +398,8 @@ implying an attack.
 
 ### RL-102 — Session resumption
 
+**Status — DONE.** Ticket sealing, one-round-trip resume, replay and trust checks live in `rl_crypto` and `rl_transport`; the mobile client persists tickets, and `PROTOCOL.md` §6.1 specifies the wire flow.
+
 **Priority** P1 · **Size** M · **Security gap 4** · **Blocked by** RL-104
 
 **Files**
@@ -1251,6 +1253,8 @@ relative for precision.
 ---
 
 ### RL-400 — File transfer protocol messages
+
+**Status — DONE.** The five payloads and adversarial filename tests live in `rl_protocol`; `PROTOCOL.md` §12 now specifies their wire fields and transfer behavior.
 
 **Priority** P4 · **Size** M
 
