@@ -110,6 +110,35 @@ List<Override> desktopHomeOverridesWith({
       if (recopy != null) clipboardRecopyProvider.overrideWithValue(recopy),
     ];
 
+/// Fake file launcher for widget testing without external processes.
+final class FakeFileLauncher implements FileLauncherService {
+  final List<String> opened = <String>[];
+  final List<String> revealed = <String>[];
+  bool openResult = true;
+  bool revealResult = true;
+
+  void reset() {
+    opened.clear();
+    revealed.clear();
+    openResult = true;
+    revealResult = true;
+  }
+
+  @override
+  Future<bool> openFile(String path) async {
+    opened.add(path);
+    return openResult;
+  }
+
+  @override
+  Future<bool> revealFile(String path) async {
+    revealed.add(path);
+    return revealResult;
+  }
+}
+
+final fakeFileLauncher = FakeFileLauncher();
+
 /// Safe provider state for rendering the desktop home screen in widget tests.
 ///
 /// These overrides deliberately stop at the UI-facing providers. In
@@ -160,6 +189,7 @@ final List<Override> desktopHomeOverrides = <Override>[
   desktopDiagnosticsProvider.overrideWith(
     (ref) => Stream<DiagnosticsInfo>.value(fakeDiagnostics),
   ),
+  fileLauncherProvider.overrideWithValue(fakeFileLauncher),
   memoryLogSinkProvider.overrideWithValue(fakeMemoryLogSink),
   clipboardHistoryProvider.overrideWith((ref) async {
     final history = ClipboardHistory();
