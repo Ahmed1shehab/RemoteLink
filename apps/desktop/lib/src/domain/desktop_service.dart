@@ -421,6 +421,8 @@ final class DesktopService {
       <String, Map<String, OutgoingFile>>{};
   final Map<String, FileOffer> _outgoingOffers = <String, FileOffer>{};
   final Map<String, DeviceId> _outgoingPeerIds = <String, DeviceId>{};
+  // The sender checks isCompleted to stop writing. The transfer row carries
+  // the failure, so completing this signal must not produce an uncaught error.
   final Map<String, Completer<void>> _activeSendCompleters =
       <String, Completer<void>>{};
   final Map<String, TransferSpeedTracker> _speedTrackers =
@@ -1331,6 +1333,16 @@ final class DesktopService {
           _activeSessionPeerId = null;
         }
 
+      case FileAccept(:final transferId) ||
+              FileComplete(:final transferId) ||
+              FileAbort(:final transferId)
+          when !device.tier.canTransferFiles &&
+              identical(device.serverSession, session) &&
+              _isOutgoingReply(session.peerId, transferId):
+        // The desktop user already chose to send these files. Let the intended
+        // recipient answer, while keeping phone-initiated offers tier-gated.
+        await _handleFileTransferMessage(session.peerId, message);
+
       default:
         _activeSessionPeerId = session.peerId;
         try {
@@ -1369,7 +1381,7 @@ final class DesktopService {
         );
         final sender = _activeSendCompleters.remove(record.transferId);
         if (sender != null && !sender.isCompleted) {
-          sender.completeError(StateError('Connection lost'));
+          sender.complete();
         }
       }
     }
@@ -1646,6 +1658,14 @@ final class DesktopService {
     unawaited(_handleFileTransferMessage(peerId, message));
   }
 
+  bool _isOutgoingReply(DeviceId peerId, String transferId) {
+    final record = _transfers[transferId];
+    return record != null &&
+        record.isActive &&
+        record.direction == TransferDirection.outgoing &&
+        record.peerId == peerId;
+  }
+
   void _publishTransfers() {
     if (!_transferChanges.isClosed) {
       _transferChanges.add(_transfers.values.toList());
@@ -1873,7 +1893,7 @@ final class DesktopService {
                 // Until then a hash or disk error can still arrive as FileAbort.
               } catch (e) {
                 if (!sendCompleter.isCompleted) {
-                  sendCompleter.completeError(e);
+                  sendCompleter.complete();
                 }
                 final rec = _transfers[message.transferId];
                 if (rec != null && rec.isActive) {
@@ -2105,9 +2125,7 @@ final class DesktopService {
           );
           final completer = _activeSendCompleters.remove(message.transferId);
           if (completer != null && !completer.isCompleted) {
-            completer.completeError(
-              StateError('Transfer aborted by remote peer'),
-            );
+            completer.complete();
           }
 
           // Storage cleanup uses the receiver's serial queue and can wait for
@@ -2373,7 +2391,7 @@ final class DesktopService {
       final device = _devices[record.peerId.value];
       final completer = _activeSendCompleters.remove(transferId);
       if (completer != null && !completer.isCompleted) {
-        completer.completeError(StateError('Transfer cancelled by user'));
+        completer.complete();
       }
       if (record.direction == TransferDirection.incoming) {
         final receiver = _transferReceivers[record.peerId.value];
