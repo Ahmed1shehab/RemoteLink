@@ -802,7 +802,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
             if (sendCompleter.isCompleted) {
               throw StateError('Transfer was cancelled');
             }
-            await session.send(chunk);
+            await session.sendFileChunk(chunk);
 
             final rec = state.transfers
                 .where((t) => t.transferId == accept.transferId)
@@ -988,17 +988,15 @@ class MobileTransferController extends StateNotifier<TransferState> {
   }
 
   /// Sends a list of files to [targetPeerId].
+  ///
+  /// More files than one offer may carry go as several offers, and the id
+  /// returned is the first one's.
   Future<String> sendFiles({
     required DeviceId targetPeerId,
     required String targetPeerName,
     required List<File> files,
     List<String>? fileNames,
   }) async {
-    final session = _sessionFor(targetPeerId);
-    if (session == null) {
-      throw StateError('Cannot send: not connected to $targetPeerName');
-    }
-
     if (files.isEmpty) {
       throw ArgumentError('files list must not be empty');
     }
@@ -1009,7 +1007,39 @@ class MobileTransferController extends StateNotifier<TransferState> {
       );
     }
 
-    final transferId = 't-${DateTime.now().microsecondsSinceEpoch}';
+    final fileBatches = fileOfferBatches(files);
+    final nameBatches =
+        fileNames == null ? null : fileOfferBatches<String>(fileNames);
+    String? first;
+    for (var index = 0; index < fileBatches.length; index++) {
+      final id = await _offerFiles(
+        targetPeerId: targetPeerId,
+        targetPeerName: targetPeerName,
+        files: fileBatches[index],
+        fileNames: nameBatches?[index],
+        // Suffixed rather than trusted to differ by the clock: two offers this
+        // close together can read the same microsecond, and sharing an id would
+        // make them share one transfer row.
+        idSuffix: fileBatches.length == 1 ? '' : '-b${index + 1}',
+      );
+      first ??= id;
+    }
+    return first!;
+  }
+
+  Future<String> _offerFiles({
+    required DeviceId targetPeerId,
+    required String targetPeerName,
+    required List<File> files,
+    required List<String>? fileNames,
+    required String idSuffix,
+  }) async {
+    final session = _sessionFor(targetPeerId);
+    if (session == null) {
+      throw StateError('Cannot send: not connected to $targetPeerName');
+    }
+
+    final transferId = 't-${DateTime.now().microsecondsSinceEpoch}$idSuffix';
     final offeredFiles = <OfferedFile>[];
     final sources = <String, OutgoingFile>{};
 

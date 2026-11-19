@@ -4,11 +4,60 @@ import 'dart:typed_data';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
 
+import '../transport/session.dart';
 import 'receiver.dart';
 import 'storage.dart';
 import 'transfer_crypto.dart';
 
 typedef SendFileChunk = Future<void> Function(FileChunk chunk);
+
+/// How long one file chunk may wait for the peer to acknowledge it.
+///
+/// Generous on purpose. Up to [kMaximumInFlightFileBytes] can be queued ahead
+/// of a chunk, and on a weak 2.4 GHz link that is several seconds of airtime
+/// before the chunk is even read. A deadline near that would fail healthy
+/// transfers; one far past it still turns a peer that has truly stopped
+/// reading into an error instead of a transfer that hangs at 60% forever.
+const Duration kFileChunkAckTimeout = Duration(seconds: 30);
+
+/// Sends file chunks the way [FileTransferSender] needs them sent.
+extension FileChunkSending on Session {
+  /// Resolves once the peer has the chunk, not once it has been queued.
+  ///
+  /// This is what makes [FileTransferFlowControl] mean anything. Both apps
+  /// used to pass `send`, which resolves as soon as the bytes are handed to
+  /// the socket — so every permit was released immediately and a whole file
+  /// was queued before the peer had received its first chunk. Measured over
+  /// loopback: 32 MiB queued at once with `send`, under 4 MiB with this.
+  ///
+  /// The queue was not merely wasteful. The one-second heartbeat ping is
+  /// written to the same stream, so it waited behind every queued chunk; on
+  /// Wi-Fi a large file put tens of seconds in front of it, the pong never came
+  /// back inside [kHeartbeatTimeout], and the session tore itself down partway
+  /// through the transfer. The peer's acks also count as inbound traffic, so
+  /// while chunks are flowing the sender never looks silent.
+  ///
+  /// Wire-compatible with every existing build: acknowledging a frame that
+  /// asks for it is handled by the session layer, not by the transfer code.
+  Future<void> sendFileChunk(FileChunk chunk) =>
+      sendAcknowledged(chunk, timeout: kFileChunkAckTimeout);
+}
+
+/// Splits [items] into runs no longer than one [FileOffer] may carry.
+///
+/// A selection past [kMaxFileOfferCount] used to fail to encode, which the
+/// user saw as a send that did nothing with an error naming a protocol limit
+/// they never chose. Several offers, each accepted on its own, is the shape
+/// the receiving side already understands.
+List<List<T>> fileOfferBatches<T>(List<T> items) => <List<T>>[
+      for (var start = 0; start < items.length; start += kMaxFileOfferCount)
+        items.sublist(
+          start,
+          start + kMaxFileOfferCount < items.length
+              ? start + kMaxFileOfferCount
+              : items.length,
+        ),
+    ];
 typedef SendFileComplete = Future<void> Function(FileComplete complete);
 
 final class _AcceptanceToken {
