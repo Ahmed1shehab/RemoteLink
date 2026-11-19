@@ -11,6 +11,7 @@ import '../../app/l10n.dart';
 import '../../app/modern_ui.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
+import '../premium/premium_providers.dart';
 
 /// The computer's current playback state, pushed from the desktop.
 final mediaStateProvider = StreamProvider<MediaState?>((ref) async* {
@@ -203,10 +204,15 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
                       semanticFormatterCallback: (value) =>
                           context.l10n.volumePercent((value * 100).round()),
                       onChanged: connected
-                          ? (value) => setState(() => _dragging = value)
+                          ? (value) {
+                              setState(() => _dragging = value);
+                              ref.read(mediaDraggingProvider.notifier).state =
+                                  true;
+                            }
                           : null,
                       onChangeEnd: (value) {
                         setState(() => _dragging = null);
+                        ref.read(mediaDraggingProvider.notifier).state = false;
                         unawaited(
                           _send(
                             VolumeCommand(
@@ -266,14 +272,19 @@ class _MediaScreenState extends ConsumerState<MediaScreen> {
                         semanticFormatterCallback: (value) => context.l10n
                             .screenBrightnessPercent((value * 100).round()),
                         onChanged: connected
-                            ? (value) =>
-                                setState(() => _brightnessDragging = value)
+                            ? (value) {
+                                setState(() => _brightnessDragging = value);
+                                ref.read(mediaDraggingProvider.notifier).state =
+                                    true;
+                              }
                             : null,
                         onChangeEnd: (value) {
                           setState(() {
                             _brightness = value;
                             _brightnessDragging = null;
                           });
+                          ref.read(mediaDraggingProvider.notifier).state =
+                              false;
                           unawaited(
                             _send(
                               BrightnessCommand(

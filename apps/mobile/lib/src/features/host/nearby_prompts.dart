@@ -75,6 +75,9 @@ void listenForNearbyPrompts(
 /// graph would only invite a rebuild to reason about.
 bool _promptOnScreen = false;
 
+/// Whether an inbound pairing, connection, or transfer prompt is currently active.
+bool get isNearbyPromptOnScreen => _promptOnScreen;
+
 /// Raises prompts one at a time until there are none left.
 ///
 /// The loop is the part that matters. Two devices can knock while the user is

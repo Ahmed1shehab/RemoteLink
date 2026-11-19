@@ -35,6 +35,11 @@ dependencies:
   # write to it — and the alternative is a Swift and Kotlin shim, which this
   # repository deliberately does not ship (ADR 0003). Used for nothing else.
   gal: ^2.3.3
+  # Displaying ads to free users. Google AdMob provides banner and interstitial
+  # formats across Android and iOS with UMP consent management. Banners stay off
+  # input surfaces, interstitials only show after file transfers, and premium
+  # users make no requests to the ad network at all.
+  google_mobile_ads: ^9.2.0
   # Separate from file_selector, and worth the second dependency: this is the
   # system photo picker (PHPickerViewController on iOS, the Android photo
   # picker on API 33+), which runs out-of-process and therefore needs no
@@ -51,6 +56,10 @@ dependencies:
   # to touch. A hand-typed address can do neither.
   mobile_scanner: ^7.2.0
   path_provider: ^2.1.4
+  # In-app purchases and subscription billing. Handles StoreKit on iOS and Google
+  # Play Billing on Android with server-validated entitlements, localized pricing,
+  # and restore flows. If keys are missing, billing degrades gracefully to free.
+  purchases_flutter: ^11.0.4
   rl_core: ^0.1.0
   rl_crypto: ^0.1.0
   # Not desktop-only despite the name: the phone asks it whether this device

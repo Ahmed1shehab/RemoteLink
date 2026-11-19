@@ -17,6 +17,8 @@ import '../host/host_providers.dart';
 import '../input/touchpad_screen.dart';
 import '../keyboard/keyboard_screen.dart';
 import '../media/media_screen.dart';
+import '../premium/paywall_screen.dart';
+import '../premium/premium_providers.dart';
 import '../screen/screen_viewer_screen.dart';
 import '../settings/settings_screen.dart';
 import '../transfer/transfer_screen.dart';
@@ -138,6 +140,14 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
     final onGestureTab = current.isGesture;
 
     final expanded = _immersive && onGestureTab;
+    final isPremium = ref.watch(isPremiumProvider);
+    final isMediaInUse = ref.watch(mediaInUseProvider);
+    // Ads are never placed on input surfaces (touchpad, keyboard, active media).
+    // Misclicks on input surfaces would send unintended gestures or keystrokes to the computer.
+    final isInputSurface = current == ControlTab.touchpad ||
+        current == ControlTab.keyboard ||
+        (current == ControlTab.media && isMediaInUse);
+    final showBanner = !isPremium && !expanded && !isInputSurface;
 
     return Scaffold(
       extendBody: true,
@@ -220,9 +230,13 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
               curve: Curves.easeOutCubic,
               // The navigation floats over the body, so the body keeps its
               // own bottom clear by exactly the room the bar takes — and
-              // reclaims all of it when the bar is gone.
+              // reclaims all of it when the bar is gone. If an ad banner is shown,
+              // we add room so content does not sit behind it.
               padding: EdgeInsets.only(
-                bottom: expanded ? 0 : LiquidNavigationBar.heightOf(context),
+                bottom: expanded
+                    ? 0
+                    : LiquidNavigationBar.heightOf(context) +
+                        (showBanner ? 60 : 0),
               ),
               // Still an [IndexedStack] over the visible tabs, so each keeps
               // its state — see the class comment for what rebuilding them
@@ -247,12 +261,21 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
       ),
       bottomNavigationBar: expanded
           ? null
-          : LiquidNavigationBar(
-              selectedIndex: visible.indexOf(current),
-              onDestinationSelected: (index) =>
-                  setState(() => _selected = visible[index]),
-              destinations: <LiquidNavDestination>[
-                for (final tab in visible) _destinationFor(tab, context),
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                if (showBanner)
+                  ref
+                      .watch(adsGatewayProvider)
+                      .createBannerWidget(context: context),
+                LiquidNavigationBar(
+                  selectedIndex: visible.indexOf(current),
+                  onDestinationSelected: (index) =>
+                      setState(() => _selected = visible[index]),
+                  destinations: <LiquidNavDestination>[
+                    for (final tab in visible) _destinationFor(tab, context),
+                  ],
+                ),
               ],
             ),
     );
@@ -475,6 +498,7 @@ class ClipboardHistoryList extends ConsumerWidget {
         else
           for (final entry in snapshot.entries)
             _HistoryTile(entry: entry, controller: controller),
+        if (!ref.watch(isPremiumProvider)) const _UnlockHistoryCard(),
       ],
     );
   }
@@ -578,6 +602,56 @@ class _HistoryTile extends StatelessWidget {
       SnackBar(
         content: Text(
           context.l10n.pinLimitReached(kMaxPinnedClipboardEntries),
+        ),
+      ),
+    );
+  }
+}
+
+class _UnlockHistoryCard extends StatelessWidget {
+  const _UnlockHistoryCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AppSectionCard(
+      margin: const EdgeInsets.only(top: 8, bottom: 8),
+      padding: EdgeInsets.zero,
+      child: ListTile(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: scheme.primary.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(
+            Icons.lock_outline_rounded,
+            size: 20,
+            color: scheme.primary,
+          ),
+        ),
+        title: Text(
+          context.l10n.unlockUnlimitedHistory,
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+        subtitle: Text(
+          context.l10n.freeHistoryLimitNote,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+        ),
+        trailing: const Icon(
+          Icons.arrow_forward_ios_rounded,
+          size: 16,
+        ),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const PaywallScreen(),
+          ),
         ),
       ),
     );

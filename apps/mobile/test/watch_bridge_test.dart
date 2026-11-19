@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:remotelink_mobile/src/app/providers.dart';
 import 'package:remotelink_mobile/src/features/input/pointer_controller.dart';
+import 'package:remotelink_mobile/src/features/premium/billing_gateway.dart';
+import 'package:remotelink_mobile/src/features/premium/premium_providers.dart';
 import 'package:remotelink_mobile/src/features/watch/watch_bridge.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
@@ -543,6 +545,14 @@ void main() {
           // off everywhere else — so without this the provider returns before
           // it subscribes to anything and the test would pass by doing nothing.
           watchSupportedProvider.overrideWithValue(true),
+          billingGatewayProvider.overrideWithValue(
+            FakeBillingGateway(initialPremium: true),
+          ),
+          isPremiumProvider.overrideWith((ref) {
+            final notifier = IsPremiumNotifier(ref);
+            notifier.state = true;
+            return notifier;
+          }),
         ],
       );
       container.read(watchBridgeProvider);
@@ -579,6 +589,24 @@ void main() {
       expect(buttons.first.button, MouseButton.left);
 
       expect(received.whereType<MouseScroll>(), hasLength(1));
+    });
+
+    test('what the wrist did is dropped when user is not premium', () async {
+      final billing =
+          container.read(billingGatewayProvider) as FakeBillingGateway;
+      billing.setPremium(false);
+      await pumpEventQueue(times: 10);
+
+      final received = <Message>[];
+      final subscription = desktopSession.messages.listen(received.add);
+      addTearDown(subscription.cancel);
+
+      channel.send(<String, Object?>{'t': 'move', 'dx': 12.0, 'dy': -6.0});
+      channel.send(<String, Object?>{'t': 'click', 'b': 'left'});
+      await pumpEventQueue(times: 40);
+
+      expect(received.whereType<MouseMove>(), isEmpty);
+      expect(received.whereType<MouseButtonEvent>(), isEmpty);
     });
 
     test('the watch is told which computer it is driving', () async {

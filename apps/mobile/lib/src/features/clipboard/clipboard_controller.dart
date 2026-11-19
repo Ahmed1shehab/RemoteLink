@@ -16,6 +16,7 @@ import '../../app/providers.dart';
 import '../devices/link_service.dart';
 import '../host/host_providers.dart';
 import '../host/phone_host_service.dart';
+import '../premium/premium_providers.dart';
 import 'clipboard_history_controller.dart';
 import 'clipboard_watcher.dart';
 
@@ -497,6 +498,10 @@ final class MobileClipboardController extends StateNotifier<ClipboardState>
   /// watches for, and without the guard every sync would be read back and
   /// returned.
   void _onBackgroundCopy(String text) {
+    if (!_ref.read(isPremiumProvider)) {
+      _log.debug(() => 'Dropped background copy: Remote Link Premium required');
+      return;
+    }
     final settings = _ref.read(clipboardSettingsProvider);
     if (!settings.syncToDesktop) return;
 
