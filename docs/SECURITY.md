@@ -177,6 +177,15 @@ mismatch, wait for the tap — and it is asserted against in
 - **Permission checks live on the desktop, per message.** Hiding a button on
   the phone is a usability affordance. The phone is untrusted input; the
   desktop is the boundary.
+- **Quick Actions load only authenticated records.** The app support file
+  `command_registry.json` contains a JSON payload and an HMAC-SHA256 tag.
+  The MAC key is derived from the desktop identity private key using a separate
+  HKDF context. The existing `identity.key` file is the only secret persisted
+  for this purpose and has the storage limits described in §4. An invalid
+  file loads as an empty registry and triggers a log and a settings warning.
+  New actions are disabled. Once enabled, an action can run only with its
+  saved executable, arguments, and working directory, at or above both the
+  command's minimum tier and the protocol's `extended` floor.
 - **Trust records are built from handshake results, never from peer claims.**
   A device cannot register a public key it does not hold.
 - **The beacon fingerprint is never a trust key.** It is 8 bytes and exists

@@ -1359,4 +1359,80 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get thisPlatform => 'هذه المنصة';
+
+  @override
+  String get quickActionsTitle => 'الإجراءات السريعة';
+
+  @override
+  String get quickActionsAdd => 'إضافة إجراء';
+
+  @override
+  String get quickActionsEdit => 'تعديل الإجراء';
+
+  @override
+  String get quickActionsEditDisables =>
+      'يؤدي حفظ التغييرات إلى تعطيل هذا الإجراء إلى أن تفعّله مجددًا.';
+
+  @override
+  String get quickActionsTest => 'تشغيل تجريبي';
+
+  @override
+  String get quickActionsRemove => 'إزالة الإجراء';
+
+  @override
+  String get quickActionsRemovePrompt =>
+      'هل تريد إزالة هذا الإجراء من الكمبيوتر وكل الهواتف المتصلة؟';
+
+  @override
+  String get quickActionsEnabled => 'مفعّل';
+
+  @override
+  String get quickActionsDisabled => 'معطّل';
+
+  @override
+  String get quickActionsName => 'اسم الإجراء';
+
+  @override
+  String get quickActionsChooseExecutable => 'اختيار الملف التنفيذي';
+
+  @override
+  String get quickActionsArguments => 'الوسيطات، كل وسيطة في سطر';
+
+  @override
+  String get quickActionsWorkingDirectory => 'مجلد العمل (اختياري)';
+
+  @override
+  String get quickActionsMinimumTier => 'الحد الأدنى للإذن';
+
+  @override
+  String get quickActionsTierExtended => 'موسّع';
+
+  @override
+  String get quickActionsTierAdmin => 'مسؤول';
+
+  @override
+  String get quickActionsValidation =>
+      'أدخل اسمًا قصيرًا، واختر ملفًا تنفيذيًا، واستخدم مسارًا مطلقًا لمجلد العمل إن حددته.';
+
+  @override
+  String get quickActionsIntegrityWarning =>
+      'تعذّر التحقق من الإجراءات المحفوظة. لم يُحمَّل أي إجراء محفوظ.';
+
+  @override
+  String get quickActionsLoading => 'جارٍ تحميل الإجراءات المحفوظة…';
+
+  @override
+  String get quickActionsUnavailable => 'الإجراءات السريعة غير متاحة.';
+
+  @override
+  String get quickActionsSaveFailed => 'تعذّر حفظ التغيير.';
+
+  @override
+  String get quickActionsPickerFailed => 'تعذّر فتح نافذة اختيار الملفات.';
+
+  @override
+  String get quickActionsStarted => 'بدأ تشغيل الإجراء.';
+
+  @override
+  String get quickActionsStartFailed => 'تعذّر تشغيل الإجراء.';
 }

@@ -12,6 +12,7 @@ import 'package:rl_transport/rl_transport.dart';
 
 import '../domain/auto_start.dart';
 import '../domain/clipboard_history_store.dart';
+import '../domain/command_registry.dart';
 import '../domain/desktop_preferences.dart';
 import '../domain/desktop_service.dart';
 import '../domain/file_launcher.dart';
@@ -333,6 +334,30 @@ Future<void> setClipboardHistoryPersistence({
   );
 }
 
+/// A separate MAC key derived from the identity secret already held on disk.
+final commandRegistryProvider = FutureProvider<CommandRegistry>((ref) async {
+  final directory = await ref.watch(appDirectoryProvider.future);
+  final identity = await ref.watch(identityProvider.future);
+  final privateKey = await identity.extractPrivateKey();
+  try {
+    final macKey = await Primitives.hkdf(
+      secret: privateKey,
+      salt: const [],
+      info: 'command-registry:v1',
+    );
+    try {
+      final registry =
+          await CommandRegistry.open(directory: directory, secret: macKey);
+      ref.onDispose(registry.dispose);
+      return registry;
+    } finally {
+      Primitives.wipe(macKey);
+    }
+  } finally {
+    Primitives.wipe(privateKey);
+  }
+});
+
 /// The running service.
 final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
   final identity = await ref.watch(identityProvider.future);
@@ -343,6 +368,7 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
   final transferStore = await ref.watch(incomingTransferStoreProvider.future);
   final directory = await ref.watch(appDirectoryProvider.future);
   final history = await ref.watch(clipboardHistoryProvider.future);
+  final registry = await ref.watch(commandRegistryProvider.future);
 
   final preferences = await ref.watch(desktopPreferencesProvider.future);
 
@@ -356,6 +382,7 @@ final desktopServiceProvider = FutureProvider<DesktopService>((ref) async {
     incomingTransferStore: transferStore,
     peerClipboardSettingsFile: File('${directory.path}/clipboard_peers.json'),
     clipboardHistory: history,
+    commandRegistry: registry,
   )
     // Before `start`, not after. The server reads this when it binds, and a
     // phone that reconnects in the moment between the two would be let in

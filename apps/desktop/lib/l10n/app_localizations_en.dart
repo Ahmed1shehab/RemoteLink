@@ -1291,4 +1291,80 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get thisPlatform => 'this platform';
+
+  @override
+  String get quickActionsTitle => 'Quick Actions';
+
+  @override
+  String get quickActionsAdd => 'Add action';
+
+  @override
+  String get quickActionsEdit => 'Edit action';
+
+  @override
+  String get quickActionsEditDisables =>
+      'Saving changes disables this action until you enable it again.';
+
+  @override
+  String get quickActionsTest => 'Test run';
+
+  @override
+  String get quickActionsRemove => 'Remove action';
+
+  @override
+  String get quickActionsRemovePrompt =>
+      'Remove this action from the computer and all connected phones?';
+
+  @override
+  String get quickActionsEnabled => 'Enabled';
+
+  @override
+  String get quickActionsDisabled => 'Disabled';
+
+  @override
+  String get quickActionsName => 'Action name';
+
+  @override
+  String get quickActionsChooseExecutable => 'Choose executable';
+
+  @override
+  String get quickActionsArguments => 'Arguments, one per line';
+
+  @override
+  String get quickActionsWorkingDirectory => 'Working directory (optional)';
+
+  @override
+  String get quickActionsMinimumTier => 'Minimum permission';
+
+  @override
+  String get quickActionsTierExtended => 'Extended';
+
+  @override
+  String get quickActionsTierAdmin => 'Administrator';
+
+  @override
+  String get quickActionsValidation =>
+      'Enter a short name, choose an executable, and use an absolute working directory path if provided.';
+
+  @override
+  String get quickActionsIntegrityWarning =>
+      'Saved actions could not be verified. No saved actions were loaded.';
+
+  @override
+  String get quickActionsLoading => 'Loading saved actions…';
+
+  @override
+  String get quickActionsUnavailable => 'Quick Actions are unavailable.';
+
+  @override
+  String get quickActionsSaveFailed => 'Could not save the change.';
+
+  @override
+  String get quickActionsPickerFailed => 'Could not open the file picker.';
+
+  @override
+  String get quickActionsStarted => 'Action started.';
+
+  @override
+  String get quickActionsStartFailed => 'Could not start the action.';
 }

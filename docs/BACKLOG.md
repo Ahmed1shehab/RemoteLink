@@ -74,7 +74,7 @@ silence and no error.
 | `DeviceRename` | `codec.dart:175` | none | RL-204 |
 | `PermissionRequest` | `codec.dart:177` | none | RL-205 |
 | `SystemStatus` | `codec.dart:171` | never *produced* | RL-206 |
-| `RunCommand` | `codec.dart:170` | refuses — no registry | RL-207 |
+| `RunCommand` | `codec.dart:170` | runs enabled registered IDs | RL-207 |
 | `ResumptionTicket` / `ResumeSession` | `codec.dart:128–129` | never produced | RL-102 |
 
 ### 1.3 Security gaps
@@ -113,7 +113,7 @@ Ranked in `SECURITY.md` §4 and reproduced here with task IDs:
 | No mobile settings screen (rename device, forget computer, tier request, sync toggles) | RL-700 |
 | ~~The Android manifest advertises a share target and nothing reads the intent~~ — built; shared text goes to the computer's clipboard, shared files become a transfer offer. iOS still needs a share extension | RL-421 |
 | No desktop diagnostics panel; `CommandDispatcher` already counts applied/denied/unsupported and nothing reads them | RL-701 |
-| No custom-command registry storage or editor UI | RL-207 |
+| Custom command placeholders | RL-207 |
 | No latency measurement harness | RL-107 |
 | No packaging, code signing, notarisation, installer, or update channel | RL-002 |
 | No localisation; every string is a hard-coded English literal | RL-702 |
@@ -1079,9 +1079,10 @@ interval. Zero polling with no device connected — verify with `powermetrics`.
 - `apps/desktop/lib/src/ui/command_editor.dart` (new)
 - `apps/desktop/lib/src/domain/desktop_service.dart` (`_onRunCommand`)
 
-**Why.** `_onRunCommand` currently logs a warning and refuses, which is the
-correct default — an unresolved command ID must never fall through to a shell.
-The registry it needs does not exist.
+**Status.** First slice complete. Desktop Settings manages the authenticated
+registry and the phone shows permitted Quick Actions. Parameter lists are
+refused. Remaining work is declaring and validating placeholders, then passing
+their values as separate argv entries (items 2–4).
 
 **Spec.**
 1. Persist registered commands as JSON under the application support directory,
@@ -1105,10 +1106,11 @@ The registry it needs does not exist.
 7. Mobile shows the registered commands as a quick-actions grid, populated from
    a list the desktop sends after `PermissionGrant`.
 
-**Acceptance.** A registered command runs from the phone. An unregistered ID is
-refused and logged. A placeholder value of `; rm -rf ~` is passed as a literal
-argument and executes nothing. A command requiring `extended` is refused for a
-`standard` device.
+**Acceptance.** An enabled registered command runs from the phone with saved
+argv. An unregistered ID is refused and logged. Any parameters are refused in
+the first slice. A command requiring `extended` is refused for a `standard`
+device. When placeholders ship, their validated values must remain literal
+arguments.
 
 **Risks.** This is the largest deliberate attack surface in the product. The
 allow-list design is what bounds it; do not add a "run arbitrary command" escape
