@@ -1134,5 +1134,14 @@
         "type": "int"
       }
     }
-  }
+  },
+  "tabActions": "Actions",
+  "actionsEmpty": "Add and enable Quick Actions in Settings on your computer.",
+  "actionsStarted": "Action started.",
+  "actionsRefusedUnknown": "This action is no longer available.",
+  "actionsRefusedDisabled": "This action is disabled on the computer.",
+  "actionsRefusedTier": "This action requires more permissions.",
+  "actionsRefusedParameters": "This action cannot accept parameters.",
+  "actionsFailedToStart": "The computer could not start the action.",
+  "actionsSendFailed": "Could not send the action."
 }

@@ -51,6 +51,8 @@ class AppIcons {
       AppIconData('assets/icons/text-square-2-svgrepo-com.svg');
   static const zoomOut = AppIconData('assets/icons/zomm-out.svg');
 
+  static const quickActions = AppIconData.material(Icons.bolt_rounded);
+
   static const materialSettings = AppIconData.material(Icons.settings_outlined);
   static const materialAnalytics =
       AppIconData.material(Icons.monitor_heart_outlined);

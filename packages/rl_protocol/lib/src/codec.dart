@@ -181,6 +181,8 @@ final class MessageCodec {
         MessageType.launchApplication => LaunchApplication.readFrom(reader),
         MessageType.openUrl => OpenUrl.readFrom(reader),
         MessageType.runCommand => RunCommand.readFrom(reader),
+        MessageType.commandCatalog => CommandCatalog.readFrom(reader),
+        MessageType.commandResult => CommandResult.readFrom(reader),
         MessageType.systemStatus => SystemStatus.readFrom(reader),
 
         // Screen.

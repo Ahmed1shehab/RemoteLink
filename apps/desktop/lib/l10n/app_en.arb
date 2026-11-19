@@ -830,5 +830,29 @@
         "type": "String"
       }
     }
-  }
+  },
+  "quickActionsTitle": "Quick Actions",
+  "quickActionsAdd": "Add action",
+  "quickActionsEdit": "Edit action",
+  "quickActionsEditDisables": "Saving changes disables this action until you enable it again.",
+  "quickActionsTest": "Test run",
+  "quickActionsRemove": "Remove action",
+  "quickActionsRemovePrompt": "Remove this action from the computer and all connected phones?",
+  "quickActionsEnabled": "Enabled",
+  "quickActionsDisabled": "Disabled",
+  "quickActionsName": "Action name",
+  "quickActionsChooseExecutable": "Choose executable",
+  "quickActionsArguments": "Arguments, one per line",
+  "quickActionsWorkingDirectory": "Working directory (optional)",
+  "quickActionsMinimumTier": "Minimum permission",
+  "quickActionsTierExtended": "Extended",
+  "quickActionsTierAdmin": "Administrator",
+  "quickActionsValidation": "Enter a short name, choose an executable, and use an absolute working directory path if provided.",
+  "quickActionsIntegrityWarning": "Saved actions could not be verified. No saved actions were loaded.",
+  "quickActionsLoading": "Loading saved actions…",
+  "quickActionsUnavailable": "Quick Actions are unavailable.",
+  "quickActionsSaveFailed": "Could not save the change.",
+  "quickActionsPickerFailed": "Could not open the file picker.",
+  "quickActionsStarted": "Action started.",
+  "quickActionsStartFailed": "Could not start the action."
 }

@@ -284,6 +284,12 @@ final class Session {
   /// Copied only for attaching the next server-issued ticket.
   Uint8List get resumptionSecret => Uint8List.fromList(_keys.resumptionSecret);
 
+  CommandCatalog? _commandCatalog;
+
+  /// The last catalog for this connection, including one sent before the
+  /// phone finished its side of pairing or mounted the Actions tab.
+  CommandCatalog? get commandCatalog => isEstablished ? _commandCatalog : null;
+
   /// Retained because a ticket may arrive before the reconnect supervisor
   /// attaches its application-message listener.
   ResumptionTicket? latestResumptionTicket;
@@ -531,7 +537,12 @@ final class Session {
         _log.warn('dropping file chunk with a bad CRC-32C');
         return;
       }
-      _log.error('payload decode failed', error: e);
+      // A malformed RunCommand can reach this path before the desktop gets
+      // an ID to sanitise. Its decoder error may include peer-supplied bytes.
+      _log.error(
+        'payload decode failed',
+        error: frame.type == MessageType.runCommand ? e.code : e,
+      );
       await _teardown(CloseReason.protocolError);
       return;
     }
@@ -589,6 +600,13 @@ final class Session {
         return;
       default:
         break;
+    }
+
+    if (message is CommandCatalog || message is CommandResult) {
+      if (isServer || !capabilities.has(Capabilities.commandRegistry)) return;
+      // Retain just the snapshot while the phone's local admission gate is
+      // closed. It stays hidden until the user completes pairing.
+      if (message is CommandCatalog) _commandCatalog = message;
     }
 
     if (_state == SessionState.pairing &&

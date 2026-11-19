@@ -11,6 +11,7 @@ import '../../app/l10n.dart';
 import '../../app/modern_ui.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
+import '../actions/actions_screen.dart';
 import '../clipboard/clipboard_controller.dart';
 import '../clipboard/clipboard_history_controller.dart';
 import '../host/host_providers.dart';
@@ -35,7 +36,7 @@ class ControlScreen extends ConsumerStatefulWidget {
   ConsumerState<ControlScreen> createState() => _ControlScreenState();
 }
 
-/// The five things this screen can be.
+/// The destinations this screen can show.
 ///
 /// An enum rather than an index, because which of them are on screen now
 /// depends on the peer. A phone that connected to another phone can exchange
@@ -47,7 +48,8 @@ enum ControlTab {
   keyboard(Capabilities.keyboard),
   media(Capabilities.mediaControl),
   clipboard(Capabilities.clipboardText),
-  send(Capabilities.fileTransfer);
+  send(Capabilities.fileTransfer),
+  actions(Capabilities.commandRegistry);
 
   const ControlTab(this.capability);
 
@@ -64,10 +66,8 @@ enum ControlTab {
 
 /// Which tabs a session with these capabilities can actually offer.
 ///
-/// Unknown capabilities mean everything, not nothing. `session` is null for the
-/// moment between the screen appearing and the handshake being read, and hiding
-/// four tabs during it would be a visible flicker on every connection, to
-/// pre-empt a case that only arises on a phone-to-phone link.
+/// Keep the familiar controls during the handshake to avoid flicker. Actions
+/// requires positive confirmation that the peer supports a catalog.
 ///
 /// A pure function, and public for the same reason [mobileCapabilities] is:
 /// the rule is worth a test, and a test of it should not need a provider
@@ -75,7 +75,7 @@ enum ControlTab {
 @visibleForTesting
 List<ControlTab> visibleTabs(Capabilities? capabilities) => <ControlTab>[
       for (final tab in ControlTab.values)
-        if (capabilities == null || capabilities.has(tab.capability)) tab,
+        if (capabilities?.has(tab.capability) ?? tab != ControlTab.actions) tab,
     ];
 
 class _ControlScreenState extends ConsumerState<ControlScreen> {
@@ -124,11 +124,12 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
             (tier?.canViewScreen ?? false);
 
     final tabs = visibleTabs(capabilities);
+    if (rawState != ClientState.connected) tabs.remove(ControlTab.actions);
     // A peer that offers none of them is not a state the app can be in — the
     // handshake requires a shared protocol version and every build since the
     // first has had a clipboard — but falling back to the full list beats a
     // screen with no body at all if it ever happens.
-    final visible = tabs.isEmpty ? ControlTab.values : tabs;
+    final visible = tabs.isEmpty ? visibleTabs(null) : tabs;
     // The chosen tab, unless the peer cannot offer it. Connecting to a phone
     // while the touchpad was the last thing open must not leave the selection
     // pointing at a tab that is not there.
@@ -238,6 +239,7 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                       ControlTab.media => const MediaScreen(),
                       ControlTab.clipboard => const ClipboardView(),
                       ControlTab.send => const TransferScreen(),
+                      ControlTab.actions => const ActionsScreen(),
                     },
                 ],
               ),
@@ -287,6 +289,11 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
             icon: AppIcons.send,
             selectedIcon: AppIcons.send,
             label: context.l10n.tabSend,
+          ),
+        ControlTab.actions => LiquidNavDestination(
+            icon: AppIcons.quickActions,
+            selectedIcon: AppIcons.quickActions,
+            label: context.l10n.tabActions,
           ),
       };
 }

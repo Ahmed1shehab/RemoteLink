@@ -358,6 +358,7 @@ final connectedDeviceIdsProvider = Provider<Set<DeviceId>>((ref) {
 /// connections do not briefly render desktop-only tabs (like the Touchpad)
 /// during loading.
 final activeCapabilitiesProvider = Provider<Capabilities?>((ref) {
+  ref.watch(clientStateProvider);
   // 1. If an established outbound session already has capabilities, use them.
   final client = ref.watch(clientProvider).valueOrNull;
   final sessionCap = client?.session?.capabilities;
@@ -384,7 +385,9 @@ final activeCapabilitiesProvider = Provider<Capabilities?>((ref) {
       for (final device in discovered) {
         if ((target.deviceId != null && device.id == target.deviceId) ||
             (device.address == target.host && device.port == target.port)) {
-          return device.beacon.capabilities;
+          // Only the authenticated handshake can enable a command catalog.
+          return Capabilities(
+              device.beacon.capabilities.bits & ~Capabilities.commandRegistry);
         }
       }
     }

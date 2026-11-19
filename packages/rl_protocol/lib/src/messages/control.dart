@@ -43,6 +43,7 @@ extension type const Capabilities(int bits) {
   /// Advertised by the phone if its backend supports it, and by the desktop
   /// to indicate it has the UI to inject inputs.
   static const int phoneControl = 1 << 19;
+  static const int commandRegistry = 1 << 20;
 
   /// Pinch, rotate, and multi-finger swipe.
   ///

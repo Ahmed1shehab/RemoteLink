@@ -2071,6 +2071,150 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'this platform'**
   String get thisPlatform;
+
+  /// No description provided for @quickActionsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick Actions'**
+  String get quickActionsTitle;
+
+  /// No description provided for @quickActionsAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add action'**
+  String get quickActionsAdd;
+
+  /// No description provided for @quickActionsEdit.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit action'**
+  String get quickActionsEdit;
+
+  /// No description provided for @quickActionsEditDisables.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving changes disables this action until you enable it again.'**
+  String get quickActionsEditDisables;
+
+  /// No description provided for @quickActionsTest.
+  ///
+  /// In en, this message translates to:
+  /// **'Test run'**
+  String get quickActionsTest;
+
+  /// No description provided for @quickActionsRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove action'**
+  String get quickActionsRemove;
+
+  /// No description provided for @quickActionsRemovePrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove this action from the computer and all connected phones?'**
+  String get quickActionsRemovePrompt;
+
+  /// No description provided for @quickActionsEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Enabled'**
+  String get quickActionsEnabled;
+
+  /// No description provided for @quickActionsDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Disabled'**
+  String get quickActionsDisabled;
+
+  /// No description provided for @quickActionsName.
+  ///
+  /// In en, this message translates to:
+  /// **'Action name'**
+  String get quickActionsName;
+
+  /// No description provided for @quickActionsChooseExecutable.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose executable'**
+  String get quickActionsChooseExecutable;
+
+  /// No description provided for @quickActionsArguments.
+  ///
+  /// In en, this message translates to:
+  /// **'Arguments, one per line'**
+  String get quickActionsArguments;
+
+  /// No description provided for @quickActionsWorkingDirectory.
+  ///
+  /// In en, this message translates to:
+  /// **'Working directory (optional)'**
+  String get quickActionsWorkingDirectory;
+
+  /// No description provided for @quickActionsMinimumTier.
+  ///
+  /// In en, this message translates to:
+  /// **'Minimum permission'**
+  String get quickActionsMinimumTier;
+
+  /// No description provided for @quickActionsTierExtended.
+  ///
+  /// In en, this message translates to:
+  /// **'Extended'**
+  String get quickActionsTierExtended;
+
+  /// No description provided for @quickActionsTierAdmin.
+  ///
+  /// In en, this message translates to:
+  /// **'Administrator'**
+  String get quickActionsTierAdmin;
+
+  /// No description provided for @quickActionsValidation.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a short name, choose an executable, and use an absolute working directory path if provided.'**
+  String get quickActionsValidation;
+
+  /// No description provided for @quickActionsIntegrityWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved actions could not be verified. No saved actions were loaded.'**
+  String get quickActionsIntegrityWarning;
+
+  /// No description provided for @quickActionsLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading saved actions…'**
+  String get quickActionsLoading;
+
+  /// No description provided for @quickActionsUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick Actions are unavailable.'**
+  String get quickActionsUnavailable;
+
+  /// No description provided for @quickActionsSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not save the change.'**
+  String get quickActionsSaveFailed;
+
+  /// No description provided for @quickActionsPickerFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open the file picker.'**
+  String get quickActionsPickerFailed;
+
+  /// No description provided for @quickActionsStarted.
+  ///
+  /// In en, this message translates to:
+  /// **'Action started.'**
+  String get quickActionsStarted;
+
+  /// No description provided for @quickActionsStartFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not start the action.'**
+  String get quickActionsStartFailed;
 }
 
 class _AppLocalizationsDelegate

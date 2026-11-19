@@ -186,7 +186,7 @@ final class RunCommand extends Message {
   static RunCommand readFrom(ByteReader reader) {
     final commandId = reader.readString(maxLength: 256);
     final count = reader.readVarUint();
-    if (count > 32) {
+    if (count < 0 || count > 32) {
       throw ProtocolError(
         'parameter_limit',
         'command declared $count parameters, cap is 32',
@@ -199,6 +199,93 @@ final class RunCommand extends Message {
       ],
     );
   }
+}
+
+/// An action's public label and opaque ID.
+@immutable
+final class CommandCatalogEntry {
+  const CommandCatalogEntry({required this.id, required this.name});
+
+  final String id;
+  final String name;
+}
+
+/// Desktop → phone. Replaces the receiving device's action list.
+@immutable
+final class CommandCatalog extends Message {
+  const CommandCatalog(this.entries);
+
+  static const maxEntries = 1024;
+  static const maxNameBytes = 256;
+
+  final List<CommandCatalogEntry> entries;
+
+  @override
+  MessageType get type => MessageType.commandCatalog;
+
+  @override
+  void writeTo(ByteWriter writer) {
+    writer.writeVarUint(entries.length);
+    for (final entry in entries) {
+      writer
+        ..writeString(entry.id)
+        ..writeString(entry.name);
+    }
+  }
+
+  static CommandCatalog readFrom(ByteReader reader) {
+    final count = reader.readVarUint();
+    if (count < 0 || count > maxEntries) {
+      throw const ProtocolError('command_catalog_limit', 'too many commands');
+    }
+    return CommandCatalog(List<CommandCatalogEntry>.unmodifiable([
+      for (var i = 0; i < count; i++)
+        CommandCatalogEntry(
+          id: reader.readString(maxLength: 256),
+          name: reader.readString(maxLength: maxNameBytes),
+        ),
+    ]));
+  }
+}
+
+enum CommandOutcome {
+  started(0),
+  refusedUnknown(1),
+  refusedDisabled(2),
+  refusedTier(3),
+  refusedParameters(4),
+  failedToStart(5);
+
+  const CommandOutcome(this.wireValue);
+
+  final int wireValue;
+
+  static CommandOutcome fromWire(int value) => values.firstWhere(
+        (outcome) => outcome.wireValue == value,
+        orElse: () => failedToStart,
+      );
+}
+
+/// Desktop → phone. Reports the start attempt without exposing process output.
+@immutable
+final class CommandResult extends Message {
+  const CommandResult({required this.commandId, required this.outcome});
+
+  final String commandId;
+  final CommandOutcome outcome;
+
+  @override
+  MessageType get type => MessageType.commandResult;
+
+  @override
+  void writeTo(ByteWriter writer) => writer
+    ..writeString(commandId)
+    ..writeUint8(outcome.wireValue);
+
+  static CommandResult readFrom(ByteReader reader) => CommandResult(
+        commandId: reader.readString(maxLength: 256),
+        outcome: CommandOutcome.fromWire(reader.readUint8()),
+      );
 }
 
 /// Desktop → phone. Host telemetry, pushed on change.
@@ -470,6 +557,9 @@ enum PermissionTier {
             MessageType.launchApplication => canLaunchApplications,
             MessageType.openUrl => canLaunchApplications,
             MessageType.runCommand => canRunCommands,
+            // A downgrade must still clear the old catalog and acknowledge a
+            // denied run. The desktop independently filters the catalog.
+            MessageType.commandCatalog || MessageType.commandResult => true,
             _ => true,
           },
         0x0C => switch (type) {

@@ -498,5 +498,14 @@
   "keyEnter": "إدخال",
   "transfersTitle": "عمليات النقل",
   "shareTextDescription": "النص الذي شاركته",
-  "shareFilesDescription": "{count, plural, zero{لا ملفات} one{ملف واحد} two{ملفان} few{{count} ملفات} many{{count} ملفًا} other{{count} ملف}}"
+  "shareFilesDescription": "{count, plural, zero{لا ملفات} one{ملف واحد} two{ملفان} few{{count} ملفات} many{{count} ملفًا} other{{count} ملف}}",
+  "tabActions": "الإجراءات",
+  "actionsEmpty": "أضف الإجراءات السريعة وفعّلها من الإعدادات على الكمبيوتر.",
+  "actionsStarted": "بدأ تشغيل الإجراء.",
+  "actionsRefusedUnknown": "هذا الإجراء لم يعد متاحًا.",
+  "actionsRefusedDisabled": "هذا الإجراء معطّل على الكمبيوتر.",
+  "actionsRefusedTier": "يتطلّب هذا الإجراء أذونات إضافية.",
+  "actionsRefusedParameters": "لا يقبل هذا الإجراء أي وسيطات.",
+  "actionsFailedToStart": "تعذّر على الكمبيوتر تشغيل الإجراء.",
+  "actionsSendFailed": "تعذّر إرسال الإجراء."
 }

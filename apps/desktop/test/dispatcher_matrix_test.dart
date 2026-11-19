@@ -79,6 +79,8 @@ void main() {
     MessageType.openUrl: PermissionTier.extended,
     MessageType.runCommand: PermissionTier.extended,
     MessageType.systemStatus: PermissionTier.readOnly,
+    MessageType.commandCatalog: PermissionTier.readOnly,
+    MessageType.commandResult: PermissionTier.readOnly,
     MessageType.deviceInfo: PermissionTier.readOnly,
     MessageType.deviceRename: PermissionTier.readOnly,
     MessageType.permissionGrant: PermissionTier.readOnly,

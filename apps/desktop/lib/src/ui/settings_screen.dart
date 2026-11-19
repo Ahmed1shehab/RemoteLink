@@ -11,6 +11,7 @@ import '../app/brand.dart';
 import '../app/l10n.dart';
 import '../app/providers.dart';
 import '../domain/file_launcher.dart';
+import 'command_editor.dart';
 import 'diagnostics_screen.dart';
 
 /// Everything about the app itself, as opposed to the devices it talks to.
@@ -41,6 +42,8 @@ class SettingsScreen extends ConsumerWidget {
               _WindowSection(),
               SizedBox(height: 24),
               _ThisComputerSection(),
+              SizedBox(height: 24),
+              _QuickActionsSection(),
               SizedBox(height: 24),
               _SavingSection(),
               SizedBox(height: 24),
@@ -183,6 +186,27 @@ class _WindowSection extends StatelessWidget {
 /// the wrong answer for plenty of people — anyone whose Downloads folder is a
 /// scratch space they empty weekly does not want the photos off their phone
 /// landing in it.
+class _QuickActionsSection extends ConsumerWidget {
+  const _QuickActionsSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final registry = ref.watch(commandRegistryProvider);
+    return _Section(
+      title: context.l10n.quickActionsTitle,
+      children: [
+        registry.when(
+          data: (value) => CommandEditor(registry: value),
+          loading: () =>
+              ListTile(title: Text(context.l10n.quickActionsLoading)),
+          error: (_, __) =>
+              ListTile(title: Text(context.l10n.quickActionsUnavailable)),
+        ),
+      ],
+    );
+  }
+}
+
 class _SavingSection extends ConsumerWidget {
   const _SavingSection();
 
