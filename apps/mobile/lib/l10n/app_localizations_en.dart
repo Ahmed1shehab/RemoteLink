@@ -1872,6 +1872,115 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get remoteLinkPremium => 'Remote Link Premium';
+
+  @override
+  String get premiumSubtitle => 'Ad-free experience and premium features';
+
+  @override
+  String get premiumActive => 'Premium Active';
+
+  @override
+  String get upgradeToPremium => 'Upgrade to Premium';
+
+  @override
+  String get whatYouGet => 'What you get with Premium';
+
+  @override
+  String get featureNoAds =>
+      'Ad-free: Removes all banners and interstitials across the app';
+
+  @override
+  String get featureWatchTrackpad =>
+      'Apple Watch trackpad: Control your computer directly from your wrist';
+
+  @override
+  String get featureBackgroundClipboard =>
+      'Background clipboard: Continuous clipboard sync while using other apps';
+
+  @override
+  String get featureUnlimitedClipboard =>
+      'Unlimited clipboard history: Keep and search your full copy history';
+
+  @override
+  String get planMonthlyTitle => 'Monthly';
+
+  @override
+  String get planMonthlySubtitle => 'Auto-renewing subscription';
+
+  @override
+  String get planLifetimeTitle => 'Lifetime';
+
+  @override
+  String get planLifetimeSubtitle =>
+      'One-time purchase · Pay once, keep forever';
+
+  @override
+  String get bestValueBadge => 'Best Value';
+
+  @override
+  String get monthlyFallbackPrice => '\$0.99 / month';
+
+  @override
+  String get lifetimeFallbackPrice => '\$4.99 one-time';
+
+  @override
+  String get autoRenewDisclosure =>
+      'Monthly plan is an auto-renewing subscription. Payment will be charged to your store account and renews automatically unless canceled at least 24 hours before the end of the current billing cycle. Manage or cancel subscriptions anytime in your store account settings.';
+
+  @override
+  String get restorePurchases => 'Restore Purchases';
+
+  @override
+  String get purchasesRestored => 'Purchases restored successfully.';
+
+  @override
+  String get noPurchasesToRestore => 'No active purchases found to restore.';
+
+  @override
+  String get purchasesUnavailable =>
+      'Purchases are currently unavailable. Please check your network or try again later.';
+
+  @override
+  String purchaseFailed(String error) {
+    return 'Purchase could not be completed: $error';
+  }
+
+  @override
+  String get purchaseCanceled => 'Purchase was canceled.';
+
+  @override
+  String get premiumActiveHeader => 'You\'re a Premium Member';
+
+  @override
+  String get premiumActiveMessage =>
+      'All premium features and ad-free access are unlocked. Thank you for supporting Remote Link!';
+
+  @override
+  String get lockedFeatureTooltip => 'Requires Remote Link Premium';
+
+  @override
+  String get unlockUnlimitedHistory =>
+      'Unlock unlimited clipboard history with Premium';
+
+  @override
+  String get unlockBackgroundClipboard =>
+      'Background clipboard requires Remote Link Premium';
+
+  @override
+  String get unlockWatchTrackpad =>
+      'Apple Watch trackpad requires Remote Link Premium';
+
+  @override
+  String get freeHistoryLimitNote => 'Free users keep the 5 most recent items.';
+
+  @override
+  String get continuePurchase => 'Continue';
+
+  @override
+  String get premiumBadge => 'PREMIUM';
+
+  @override
   String get tabActions => 'Actions';
 
   @override

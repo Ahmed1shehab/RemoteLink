@@ -97,6 +97,13 @@ class MobileTransferController extends StateNotifier<TransferState> {
   IncomingTransferStore? _store;
   DeviceId? _clientPeerId;
 
+  final StreamController<TransferRecord> _transferCompletedController =
+      StreamController<TransferRecord>.broadcast();
+
+  /// Hook to observe when a file transfer successfully reaches completed state.
+  Stream<TransferRecord> get onTransferCompleted =>
+      _transferCompletedController.stream;
+
   void _init() {
     unawaited(_listen());
     unawaited(_initStore());
@@ -620,14 +627,20 @@ class MobileTransferController extends StateNotifier<TransferState> {
       state = state.copyWith(
           transfers: _updateTransfer(
         complete.transferId,
-        (record) => record.copyWith(
-          files: files,
-          transferredBytes: files.fold<int>(
-              0, (total, file) => total + file.transferredBytes),
-          status:
-              allDone ? TransferStatus.completed : TransferStatus.inProgress,
-          completedAt: allDone ? DateTime.now() : null,
-        ),
+        (record) {
+          final updated = record.copyWith(
+            files: files,
+            transferredBytes: files.fold<int>(
+                0, (total, file) => total + file.transferredBytes),
+            status:
+                allDone ? TransferStatus.completed : TransferStatus.inProgress,
+            completedAt: allDone ? DateTime.now() : null,
+          );
+          if (allDone) {
+            _transferCompletedController.add(updated);
+          }
+          return updated;
+        },
       ));
       return;
     }
@@ -704,13 +717,20 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
     final updated = _updateTransfer(
       complete.transferId,
-      (t) => t.copyWith(
-        files: updatedFiles,
-        transferredBytes: totalTransferred,
-        status:
-            allComplete ? TransferStatus.completed : TransferStatus.inProgress,
-        completedAt: allComplete ? DateTime.now() : null,
-      ),
+      (t) {
+        final rec = t.copyWith(
+          files: updatedFiles,
+          transferredBytes: totalTransferred,
+          status: allComplete
+              ? TransferStatus.completed
+              : TransferStatus.inProgress,
+          completedAt: allComplete ? DateTime.now() : null,
+        );
+        if (allComplete) {
+          _transferCompletedController.add(rec);
+        }
+        return rec;
+      },
     );
 
     state = state.copyWith(transfers: updated);
@@ -1263,6 +1283,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
   @override
   void dispose() {
+    unawaited(_transferCompletedController.close());
     unawaited(_inboundSubscription?.cancel());
     unawaited(_hostLinksSubscription?.cancel());
     _messageSubscription?.cancel();

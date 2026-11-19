@@ -8,6 +8,7 @@ import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/l10n.dart';
 import '../../app/providers.dart';
+import '../premium/premium_providers.dart';
 
 /// Keeps this phone's link alive while the app is off screen.
 ///
@@ -76,7 +77,7 @@ abstract interface class LinkService {
 
 /// The real one, backed by the service in the Android runner.
 final class PlatformLinkService implements LinkService {
-  PlatformLinkService() {
+  PlatformLinkService({Ref? ref}) : _ref = ref {
     _channel.setMethodCallHandler((call) async {
       switch (call.method) {
         case 'disconnectRequested':
@@ -89,6 +90,8 @@ final class PlatformLinkService implements LinkService {
       }
     });
   }
+
+  final Ref? _ref;
 
   static const MethodChannel _channel =
       MethodChannel('com.remotelink.app/link_service');
@@ -110,7 +113,14 @@ final class PlatformLinkService implements LinkService {
   Stream<void> get backgroundReadRefusals => _refusals.stream;
 
   @override
-  Future<bool> openAccessibilitySettings() => _ask('openAccessibilitySettings');
+  Future<bool> openAccessibilitySettings() {
+    if (_ref != null && !_ref.read(isPremiumProvider)) {
+      _log.debug(() =>
+          'Refusing to open accessibility settings: Remote Link Premium required');
+      return Future<bool>.value(false);
+    }
+    return _ask('openAccessibilitySettings');
+  }
 
   @override
   Future<bool> backgroundClipboardEnabled() =>
@@ -216,7 +226,7 @@ final class InertLinkService implements LinkService {
 /// The service for this platform.
 final linkServiceProvider = Provider<LinkService>((ref) {
   if (!Platform.isAndroid) return const InertLinkService();
-  return PlatformLinkService();
+  return PlatformLinkService(ref: ref);
 });
 
 /// Whether the user wants the link held open in the background.

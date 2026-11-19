@@ -19,6 +19,8 @@ import '../devices/link_service.dart';
 import '../devices/remember_prompt.dart';
 import '../host/host_providers.dart';
 import '../host/phone_host_service.dart';
+import '../premium/paywall_screen.dart';
+import '../premium/premium_providers.dart';
 import '../watch/watch_bridge.dart';
 
 /// Settings screen for configuring device identity, managing paired computers,
@@ -37,6 +39,8 @@ class SettingsScreen extends ConsumerWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         children: const <Widget>[
           _ThisPhoneSection(),
+          SizedBox(height: 12),
+          _PremiumSection(),
           SizedBox(height: 12),
           _AppearanceSection(),
           SizedBox(height: 12),
@@ -57,6 +61,87 @@ class SettingsScreen extends ConsumerWidget {
           _AboutSection(),
           SizedBox(height: 16),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 0. PREMIUM
+// ---------------------------------------------------------------------------
+
+class _PremiumSection extends ConsumerWidget {
+  const _PremiumSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isPremium = ref.watch(isPremiumProvider);
+
+    return Card(
+      child: ListTile(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: colorScheme.primary.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(
+            isPremium ? Icons.verified_rounded : Icons.star_rounded,
+            color: colorScheme.primary,
+            size: 22,
+          ),
+        ),
+        title: Row(
+          children: <Widget>[
+            Flexible(
+              child: Text(
+                context.l10n.remoteLinkPremium,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (isPremium) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: colorScheme.primary,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  context.l10n.premiumBadge,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: colorScheme.onPrimary,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        subtitle: Text(
+          isPremium ? context.l10n.premiumActive : context.l10n.premiumSubtitle,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+        trailing: const Icon(
+          Icons.arrow_forward_ios_rounded,
+          size: 16,
+        ),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const PaywallScreen(),
+          ),
+        ),
       ),
     );
   }
@@ -1277,6 +1362,7 @@ class _BackgroundClipboardTileState
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isPremium = ref.watch(isPremiumProvider);
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
@@ -1286,15 +1372,26 @@ class _BackgroundClipboardTileState
       ),
       title: Text(context.l10n.copyInAnyApp),
       subtitle: Text(
-        _enabled
-            ? context.l10n.backgroundClipboardOn
-            : context.l10n.backgroundClipboardOff,
+        isPremium
+            ? (_enabled
+                ? context.l10n.backgroundClipboardOn
+                : context.l10n.backgroundClipboardOff)
+            : context.l10n.unlockBackgroundClipboard,
       ),
-      trailing: const AppIcon(AppIcons.settings),
-      onTap: () => showDialog<void>(
-        context: context,
-        builder: (context) => _BackgroundClipboardDialog(enabled: _enabled),
-      ),
+      trailing: isPremium
+          ? const AppIcon(AppIcons.settings)
+          : const Icon(Icons.lock_outline_rounded, size: 20),
+      onTap: isPremium
+          ? () => showDialog<void>(
+                context: context,
+                builder: (context) =>
+                    _BackgroundClipboardDialog(enabled: _enabled),
+              )
+          : () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const PaywallScreen(),
+                ),
+              ),
     );
   }
 }
@@ -1452,6 +1549,7 @@ class _AppleWatchSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isPremium = ref.watch(isPremiumProvider);
     final availability = ref.watch(watchAvailabilityProvider).valueOrNull ??
         const WatchAvailability();
 
@@ -1494,14 +1592,31 @@ class _AppleWatchSection extends ConsumerWidget {
             const SizedBox(height: 10),
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: AppIcon(icon, color: colorScheme.primary),
-              title: Text(headline),
-              subtitle: Text(detail),
-              trailing: IconButton(
-                tooltip: context.l10n.checkAgain,
-                icon: const AppIcon(AppIcons.settings),
-                onPressed: () => ref.invalidate(watchAvailabilityProvider),
+              leading: AppIcon(
+                isPremium ? icon : AppIcons.settings,
+                color: isPremium
+                    ? colorScheme.primary
+                    : colorScheme.onSurfaceVariant,
               ),
+              title: Text(headline),
+              subtitle: Text(
+                isPremium ? detail : context.l10n.unlockWatchTrackpad,
+              ),
+              trailing: isPremium
+                  ? IconButton(
+                      tooltip: context.l10n.checkAgain,
+                      icon: const AppIcon(AppIcons.settings),
+                      onPressed: () =>
+                          ref.invalidate(watchAvailabilityProvider),
+                    )
+                  : const Icon(Icons.lock_outline_rounded, size: 20),
+              onTap: isPremium
+                  ? null
+                  : () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const PaywallScreen(),
+                        ),
+                      ),
             ),
           ],
         ),

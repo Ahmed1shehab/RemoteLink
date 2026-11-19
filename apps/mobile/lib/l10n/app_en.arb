@@ -1135,6 +1135,45 @@
       }
     }
   },
+  "remoteLinkPremium": "Remote Link Premium",
+  "premiumSubtitle": "Ad-free experience and premium features",
+  "premiumActive": "Premium Active",
+  "upgradeToPremium": "Upgrade to Premium",
+  "whatYouGet": "What you get with Premium",
+  "featureNoAds": "Ad-free: Removes all banners and interstitials across the app",
+  "featureWatchTrackpad": "Apple Watch trackpad: Control your computer directly from your wrist",
+  "featureBackgroundClipboard": "Background clipboard: Continuous clipboard sync while using other apps",
+  "featureUnlimitedClipboard": "Unlimited clipboard history: Keep and search your full copy history",
+  "planMonthlyTitle": "Monthly",
+  "planMonthlySubtitle": "Auto-renewing subscription",
+  "planLifetimeTitle": "Lifetime",
+  "planLifetimeSubtitle": "One-time purchase · Pay once, keep forever",
+  "bestValueBadge": "Best Value",
+  "monthlyFallbackPrice": "$0.99 / month",
+  "lifetimeFallbackPrice": "$4.99 one-time",
+  "autoRenewDisclosure": "Monthly plan is an auto-renewing subscription. Payment will be charged to your store account and renews automatically unless canceled at least 24 hours before the end of the current billing cycle. Manage or cancel subscriptions anytime in your store account settings.",
+  "restorePurchases": "Restore Purchases",
+  "purchasesRestored": "Purchases restored successfully.",
+  "noPurchasesToRestore": "No active purchases found to restore.",
+  "purchasesUnavailable": "Purchases are currently unavailable. Please check your network or try again later.",
+  "purchaseFailed": "Purchase could not be completed: {error}",
+  "@purchaseFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "purchaseCanceled": "Purchase was canceled.",
+  "premiumActiveHeader": "You're a Premium Member",
+  "premiumActiveMessage": "All premium features and ad-free access are unlocked. Thank you for supporting Remote Link!",
+  "lockedFeatureTooltip": "Requires Remote Link Premium",
+  "unlockUnlimitedHistory": "Unlock unlimited clipboard history with Premium",
+  "unlockBackgroundClipboard": "Background clipboard requires Remote Link Premium",
+  "unlockWatchTrackpad": "Apple Watch trackpad requires Remote Link Premium",
+  "freeHistoryLimitNote": "Free users keep the 5 most recent items.",
+  "continuePurchase": "Continue",
+  "premiumBadge": "PREMIUM",
   "tabActions": "Actions",
   "actionsEmpty": "Add and enable Quick Actions in Settings on your computer.",
   "actionsStarted": "Action started.",

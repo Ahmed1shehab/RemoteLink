@@ -11,6 +11,7 @@ import 'package:rl_transport/rl_transport.dart';
 
 import '../../app/providers.dart';
 import '../input/pointer_controller.dart';
+import '../premium/premium_providers.dart';
 
 /// Intents from the Apple Watch, one event per gesture the wrist made.
 ///
@@ -747,6 +748,7 @@ final watchBridgeProvider = Provider<void>((ref) {
   Timer? ticker;
 
   Future<void> deliver(Message message) async {
+    if (!ref.read(isPremiumProvider)) return;
     final client = ref.read(clientProvider).valueOrNull;
     if (client == null || !client.isConnected) return;
     try {
@@ -774,6 +776,10 @@ final watchBridgeProvider = Provider<void>((ref) {
 
   Future<void> dispatch(Object? event) async {
     if (event is! Map) return;
+    if (!ref.read(isPremiumProvider)) {
+      log.debug(() => 'Dropped watch command: Remote Link Premium required');
+      return;
+    }
     final raw = event.cast<Object?, Object?>();
 
     // The path the finger drew, when the watch sent one. Preferred over the

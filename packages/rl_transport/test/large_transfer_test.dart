@@ -14,14 +14,20 @@ void main() {
   // queued. An in-memory test that calls the receiver directly cannot see that.
   test('a 32 MiB send never runs more than the flow-control window ahead',
       () async {
+    // Built and hashed before the link opens. Both are synchronous and take
+    // seconds under a loaded test run, and both ends of the link share this
+    // event loop — doing them with the sessions up stalls the heartbeat and
+    // fails the test for a reason no real transfer has.
+    final data = Uint8List(32 * 1024 * 1024);
+    for (var i = 0; i < data.length; i++) {
+      data[i] = (i * 31 + 7) & 0xFF;
+    }
+    final hash = await Primitives.sha256(data);
     final link = await _Link.open();
     addTearDown(link.close);
-    final data = Uint8List.fromList(
-      List<int>.generate(32 * 1024 * 1024, (i) => (i * 31 + 7) & 0xFF),
-    );
 
     var maxAhead = 0;
-    final result = await link.transfer(data, (chunk) async {
+    final result = await link.transfer(data, hash, (chunk) async {
       final ahead = link.client.currentQuality.sentBytes -
           link.server.currentQuality.receivedBytes;
       if (ahead > maxAhead) maxAhead = ahead;
@@ -111,6 +117,7 @@ final class _Link {
 
   Future<CompletionDisposition?> transfer(
     Uint8List data,
+    Uint8List hash,
     Future<void> Function(FileChunk chunk) sendChunk,
   ) async {
     final offer = FileOffer(transferId: 'big', files: <OfferedFile>[
@@ -119,7 +126,7 @@ final class _Link {
         fileName: 'big.bin',
         size: data.length,
         fileType: 'application/octet-stream',
-        sha256: await Primitives.sha256(data),
+        sha256: hash,
       ),
     ]);
     final store = _CountingStore();
@@ -165,8 +172,23 @@ final class _MemoryFile implements OutgoingFile {
   @override
   Future<Uint8List> read(int offset, int length) async =>
       Uint8List.sublistView(bytes, offset, offset + length);
+  // In pieces, as a file on disk is read. One 32 MiB block would hash
+  // synchronously and hold the event loop — which both ends of this test share
+  // — past the heartbeat deadline, failing the test for a reason no real
+  // transfer has.
   @override
-  Stream<List<int>> readAll() => Stream<List<int>>.value(bytes);
+  Stream<List<int>> readAll() => _pieces(bytes);
+}
+
+Stream<List<int>> _pieces(Uint8List bytes) async* {
+  const piece = 256 * 1024;
+  for (var start = 0; start < bytes.length; start += piece) {
+    yield Uint8List.sublistView(
+      bytes,
+      start,
+      start + piece < bytes.length ? start + piece : bytes.length,
+    );
+  }
 }
 
 final class _CountingStore implements IncomingTransferStore {
@@ -200,7 +222,7 @@ final class _MemoryIncoming implements IncomingFile {
   }
 
   @override
-  Stream<List<int>> read() => Stream<List<int>>.value(_bytes);
+  Stream<List<int>> read() => _pieces(_bytes);
 
   @override
   Future<void> commit() async {}

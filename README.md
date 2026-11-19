@@ -6,7 +6,9 @@ renaming them would orphan every paired device's trust store.</sub>
 
 Control a Windows or macOS computer from an Android or iOS phone over local
 Wi-Fi, and send files between two phones the same way. No cloud, no account, no
-internet, no typing in IP addresses.
+typing in IP addresses, and no internet required for the device link (ads and
+in-app subscription billing on the mobile client connect to AdMob and RevenueCat;
+the desktop app uses no internet).
 
 Install the desktop app once. After that the phone finds the computer, asks to
 come in, and reconnects on its own once you have let it — and where the network
@@ -47,6 +49,7 @@ such rather than stubbed.
 | Background link | Android: a foreground service keeps the connection alive while the app is off screen, so a transfer survives switching apps. No iOS equivalent exists |
 | Media control | macOS: transport via hardware media keys, volume, now playing |
 | Apple Watch | A trackpad on the wrist: drag to move, tap to click, Digital Crown to scroll. The watch relays through the iPhone rather than speaking the protocol itself — [ADR 0004](docs/adr/0004-apple-watch-relays-through-the-phone.md) says why, and what that costs |
+| Premium & Monetization | Mobile app only: AdMob banners and post-transfer interstitials for free users; Monthly ($0.99) and Lifetime ($4.99) plans via RevenueCat remove all ads and unlock Apple Watch trackpad relay, Android background clipboard, and unlimited clipboard history. Local link remains 100% private and unaccounted — [ADR 0006](docs/adr/0006-ads-and-subscriptions.md) says why |
 | Appearance | Dark by default, with light and system in Settings › Appearance |
 
 ### Built, but not in this release

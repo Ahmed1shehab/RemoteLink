@@ -3092,6 +3092,198 @@ abstract class AppLocalizations {
   /// **'{count, plural, =0{no files} =1{one file} other{{count} files}}'**
   String shareFilesDescription(int count);
 
+  /// No description provided for @remoteLinkPremium.
+  ///
+  /// In en, this message translates to:
+  /// **'Remote Link Premium'**
+  String get remoteLinkPremium;
+
+  /// No description provided for @premiumSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Ad-free experience and premium features'**
+  String get premiumSubtitle;
+
+  /// No description provided for @premiumActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Premium Active'**
+  String get premiumActive;
+
+  /// No description provided for @upgradeToPremium.
+  ///
+  /// In en, this message translates to:
+  /// **'Upgrade to Premium'**
+  String get upgradeToPremium;
+
+  /// No description provided for @whatYouGet.
+  ///
+  /// In en, this message translates to:
+  /// **'What you get with Premium'**
+  String get whatYouGet;
+
+  /// No description provided for @featureNoAds.
+  ///
+  /// In en, this message translates to:
+  /// **'Ad-free: Removes all banners and interstitials across the app'**
+  String get featureNoAds;
+
+  /// No description provided for @featureWatchTrackpad.
+  ///
+  /// In en, this message translates to:
+  /// **'Apple Watch trackpad: Control your computer directly from your wrist'**
+  String get featureWatchTrackpad;
+
+  /// No description provided for @featureBackgroundClipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Background clipboard: Continuous clipboard sync while using other apps'**
+  String get featureBackgroundClipboard;
+
+  /// No description provided for @featureUnlimitedClipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlimited clipboard history: Keep and search your full copy history'**
+  String get featureUnlimitedClipboard;
+
+  /// No description provided for @planMonthlyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Monthly'**
+  String get planMonthlyTitle;
+
+  /// No description provided for @planMonthlySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-renewing subscription'**
+  String get planMonthlySubtitle;
+
+  /// No description provided for @planLifetimeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Lifetime'**
+  String get planLifetimeTitle;
+
+  /// No description provided for @planLifetimeSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'One-time purchase · Pay once, keep forever'**
+  String get planLifetimeSubtitle;
+
+  /// No description provided for @bestValueBadge.
+  ///
+  /// In en, this message translates to:
+  /// **'Best Value'**
+  String get bestValueBadge;
+
+  /// No description provided for @monthlyFallbackPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'\$0.99 / month'**
+  String get monthlyFallbackPrice;
+
+  /// No description provided for @lifetimeFallbackPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'\$4.99 one-time'**
+  String get lifetimeFallbackPrice;
+
+  /// No description provided for @autoRenewDisclosure.
+  ///
+  /// In en, this message translates to:
+  /// **'Monthly plan is an auto-renewing subscription. Payment will be charged to your store account and renews automatically unless canceled at least 24 hours before the end of the current billing cycle. Manage or cancel subscriptions anytime in your store account settings.'**
+  String get autoRenewDisclosure;
+
+  /// No description provided for @restorePurchases.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore Purchases'**
+  String get restorePurchases;
+
+  /// No description provided for @purchasesRestored.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchases restored successfully.'**
+  String get purchasesRestored;
+
+  /// No description provided for @noPurchasesToRestore.
+  ///
+  /// In en, this message translates to:
+  /// **'No active purchases found to restore.'**
+  String get noPurchasesToRestore;
+
+  /// No description provided for @purchasesUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchases are currently unavailable. Please check your network or try again later.'**
+  String get purchasesUnavailable;
+
+  /// No description provided for @purchaseFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase could not be completed: {error}'**
+  String purchaseFailed(String error);
+
+  /// No description provided for @purchaseCanceled.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase was canceled.'**
+  String get purchaseCanceled;
+
+  /// No description provided for @premiumActiveHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'You\'re a Premium Member'**
+  String get premiumActiveHeader;
+
+  /// No description provided for @premiumActiveMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'All premium features and ad-free access are unlocked. Thank you for supporting Remote Link!'**
+  String get premiumActiveMessage;
+
+  /// No description provided for @lockedFeatureTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Requires Remote Link Premium'**
+  String get lockedFeatureTooltip;
+
+  /// No description provided for @unlockUnlimitedHistory.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlock unlimited clipboard history with Premium'**
+  String get unlockUnlimitedHistory;
+
+  /// No description provided for @unlockBackgroundClipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Background clipboard requires Remote Link Premium'**
+  String get unlockBackgroundClipboard;
+
+  /// No description provided for @unlockWatchTrackpad.
+  ///
+  /// In en, this message translates to:
+  /// **'Apple Watch trackpad requires Remote Link Premium'**
+  String get unlockWatchTrackpad;
+
+  /// No description provided for @freeHistoryLimitNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Free users keep the 5 most recent items.'**
+  String get freeHistoryLimitNote;
+
+  /// No description provided for @continuePurchase.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get continuePurchase;
+
+  /// No description provided for @premiumBadge.
+  ///
+  /// In en, this message translates to:
+  /// **'PREMIUM'**
+  String get premiumBadge;
+
   /// No description provided for @tabActions.
   ///
   /// In en, this message translates to:
