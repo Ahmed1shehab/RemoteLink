@@ -2018,4 +2018,32 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get premiumBadge => 'بريميوم';
+
+  @override
+  String get tabActions => 'الإجراءات';
+
+  @override
+  String get actionsEmpty =>
+      'أضف الإجراءات السريعة وفعّلها من الإعدادات على الكمبيوتر.';
+
+  @override
+  String get actionsStarted => 'بدأ تشغيل الإجراء.';
+
+  @override
+  String get actionsRefusedUnknown => 'هذا الإجراء لم يعد متاحًا.';
+
+  @override
+  String get actionsRefusedDisabled => 'هذا الإجراء معطّل على الكمبيوتر.';
+
+  @override
+  String get actionsRefusedTier => 'يتطلّب هذا الإجراء أذونات إضافية.';
+
+  @override
+  String get actionsRefusedParameters => 'لا يقبل هذا الإجراء أي وسيطات.';
+
+  @override
+  String get actionsFailedToStart => 'تعذّر على الكمبيوتر تشغيل الإجراء.';
+
+  @override
+  String get actionsSendFailed => 'تعذّر إرسال الإجراء.';
 }

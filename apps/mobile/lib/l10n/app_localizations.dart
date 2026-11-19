@@ -3283,6 +3283,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'PREMIUM'**
   String get premiumBadge;
+
+  /// No description provided for @tabActions.
+  ///
+  /// In en, this message translates to:
+  /// **'Actions'**
+  String get tabActions;
+
+  /// No description provided for @actionsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Add and enable Quick Actions in Settings on your computer.'**
+  String get actionsEmpty;
+
+  /// No description provided for @actionsStarted.
+  ///
+  /// In en, this message translates to:
+  /// **'Action started.'**
+  String get actionsStarted;
+
+  /// No description provided for @actionsRefusedUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'This action is no longer available.'**
+  String get actionsRefusedUnknown;
+
+  /// No description provided for @actionsRefusedDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'This action is disabled on the computer.'**
+  String get actionsRefusedDisabled;
+
+  /// No description provided for @actionsRefusedTier.
+  ///
+  /// In en, this message translates to:
+  /// **'This action requires more permissions.'**
+  String get actionsRefusedTier;
+
+  /// No description provided for @actionsRefusedParameters.
+  ///
+  /// In en, this message translates to:
+  /// **'This action cannot accept parameters.'**
+  String get actionsRefusedParameters;
+
+  /// No description provided for @actionsFailedToStart.
+  ///
+  /// In en, this message translates to:
+  /// **'The computer could not start the action.'**
+  String get actionsFailedToStart;
+
+  /// No description provided for @actionsSendFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not send the action.'**
+  String get actionsSendFailed;
 }
 
 class _AppLocalizationsDelegate

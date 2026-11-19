@@ -52,7 +52,8 @@ const Capabilities kMobileCapabilities = Capabilities(
       // screen stream and asks for a brightness change, it does not capture or
       // dim anything of its own.
       Capabilities.screenCapture |
-      Capabilities.brightness,
+      Capabilities.brightness |
+      Capabilities.commandRegistry,
 );
 
 const String _identityKey = 'remotelink.identity.private';

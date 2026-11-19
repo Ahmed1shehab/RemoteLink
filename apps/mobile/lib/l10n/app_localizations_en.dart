@@ -1979,4 +1979,34 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get premiumBadge => 'PREMIUM';
+
+  @override
+  String get tabActions => 'Actions';
+
+  @override
+  String get actionsEmpty =>
+      'Add and enable Quick Actions in Settings on your computer.';
+
+  @override
+  String get actionsStarted => 'Action started.';
+
+  @override
+  String get actionsRefusedUnknown => 'This action is no longer available.';
+
+  @override
+  String get actionsRefusedDisabled =>
+      'This action is disabled on the computer.';
+
+  @override
+  String get actionsRefusedTier => 'This action requires more permissions.';
+
+  @override
+  String get actionsRefusedParameters =>
+      'This action cannot accept parameters.';
+
+  @override
+  String get actionsFailedToStart => 'The computer could not start the action.';
+
+  @override
+  String get actionsSendFailed => 'Could not send the action.';
 }

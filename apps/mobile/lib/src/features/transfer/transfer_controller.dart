@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -90,6 +91,8 @@ class MobileTransferController extends StateNotifier<TransferState> {
   final Map<String, FileOffer> _outgoingOffers = <String, FileOffer>{};
   final Map<String, Completer<void>> _activeSendCompleters =
       <String, Completer<void>>{};
+  final Queue<PendingIncomingTransfer> _queuedIncoming =
+      Queue<PendingIncomingTransfer>();
 
   IncomingTransferStore? _store;
   DeviceId? _clientPeerId;
@@ -351,13 +354,28 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
     _speedTrackers[offer.transferId] = TransferSpeedTracker();
 
+    // The open sheet belongs to the first offer until it is answered.
+    // Replacing its request would leave one of the senders waiting forever.
+    final current = state.pendingIncoming;
+    if (current != null && current.transferId != offer.transferId) {
+      _queuedIncoming
+          .removeWhere((item) => item.transferId == offer.transferId);
+      _queuedIncoming.addLast(pending);
+    }
     state = state.copyWith(
       transfers: <TransferRecord>[
         transferRecord,
         ...state.transfers.where((t) => t.transferId != offer.transferId),
       ],
-      pendingIncoming: () => pending,
+      pendingIncoming: () => current ?? pending,
     );
+  }
+
+  PendingIncomingTransfer? _afterIncomingDecision(String transferId) {
+    _queuedIncoming.removeWhere((item) => item.transferId == transferId);
+    final current = state.pendingIncoming;
+    if (current?.transferId != transferId) return current;
+    return _queuedIncoming.isEmpty ? null : _queuedIncoming.removeFirst();
   }
 
   /// Explicitly accepts an incoming transfer. Never called automatically.
@@ -436,7 +454,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
       state = state.copyWith(
         transfers: updated,
-        pendingIncoming: () => null,
+        pendingIncoming: () => _afterIncomingDecision(request.transferId),
         knownPeersWithTransfers: known,
       );
     } catch (e) {
@@ -467,7 +485,10 @@ class MobileTransferController extends StateNotifier<TransferState> {
             )
           : t,
     );
-    state = state.copyWith(transfers: updated, pendingIncoming: () => null);
+    state = state.copyWith(
+      transfers: updated,
+      pendingIncoming: () => _afterIncomingDecision(request.transferId),
+    );
     final session = _sessionFor(request.peerId);
     if (session != null) {
       try {
@@ -756,9 +777,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
     state = state.copyWith(
       transfers: updated,
-      pendingIncoming: state.pendingIncoming?.transferId == abort.transferId
-          ? () => null
-          : null,
+      pendingIncoming: () => _afterIncomingDecision(abort.transferId),
     );
     final receiver = _receivers[peerId.value];
     if (receiver != null) {
@@ -803,7 +822,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
             if (sendCompleter.isCompleted) {
               throw StateError('Transfer was cancelled');
             }
-            await session.send(chunk);
+            await session.sendFileChunk(chunk);
 
             final rec = state.transfers
                 .where((t) => t.transferId == accept.transferId)
@@ -989,17 +1008,15 @@ class MobileTransferController extends StateNotifier<TransferState> {
   }
 
   /// Sends a list of files to [targetPeerId].
+  ///
+  /// More files than one offer may carry go as several offers, and the id
+  /// returned is the first one's.
   Future<String> sendFiles({
     required DeviceId targetPeerId,
     required String targetPeerName,
     required List<File> files,
     List<String>? fileNames,
   }) async {
-    final session = _sessionFor(targetPeerId);
-    if (session == null) {
-      throw StateError('Cannot send: not connected to $targetPeerName');
-    }
-
     if (files.isEmpty) {
       throw ArgumentError('files list must not be empty');
     }
@@ -1010,7 +1027,39 @@ class MobileTransferController extends StateNotifier<TransferState> {
       );
     }
 
-    final transferId = 't-${DateTime.now().microsecondsSinceEpoch}';
+    final fileBatches = fileOfferBatches(files);
+    final nameBatches =
+        fileNames == null ? null : fileOfferBatches<String>(fileNames);
+    String? first;
+    for (var index = 0; index < fileBatches.length; index++) {
+      final id = await _offerFiles(
+        targetPeerId: targetPeerId,
+        targetPeerName: targetPeerName,
+        files: fileBatches[index],
+        fileNames: nameBatches?[index],
+        // Suffixed rather than trusted to differ by the clock: two offers this
+        // close together can read the same microsecond, and sharing an id would
+        // make them share one transfer row.
+        idSuffix: fileBatches.length == 1 ? '' : '-b${index + 1}',
+      );
+      first ??= id;
+    }
+    return first!;
+  }
+
+  Future<String> _offerFiles({
+    required DeviceId targetPeerId,
+    required String targetPeerName,
+    required List<File> files,
+    required List<String>? fileNames,
+    required String idSuffix,
+  }) async {
+    final session = _sessionFor(targetPeerId);
+    if (session == null) {
+      throw StateError('Cannot send: not connected to $targetPeerName');
+    }
+
+    final transferId = 't-${DateTime.now().microsecondsSinceEpoch}$idSuffix';
     final offeredFiles = <OfferedFile>[];
     final sources = <String, OutgoingFile>{};
 
@@ -1099,8 +1148,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
           completedAt: DateTime.now(),
         ),
       ),
-      pendingIncoming:
-          state.pendingIncoming?.transferId == transferId ? () => null : null,
+      pendingIncoming: () => _afterIncomingDecision(transferId),
     );
 
     final sendCompleter = _activeSendCompleters.remove(transferId);
@@ -1229,8 +1277,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
     );
     state = state.copyWith(
       transfers: updated,
-      pendingIncoming:
-          state.pendingIncoming?.transferId == transferId ? () => null : null,
+      pendingIncoming: () => _afterIncomingDecision(transferId),
     );
   }
 

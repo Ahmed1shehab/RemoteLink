@@ -1349,10 +1349,8 @@ final class _DecisionRecordingController extends MobileTransferController {
 
   /// The offer that arrives while another is still being answered.
   ///
-  /// `TransferState` holds one pending offer at a time, so a real second offer
-  /// would overwrite the first rather than queue behind it. This stands in for
-  /// the queue the controller does not have, which is enough to exercise the
-  /// part under test: whether answering one prompt goes looking for the next.
+  /// Stands in for the controller's incoming queue so the sheet can be tested
+  /// without opening a connection.
   PendingIncomingTransfer? _next;
 
   /// Puts an offer into the state the way an arriving `FileOffer` would.

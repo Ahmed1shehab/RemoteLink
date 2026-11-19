@@ -14,6 +14,8 @@ import 'file_exporter.dart';
 
 typedef DiskSpaceProbe = Future<int> Function(String canonicalPath);
 
+const int _fallbackDiskBytes = 500 * 1024 * 1024;
+
 /// Directory under the staging root holding files that have been delivered.
 const String kReceivedDirectoryName = 'received';
 
@@ -137,7 +139,7 @@ final class MobileTransferStore implements IncomingTransferStore {
       final entry = manifest.entries[offered.fileId];
       requiredBytes += offered.size - (entry?.coveredBytes ?? 0);
     }
-    final available = await _diskSpaceProbe(root);
+    final available = await _probeAvailableBytes(root);
     final reservedElsewhere = _reservations.entries
         .where((entry) => entry.key != reservationKey)
         .fold(0, (total, entry) => total + entry.value);
@@ -175,6 +177,16 @@ final class MobileTransferStore implements IncomingTransferStore {
           this,
         ),
     };
+  }
+
+  Future<int> _probeAvailableBytes(String root) async {
+    try {
+      return await _diskSpaceProbe(root);
+    } on ProcessException {
+      // iOS forbids spawning df, and a sandbox can refuse it elsewhere. Use
+      // the same bounded estimate as when the command returns no usable result.
+      return _fallbackDiskBytes;
+    }
   }
 
   void _releaseReservation(String key, int bytes) {
@@ -672,6 +684,5 @@ Future<int> _availableDiskBytes(String canonicalPath) async {
       }
     }
   }
-  // Mobile / sandbox fallback: if df is unavailable or restricted, return a safe 500 MB default.
-  return 500 * 1024 * 1024;
+  return _fallbackDiskBytes;
 }

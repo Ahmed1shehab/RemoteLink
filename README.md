@@ -39,6 +39,7 @@ such rather than stubbed.
 | Native clipboard | Text complete on both platforms; images deferred. Syncs both ways on its own — the phone half needs the app in the foreground, which is as far as iOS and Android allow |
 | Desktop app | Service, dispatcher with permission enforcement, clipboard sync, tray, pairing UI |
 | Mobile app | Discovery, pairing, touchpad, full keyboard, clipboard, media |
+| Quick Actions | Register and enable fixed commands in desktop Settings, then run permitted actions from the phone’s Actions tab |
 | Pairing | Two ways in and no third: tap the computer the phone found, or scan the code the desktop shows. The code carries the computer's real public key, so a scanned pairing verifies the handshake against a key that never crossed the network — and a mismatch fails closed with no fallback |
 | Phone to phone | Complete for files and text: the phone runs the same server the desktop does, advertises over Bonjour, and pairs with the same six digits. A listening phone accepts file transfer and clipboard text and refuses everything else, per message — [ADR 0005](docs/adr/0005-a-phone-can-listen.md) says why, and what it deliberately does not do |
 | Connection approval | A device you paired with is held at the door until someone on the other end allows it — once per device per run of the app, so a Wi-Fi drop does not ask again. On by default; the switch is in Settings › Connections |
