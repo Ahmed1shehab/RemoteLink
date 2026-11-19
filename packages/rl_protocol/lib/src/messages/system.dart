@@ -418,7 +418,9 @@ enum PermissionTier {
   /// geometry, and the phone needs it to aim the touchpad.
   bool get canViewScreen => wireValue >= standard.wireValue;
 
-  /// Whether this tier may offer files to, or accept them from, the desk.
+  /// Whether this tier may initiate file transfers to the desk.
+  ///
+  /// The desk can separately accept replies to an offer its own user made.
   ///
   /// Set at `standard` rather than `extended`, which is where it started. The
   /// tier was never the gate that mattered: both ends prompt the user to accept

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -90,6 +91,8 @@ class MobileTransferController extends StateNotifier<TransferState> {
   final Map<String, FileOffer> _outgoingOffers = <String, FileOffer>{};
   final Map<String, Completer<void>> _activeSendCompleters =
       <String, Completer<void>>{};
+  final Queue<PendingIncomingTransfer> _queuedIncoming =
+      Queue<PendingIncomingTransfer>();
 
   IncomingTransferStore? _store;
   DeviceId? _clientPeerId;
@@ -344,13 +347,28 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
     _speedTrackers[offer.transferId] = TransferSpeedTracker();
 
+    // The open sheet belongs to the first offer until it is answered.
+    // Replacing its request would leave one of the senders waiting forever.
+    final current = state.pendingIncoming;
+    if (current != null && current.transferId != offer.transferId) {
+      _queuedIncoming
+          .removeWhere((item) => item.transferId == offer.transferId);
+      _queuedIncoming.addLast(pending);
+    }
     state = state.copyWith(
       transfers: <TransferRecord>[
         transferRecord,
         ...state.transfers.where((t) => t.transferId != offer.transferId),
       ],
-      pendingIncoming: () => pending,
+      pendingIncoming: () => current ?? pending,
     );
+  }
+
+  PendingIncomingTransfer? _afterIncomingDecision(String transferId) {
+    _queuedIncoming.removeWhere((item) => item.transferId == transferId);
+    final current = state.pendingIncoming;
+    if (current?.transferId != transferId) return current;
+    return _queuedIncoming.isEmpty ? null : _queuedIncoming.removeFirst();
   }
 
   /// Explicitly accepts an incoming transfer. Never called automatically.
@@ -429,7 +447,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
       state = state.copyWith(
         transfers: updated,
-        pendingIncoming: () => null,
+        pendingIncoming: () => _afterIncomingDecision(request.transferId),
         knownPeersWithTransfers: known,
       );
     } catch (e) {
@@ -460,7 +478,10 @@ class MobileTransferController extends StateNotifier<TransferState> {
             )
           : t,
     );
-    state = state.copyWith(transfers: updated, pendingIncoming: () => null);
+    state = state.copyWith(
+      transfers: updated,
+      pendingIncoming: () => _afterIncomingDecision(request.transferId),
+    );
     final session = _sessionFor(request.peerId);
     if (session != null) {
       try {
@@ -736,9 +757,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
 
     state = state.copyWith(
       transfers: updated,
-      pendingIncoming: state.pendingIncoming?.transferId == abort.transferId
-          ? () => null
-          : null,
+      pendingIncoming: () => _afterIncomingDecision(abort.transferId),
     );
     final receiver = _receivers[peerId.value];
     if (receiver != null) {
@@ -1079,8 +1098,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
           completedAt: DateTime.now(),
         ),
       ),
-      pendingIncoming:
-          state.pendingIncoming?.transferId == transferId ? () => null : null,
+      pendingIncoming: () => _afterIncomingDecision(transferId),
     );
 
     final sendCompleter = _activeSendCompleters.remove(transferId);
@@ -1209,8 +1227,7 @@ class MobileTransferController extends StateNotifier<TransferState> {
     );
     state = state.copyWith(
       transfers: updated,
-      pendingIncoming:
-          state.pendingIncoming?.transferId == transferId ? () => null : null,
+      pendingIncoming: () => _afterIncomingDecision(transferId),
     );
   }
 

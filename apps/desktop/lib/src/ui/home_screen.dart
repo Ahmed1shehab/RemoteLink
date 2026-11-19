@@ -821,7 +821,7 @@ class _SendCardState extends ConsumerState<_SendCard> {
                     DropdownMenuItem<String>(
                       value: d.id.value,
                       child: Text(
-                        '${d.name}${d.tier.canTransferFiles ? "" : context.l10n.transfersNotPermitted}',
+                        d.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
