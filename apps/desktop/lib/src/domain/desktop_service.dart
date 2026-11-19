@@ -1795,7 +1795,7 @@ final class DesktopService {
                     if (sendCompleter.isCompleted) {
                       throw StateError('Transfer cancelled');
                     }
-                    await device.serverSession.session.send(chunk);
+                    await device.serverSession.session.sendFileChunk(chunk);
                     final rec = _transfers[message.transferId];
                     if (rec != null && rec.isActive) {
                       final fileIdx = rec.files.indexWhere(
@@ -2220,17 +2220,40 @@ final class DesktopService {
   }
 
   /// Sends a list of files to [targetPeerId].
+  ///
+  /// More files than one offer may carry go as several offers, and the id
+  /// returned is the first one's.
   Future<String> sendFiles(DeviceId targetPeerId, List<File> files) async {
+    if (files.isEmpty) {
+      throw ArgumentError('files list must not be empty');
+    }
+    final batches = fileOfferBatches(files);
+    String? first;
+    for (var index = 0; index < batches.length; index++) {
+      final id = await _offerFiles(
+        targetPeerId,
+        batches[index],
+        // Suffixed rather than trusted to differ by the clock. Windows can
+        // hand back the same microsecond to two calls this close together,
+        // and two offers sharing an id would share one transfer row.
+        idSuffix: batches.length == 1 ? '' : '-b${index + 1}',
+      );
+      first ??= id;
+    }
+    return first!;
+  }
+
+  Future<String> _offerFiles(
+    DeviceId targetPeerId,
+    List<File> files, {
+    required String idSuffix,
+  }) async {
     final device = _devices[targetPeerId.value];
     if (device == null || !device.serverSession.session.isEstablished) {
       throw StateError('Cannot send files: device not connected');
     }
 
-    if (files.isEmpty) {
-      throw ArgumentError('files list must not be empty');
-    }
-
-    final transferId = 't-${DateTime.now().microsecondsSinceEpoch}';
+    final transferId = 't-${DateTime.now().microsecondsSinceEpoch}$idSuffix';
     final offeredFiles = <OfferedFile>[];
     final sources = <String, OutgoingFile>{};
 
