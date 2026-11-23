@@ -1,4 +1,9 @@
+// The loopback tests join both apps through the workspace package resolution.
+// Neither app depends on the other at runtime.
+// ignore_for_file: depend_on_referenced_packages
+
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -9,6 +14,13 @@ import 'package:remotelink_desktop/src/app/providers.dart';
 import 'package:remotelink_desktop/src/domain/desktop_service.dart';
 import 'package:remotelink_desktop/src/domain/transfer_model.dart';
 import 'package:remotelink_desktop/src/ui/home_screen.dart';
+import 'package:remotelink_mobile/src/app/providers.dart' as mobile;
+import 'package:remotelink_mobile/src/features/host/host_providers.dart';
+import 'package:remotelink_mobile/src/features/transfer/file_exporter.dart';
+import 'package:remotelink_mobile/src/features/transfer/mobile_transfer_store.dart';
+import 'package:remotelink_mobile/src/features/transfer/transfer_controller.dart';
+import 'package:remotelink_mobile/src/features/transfer/transfer_model.dart'
+    as phone;
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_native/rl_native.dart';
@@ -18,6 +30,211 @@ import 'package:rl_transport/rl_transport.dart';
 import 'support/fakes.dart';
 
 void main() {
+  for (final (name, tier, diskSpaceProbe, overlap, rejected) in [
+    (
+      'desktop files and text reach a Control phone',
+      PermissionTier.standard,
+      null,
+      false,
+      false
+    ),
+    (
+      'desktop files and text reach a View only phone',
+      PermissionTier.readOnly,
+      null,
+      false,
+      false
+    ),
+    (
+      'desktop files and text arrive when the phone cannot launch its disk probe',
+      PermissionTier.standard,
+      _unavailableDiskProbe,
+      false,
+      false
+    ),
+    (
+      'the phone can answer both desktop offers when they overlap',
+      PermissionTier.standard,
+      null,
+      true,
+      false
+    ),
+    (
+      'desktop handles the phone running out of space without an uncaught error',
+      PermissionTier.standard,
+      _fullDiskProbe,
+      false,
+      true
+    ),
+  ]) {
+    test(name, () async {
+      final pair = await _createRealServerClientPair(tier: tier);
+      addTearDown(pair.trustStore.dispose);
+      addTearDown(pair.server.stop);
+      addTearDown(pair.client.dispose);
+      final service = DesktopService(
+        identity: pair.server.identity,
+        trustStore: pair.trustStore,
+        deviceName: 'Test Computer',
+        appVersion: '0.1.0',
+        clock: SystemClock(),
+        input: const UnsupportedInputBackend('test'),
+        clipboardBackend: const UnsupportedClipboardBackend(),
+        media: const UnsupportedMediaBackend(),
+        brightness: const UnsupportedBrightnessBackend('test'),
+        systemInfo: const UnsupportedSystemInfoBackend('test'),
+        networkAdapters: const UnsupportedNetworkAdapterBackend('test'),
+        screenCapture: const UnsupportedScreenCaptureBackend('test'),
+      );
+      addTearDown(service.stop);
+      final directory = await Directory.systemTemp.createTemp('desktop_send_');
+      addTearDown(() => directory.delete(recursive: true));
+      final exporter = _RecordingExporter();
+      final store = MobileTransferStore(
+        directory,
+        exporter: exporter,
+        diskSpaceProbe: diskSpaceProbe,
+      );
+      final container = ProviderContainer(overrides: <Override>[
+        mobile.clientProvider.overrideWith((ref) async => pair.client),
+        phoneHostServiceProvider.overrideWith(
+          (ref) async => throw StateError('No inbound links in this test'),
+        ),
+        transferControllerProvider.overrideWith(
+          (ref) => MobileTransferController(ref, customTransferStore: store),
+        ),
+      ]);
+      addTearDown(container.dispose);
+      await container.read(mobile.clientProvider.future);
+      await service.registerSessionForTesting(pair.session);
+
+      final file = await File('${directory.path}/file with spaces.bin')
+          .writeAsBytes(<int>[0, 1, 255]);
+      const snippet = 'From the desktop 🌍';
+      final peer = pair.session.peerId;
+      final controller = container.read(transferControllerProvider.notifier);
+
+      Future<phone.PendingIncomingTransfer> sendFile() async {
+        final pending = Completer<phone.PendingIncomingTransfer>();
+        final listener =
+            container.listen(transferControllerProvider, (_, next) {
+          if (next.pendingIncoming case final request?) {
+            if (!pending.isCompleted) pending.complete(request);
+          }
+        });
+        try {
+          final id = await service.sendFiles(peer, <File>[file]);
+          final request =
+              await pending.future.timeout(const Duration(seconds: 3));
+          expect(request.transferId, id);
+          return request;
+        } finally {
+          listener.close();
+        }
+      }
+
+      Future<String> sendText() async {
+        final offered =
+            pair.client.messages.firstWhere((message) => message is FileOffer);
+        final id = await service.sendText(peer, snippet);
+        await offered.timeout(const Duration(seconds: 3));
+        return id;
+      }
+
+      Future<void> receive(phone.PendingIncomingTransfer request) async {
+        final transferId = request.transferId;
+        final phoneCompleted = Completer<phone.TransferStatus>();
+        final listener =
+            container.listen(transferControllerProvider, (_, next) {
+          final record = next.transfers
+              .singleWhere((record) => record.transferId == transferId);
+          if (!phoneCompleted.isCompleted && !record.isActive) {
+            phoneCompleted.complete(record.status);
+          }
+        });
+        addTearDown(listener.close);
+        final accept = pair.session.session.messages
+            .where((message) => message is FileAccept)
+            .cast<FileAccept>()
+            .firstWhere((message) => message.transferId == transferId);
+        final desktopCompleted = service.transferChanges.firstWhere(
+          (records) => records.any(
+              (record) => record.transferId == transferId && !record.isActive),
+          orElse: () => const <TransferRecord>[],
+        );
+        await controller.acceptIncomingTransfer(request);
+        final reply = await accept.timeout(const Duration(seconds: 3));
+        expect(reply.fileTokens, rejected ? isEmpty : isNotEmpty,
+            reason:
+                'the acceptance reflects whether the phone prepared storage');
+        expect(
+          service.transfers
+              .singleWhere((r) => r.transferId == transferId)
+              .status,
+          isNot(TransferStatus.offered),
+          reason: 'the desktop received FileAccept and should start sending',
+        );
+        expect(
+            await phoneCompleted.future.timeout(const Duration(seconds: 3)),
+            rejected
+                ? phone.TransferStatus.failed
+                : phone.TransferStatus.completed);
+        final records =
+            await desktopCompleted.timeout(const Duration(seconds: 3));
+        expect(records.singleWhere((r) => r.transferId == transferId).status,
+            rejected ? TransferStatus.failed : TransferStatus.completed);
+        listener.close();
+      }
+
+      final fileRequest = await sendFile();
+      expect(fileRequest.offer.files.single.fileName, 'file with spaces.bin');
+      expect(fileRequest.offer.files.single.sha256, isNull);
+      final queuedTextId = overlap ? await sendText() : null;
+      expect(
+          container
+              .read(transferControllerProvider)
+              .pendingIncoming
+              ?.transferId,
+          fileRequest.transferId,
+          reason: 'the first offer is still awaiting a decision');
+      await receive(fileRequest);
+      if (rejected) {
+        expect(exporter.payloads, isEmpty);
+        expect(service.transfers.single.failure, TransferFailure.noSpace);
+        return;
+      }
+      final textId = queuedTextId ?? await sendText();
+      final textRequest =
+          container.read(transferControllerProvider).pendingIncoming;
+      expect(textRequest?.transferId, textId);
+      expect(textRequest!.offer.files.single.sha256, hasLength(32));
+      await receive(textRequest);
+      expect(exporter.payloads, <List<int>>[
+        <int>[0, 1, 255],
+        utf8.encode(snippet),
+      ]);
+
+      if (tier == PermissionTier.readOnly) {
+        // Replying to a desktop offer does not grant permission to upload.
+        const uploadId = 'phone-upload';
+        final refused = pair.client.messages
+            .where((message) => message is FileAbort)
+            .cast<FileAbort>()
+            .firstWhere((message) => message.transferId == uploadId);
+        await pair.client.session!.send(FileOffer(
+          transferId: uploadId,
+          files: fileRequest.offer.files,
+        ));
+        expect(
+          (await refused.timeout(const Duration(seconds: 3))).reason,
+          FileAbortReason.declined,
+        );
+        expect(service.transfers.map((record) => record.transferId),
+            isNot(contains(uploadId)));
+      }
+    });
+  }
+
   group('Desktop Transfer Models & Utilities', () {
     test('generateTextSnippetFileName produces sanitized timestamped filename',
         () {
@@ -824,13 +1041,32 @@ final class _ThrowingIncomingFile implements IncomingFile {
   Future<void> delete() async {}
 }
 
+final class _RecordingExporter implements IncomingFileExporter {
+  final List<List<int>> payloads = <List<int>>[];
+
+  @override
+  Future<void> export(File file, {required String mimeType}) async {
+    payloads.add(await file.readAsBytes());
+  }
+}
+
+Future<int> _unavailableDiskProbe(String path) async => throw ProcessException(
+      'df',
+      <String>['-Pk', path],
+      'Starting new processes is not supported on iOS',
+    );
+
+Future<int> _fullDiskProbe(String path) async => 0;
+
 Future<
     ({
       RemoteLinkServer server,
       RemoteLinkClient client,
       ServerSession session,
       InMemoryTrustStore trustStore
-    })> _createRealServerClientPair() async {
+    })> _createRealServerClientPair({
+  PermissionTier tier = PermissionTier.extended,
+}) async {
   final phoneIdentity = await DeviceIdentity.generate();
   final desktopIdentity = await DeviceIdentity.generate();
   final desktopTrust = InMemoryTrustStore();
@@ -841,7 +1077,7 @@ Future<
       name: 'Pixel 8 Pro',
       platform: PlatformKind.android,
       pairedAt: DateTime.now(),
-      permissionTier: PermissionTier.extended.wireValue,
+      permissionTier: tier.wireValue,
     ),
   );
 

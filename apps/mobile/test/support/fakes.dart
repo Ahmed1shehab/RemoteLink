@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:remotelink_mobile/src/app/providers.dart';
 import 'package:remotelink_mobile/src/features/devices/auto_connect.dart';
 import 'package:remotelink_mobile/src/features/input/pointer_controller.dart';
+import 'package:remotelink_mobile/src/features/premium/ads_gateway.dart';
+import 'package:remotelink_mobile/src/features/premium/billing_gateway.dart';
+import 'package:remotelink_mobile/src/features/premium/premium_providers.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_transport/rl_transport.dart';
@@ -55,6 +58,8 @@ List<Override> mobileDeviceListOverrides({
       final controller = AutoConnectController(ref)..cancel();
       return controller;
     }),
+    billingGatewayProvider.overrideWithValue(FakeBillingGateway()),
+    adsGatewayProvider.overrideWithValue(const NoopAdsGateway()),
   ];
 }
 
@@ -122,6 +127,8 @@ List<Override> mobileSettingsOverrides({
       final controller = AutoConnectController(ref)..cancel();
       return controller;
     }),
+    billingGatewayProvider.overrideWithValue(FakeBillingGateway()),
+    adsGatewayProvider.overrideWithValue(const NoopAdsGateway()),
   ];
 }
 

@@ -1,5 +1,9 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:remotelink_desktop/src/domain/command_registry.dart';
 import 'package:remotelink_desktop/src/domain/desktop_service.dart';
 import 'package:remotelink_desktop/src/ui/home_screen.dart';
 import 'package:rl_core/rl_core.dart';
@@ -23,6 +27,17 @@ void main() {
     late InMemoryTrustStore trustStore;
     late DesktopService service;
     late RemoteLinkClient client;
+    late CommandRegistry registry;
+    late List<
+        ({
+          String executable,
+          List<String> arguments,
+          String? workingDirectory,
+          bool runInShell
+        })> launches;
+    final executable =
+        Platform.isWindows ? r'C:\Tools\backup.exe' : '/tools/backup';
+    final workingDirectory = Platform.isWindows ? r'C:\Work' : '/work';
 
     setUp(() async {
       clock = FakeClock();
@@ -41,6 +56,12 @@ void main() {
         ),
       );
 
+      final directory =
+          await Directory.systemTemp.createTemp('quick-actions-loopback');
+      addTearDown(() => directory.delete(recursive: true));
+      registry = await CommandRegistry.open(
+          directory: directory, secret: List.filled(32, 19));
+      launches = [];
       service = DesktopService(
         identity: desktopIdentity,
         trustStore: trustStore,
@@ -48,6 +69,16 @@ void main() {
         appVersion: '0.1.0',
         clock: clock,
         servicePort: 0,
+        commandRegistry: registry,
+        commandProcessRunner: (executable, arguments,
+            {required workingDirectory, required runInShell}) async {
+          launches.add((
+            executable: executable,
+            arguments: arguments,
+            workingDirectory: workingDirectory,
+            runInShell: runInShell
+          ));
+        },
         input: const UnsupportedInputBackend('test'),
         clipboardBackend: const UnsupportedClipboardBackend(),
         media: const UnsupportedMediaBackend(),
@@ -59,7 +90,8 @@ void main() {
 
       client = RemoteLinkClient(
         identity: phoneIdentity,
-        capabilities: const Capabilities(Capabilities.clipboardText),
+        capabilities: const Capabilities(
+            Capabilities.clipboardText | Capabilities.commandRegistry),
         clock: clock,
       );
     });
@@ -79,6 +111,149 @@ void main() {
             displayName: 'Mac Studio',
           ),
         );
+
+    Future<void> admit() async {
+      final request =
+          service.connectionRequests.first.timeout(const Duration(seconds: 5));
+      final held = client.states
+          .firstWhere((state) => state == ClientState.awaitingApproval);
+      final grant =
+          client.messages.firstWhere((message) => message is PermissionGrant);
+      await dial();
+      final pending = await request;
+      await held.timeout(const Duration(seconds: 5));
+      await service.approveConnection(pending);
+      await grant.timeout(const Duration(seconds: 5));
+    }
+
+    Future<CommandResult> run(String id,
+        {List<String> parameters = const []}) async {
+      final result = client.messages
+          .where((message) => message is CommandResult)
+          .cast<CommandResult>()
+          .first
+          .timeout(const Duration(seconds: 5));
+      await client.session!
+          .send(RunCommand(commandId: id, parameters: parameters));
+      return result;
+    }
+
+    test('a registered action starts with stored argv and no shell', () async {
+      final entry = await registry.add(
+        name: 'Back up',
+        executable: executable,
+        arguments: ['path with spaces', 'a;b', ''],
+        workingDirectory: workingDirectory,
+      );
+      await registry.setEnabled(entry.id, true);
+      await admit();
+      await service.setTier(phoneIdentity.id, PermissionTier.extended);
+
+      final result = await run(entry.id);
+      expect(result.commandId, entry.id);
+      expect(result.outcome, CommandOutcome.started);
+      final launch = launches.single;
+      expect(launch.executable, executable);
+      expect(launch.arguments, ['path with spaces', 'a;b', '']);
+      expect(launch.workingDirectory, workingDirectory);
+      expect(launch.runInShell, isFalse);
+    });
+
+    test(
+        'an unregistered action returns refusedUnknown without starting a process',
+        () async {
+      await admit();
+      await service.setTier(phoneIdentity.id, PermissionTier.extended);
+
+      final result = await run('missing-action');
+      expect(result.commandId, 'missing-action');
+      expect(result.outcome, CommandOutcome.refusedUnknown);
+      expect(launches, isEmpty);
+    });
+
+    test('an action with parameters is refused before the runner is called',
+        () async {
+      final entry = await registry.add(name: 'Back up', executable: executable);
+      await registry.setEnabled(entry.id, true);
+      await admit();
+      await service.setTier(phoneIdentity.id, PermissionTier.extended);
+
+      final result = await run(entry.id, parameters: ['; rm -rf ~']);
+      expect(result.outcome, CommandOutcome.refusedParameters);
+      expect(launches, isEmpty);
+    });
+
+    test('a standard-tier phone cannot start an extended action', () async {
+      final entry = await registry.add(name: 'Back up', executable: executable);
+      await registry.setEnabled(entry.id, true);
+      await admit();
+
+      final result = await run(entry.id);
+      expect(result.outcome, CommandOutcome.refusedTier);
+      expect(launches, isEmpty);
+    });
+
+    test(
+        'admission and changes send only enabled permitted action labels and IDs',
+        () async {
+      final peer = (await trustStore.findById(phoneIdentity.id))!;
+      await trustStore.upsert(
+          peer.copyWith(permissionTier: PermissionTier.extended.wireValue));
+      final approved = await registry.add(
+          name: 'Back up',
+          executable: executable,
+          arguments: ['private argument']);
+      final disabled = await registry.add(name: 'Sync', executable: executable);
+      final admin = await registry.add(
+          name: 'Admin task',
+          executable: executable,
+          minimumTier: PermissionTier.admin);
+      await registry.setEnabled(approved.id, true);
+      await registry.setEnabled(admin.id, true);
+
+      final received = <Message>[];
+      final subscription = client.messages.listen(received.add);
+      addTearDown(subscription.cancel);
+      Future<CommandCatalog> nextCatalog() => client.messages
+          .where((message) => message is CommandCatalog)
+          .cast<CommandCatalog>()
+          .first
+          .timeout(const Duration(seconds: 10));
+
+      final initial = nextCatalog();
+      // Surface an early missing-capability failure without leaving an
+      // unhandled timeout on the pending catalog subscription.
+      final observedInitial = initial.then<Object>((value) => value,
+          onError: (Object error) => error);
+      await admit();
+      expect(client.session!.capabilities.has(Capabilities.commandRegistry),
+          isTrue);
+      final catalog = await observedInitial as CommandCatalog;
+      expect(catalog.entries.map((entry) => (entry.id, entry.name)),
+          [(approved.id, 'Back up')]);
+      expect(received.indexWhere((message) => message is PermissionGrant),
+          lessThan(received.indexOf(catalog)));
+      final writer = ByteWriter();
+      catalog.writeTo(writer);
+      final payload = utf8.decode(writer.toBytes(), allowMalformed: true);
+      expect(payload, isNot(contains(executable)));
+      expect(payload, isNot(contains('private argument')));
+
+      final afterEdit = nextCatalog();
+      await registry.setEnabled(approved.id, false);
+      expect((await afterEdit).entries, isEmpty);
+
+      final afterElevation = nextCatalog();
+      await service.setTier(phoneIdentity.id, PermissionTier.admin);
+      expect(
+          (await afterElevation).entries.map((entry) => entry.id), [admin.id]);
+      expect((await afterElevation).entries.map((entry) => entry.id),
+          isNot(contains(disabled.id)));
+
+      final afterDowngrade = nextCatalog();
+      await service.setTier(phoneIdentity.id, PermissionTier.standard);
+      expect((await afterDowngrade).entries, isEmpty);
+    });
 
     test('asking is on unless the user has turned it off', () {
       // The default is the feature. A setting that has to be found before it

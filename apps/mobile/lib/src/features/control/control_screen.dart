@@ -11,12 +11,15 @@ import '../../app/l10n.dart';
 import '../../app/modern_ui.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
+import '../actions/actions_screen.dart';
 import '../clipboard/clipboard_controller.dart';
 import '../clipboard/clipboard_history_controller.dart';
 import '../host/host_providers.dart';
 import '../input/touchpad_screen.dart';
 import '../keyboard/keyboard_screen.dart';
 import '../media/media_screen.dart';
+import '../premium/paywall_screen.dart';
+import '../premium/premium_providers.dart';
 import '../screen/screen_viewer_screen.dart';
 import '../settings/settings_screen.dart';
 import '../transfer/transfer_screen.dart';
@@ -35,7 +38,7 @@ class ControlScreen extends ConsumerStatefulWidget {
   ConsumerState<ControlScreen> createState() => _ControlScreenState();
 }
 
-/// The five things this screen can be.
+/// The destinations this screen can show.
 ///
 /// An enum rather than an index, because which of them are on screen now
 /// depends on the peer. A phone that connected to another phone can exchange
@@ -47,7 +50,8 @@ enum ControlTab {
   keyboard(Capabilities.keyboard),
   media(Capabilities.mediaControl),
   clipboard(Capabilities.clipboardText),
-  send(Capabilities.fileTransfer);
+  send(Capabilities.fileTransfer),
+  actions(Capabilities.commandRegistry);
 
   const ControlTab(this.capability);
 
@@ -64,10 +68,8 @@ enum ControlTab {
 
 /// Which tabs a session with these capabilities can actually offer.
 ///
-/// Unknown capabilities mean everything, not nothing. `session` is null for the
-/// moment between the screen appearing and the handshake being read, and hiding
-/// four tabs during it would be a visible flicker on every connection, to
-/// pre-empt a case that only arises on a phone-to-phone link.
+/// Keep the familiar controls during the handshake to avoid flicker. Actions
+/// requires positive confirmation that the peer supports a catalog.
 ///
 /// A pure function, and public for the same reason [mobileCapabilities] is:
 /// the rule is worth a test, and a test of it should not need a provider
@@ -75,7 +77,7 @@ enum ControlTab {
 @visibleForTesting
 List<ControlTab> visibleTabs(Capabilities? capabilities) => <ControlTab>[
       for (final tab in ControlTab.values)
-        if (capabilities == null || capabilities.has(tab.capability)) tab,
+        if (capabilities?.has(tab.capability) ?? tab != ControlTab.actions) tab,
     ];
 
 class _ControlScreenState extends ConsumerState<ControlScreen> {
@@ -124,11 +126,12 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
             (tier?.canViewScreen ?? false);
 
     final tabs = visibleTabs(capabilities);
+    if (rawState != ClientState.connected) tabs.remove(ControlTab.actions);
     // A peer that offers none of them is not a state the app can be in — the
     // handshake requires a shared protocol version and every build since the
     // first has had a clipboard — but falling back to the full list beats a
     // screen with no body at all if it ever happens.
-    final visible = tabs.isEmpty ? ControlTab.values : tabs;
+    final visible = tabs.isEmpty ? visibleTabs(null) : tabs;
     // The chosen tab, unless the peer cannot offer it. Connecting to a phone
     // while the touchpad was the last thing open must not leave the selection
     // pointing at a tab that is not there.
@@ -138,6 +141,14 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
     final onGestureTab = current.isGesture;
 
     final expanded = _immersive && onGestureTab;
+    final isPremium = ref.watch(isPremiumProvider);
+    final isMediaInUse = ref.watch(mediaInUseProvider);
+    // Ads are never placed on input surfaces (touchpad, keyboard, active media).
+    // Misclicks on input surfaces would send unintended gestures or keystrokes to the computer.
+    final isInputSurface = current == ControlTab.touchpad ||
+        current == ControlTab.keyboard ||
+        (current == ControlTab.media && isMediaInUse);
+    final showBanner = !isPremium && !expanded && !isInputSurface;
 
     return Scaffold(
       extendBody: true,
@@ -220,9 +231,13 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
               curve: Curves.easeOutCubic,
               // The navigation floats over the body, so the body keeps its
               // own bottom clear by exactly the room the bar takes — and
-              // reclaims all of it when the bar is gone.
+              // reclaims all of it when the bar is gone. If an ad banner is shown,
+              // we add room so content does not sit behind it.
               padding: EdgeInsets.only(
-                bottom: expanded ? 0 : LiquidNavigationBar.heightOf(context),
+                bottom: expanded
+                    ? 0
+                    : LiquidNavigationBar.heightOf(context) +
+                        (showBanner ? 60 : 0),
               ),
               // Still an [IndexedStack] over the visible tabs, so each keeps
               // its state — see the class comment for what rebuilding them
@@ -238,6 +253,7 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                       ControlTab.media => const MediaScreen(),
                       ControlTab.clipboard => const ClipboardView(),
                       ControlTab.send => const TransferScreen(),
+                      ControlTab.actions => const ActionsScreen(),
                     },
                 ],
               ),
@@ -247,12 +263,21 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
       ),
       bottomNavigationBar: expanded
           ? null
-          : LiquidNavigationBar(
-              selectedIndex: visible.indexOf(current),
-              onDestinationSelected: (index) =>
-                  setState(() => _selected = visible[index]),
-              destinations: <LiquidNavDestination>[
-                for (final tab in visible) _destinationFor(tab, context),
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                if (showBanner)
+                  ref
+                      .watch(adsGatewayProvider)
+                      .createBannerWidget(context: context),
+                LiquidNavigationBar(
+                  selectedIndex: visible.indexOf(current),
+                  onDestinationSelected: (index) =>
+                      setState(() => _selected = visible[index]),
+                  destinations: <LiquidNavDestination>[
+                    for (final tab in visible) _destinationFor(tab, context),
+                  ],
+                ),
               ],
             ),
     );
@@ -287,6 +312,11 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
             icon: AppIcons.send,
             selectedIcon: AppIcons.send,
             label: context.l10n.tabSend,
+          ),
+        ControlTab.actions => LiquidNavDestination(
+            icon: AppIcons.quickActions,
+            selectedIcon: AppIcons.quickActions,
+            label: context.l10n.tabActions,
           ),
       };
 }
@@ -475,6 +505,7 @@ class ClipboardHistoryList extends ConsumerWidget {
         else
           for (final entry in snapshot.entries)
             _HistoryTile(entry: entry, controller: controller),
+        if (!ref.watch(isPremiumProvider)) const _UnlockHistoryCard(),
       ],
     );
   }
@@ -578,6 +609,56 @@ class _HistoryTile extends StatelessWidget {
       SnackBar(
         content: Text(
           context.l10n.pinLimitReached(kMaxPinnedClipboardEntries),
+        ),
+      ),
+    );
+  }
+}
+
+class _UnlockHistoryCard extends StatelessWidget {
+  const _UnlockHistoryCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AppSectionCard(
+      margin: const EdgeInsets.only(top: 8, bottom: 8),
+      padding: EdgeInsets.zero,
+      child: ListTile(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: scheme.primary.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(
+            Icons.lock_outline_rounded,
+            size: 20,
+            color: scheme.primary,
+          ),
+        ),
+        title: Text(
+          context.l10n.unlockUnlimitedHistory,
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+        subtitle: Text(
+          context.l10n.freeHistoryLimitNote,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+        ),
+        trailing: const Icon(
+          Icons.arrow_forward_ios_rounded,
+          size: 16,
+        ),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const PaywallScreen(),
+          ),
         ),
       ),
     );

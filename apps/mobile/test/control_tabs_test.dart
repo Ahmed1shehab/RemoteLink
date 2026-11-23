@@ -6,7 +6,7 @@ import 'package:rl_protocol/rl_protocol.dart';
 
 void main() {
   group('which tabs a session is worth showing', () {
-    test('a computer offers all five', () {
+    test('a computer with Actions offers all six', () {
       // What a desktop with every permission granted intersects to. The exact
       // set matters less than that nothing is filtered out of it: this is the
       // case the screen was built for and the one every existing test assumes.
@@ -15,7 +15,8 @@ void main() {
             Capabilities.keyboard |
             Capabilities.mediaControl |
             Capabilities.clipboardText |
-            Capabilities.fileTransfer,
+            Capabilities.fileTransfer |
+            Capabilities.commandRegistry,
       );
 
       expect(visibleTabs(desktop), ControlTab.values);
@@ -48,12 +49,15 @@ void main() {
       );
     });
 
-    test('an unread handshake shows everything rather than nothing', () {
+    test(
+        'an unread handshake shows the existing controls while waiting for Actions',
+        () {
       // The moment between the screen appearing and the session being
       // readable. Hiding tabs here would flicker four of them out and back on
       // every single connection, to pre-empt a case that only arises when the
       // peer is a phone.
-      expect(visibleTabs(null), ControlTab.values);
+      expect(visibleTabs(null),
+          ControlTab.values.where((tab) => tab != ControlTab.actions));
     });
 
     test('every tab names a capability this phone actually advertises', () {

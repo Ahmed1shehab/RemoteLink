@@ -6,7 +6,9 @@ renaming them would orphan every paired device's trust store.</sub>
 
 Control a Windows or macOS computer from an Android or iOS phone over local
 Wi-Fi, and send files between two phones the same way. No cloud, no account, no
-internet, no typing in IP addresses.
+typing in IP addresses, and no internet required for the device link (ads and
+in-app subscription billing on the mobile client connect to AdMob and RevenueCat;
+the desktop app uses no internet).
 
 Install the desktop app once. After that the phone finds the computer, asks to
 come in, and reconnects on its own once you have let it — and where the network
@@ -37,6 +39,7 @@ such rather than stubbed.
 | Native clipboard | Text complete on both platforms; images deferred. Syncs both ways on its own — the phone half needs the app in the foreground, which is as far as iOS and Android allow |
 | Desktop app | Service, dispatcher with permission enforcement, clipboard sync, tray, pairing UI |
 | Mobile app | Discovery, pairing, touchpad, full keyboard, clipboard, media |
+| Quick Actions | Register and enable fixed commands in desktop Settings, then run permitted actions from the phone’s Actions tab |
 | Pairing | Two ways in and no third: tap the computer the phone found, or scan the code the desktop shows. The code carries the computer's real public key, so a scanned pairing verifies the handshake against a key that never crossed the network — and a mismatch fails closed with no fallback |
 | Phone to phone | Complete for files and text: the phone runs the same server the desktop does, advertises over Bonjour, and pairs with the same six digits. A listening phone accepts file transfer and clipboard text and refuses everything else, per message — [ADR 0005](docs/adr/0005-a-phone-can-listen.md) says why, and what it deliberately does not do |
 | Connection approval | A device you paired with is held at the door until someone on the other end allows it — once per device per run of the app, so a Wi-Fi drop does not ask again. On by default; the switch is in Settings › Connections |
@@ -46,6 +49,7 @@ such rather than stubbed.
 | Background link | Android: a foreground service keeps the connection alive while the app is off screen, so a transfer survives switching apps. No iOS equivalent exists |
 | Media control | macOS: transport via hardware media keys, volume, now playing |
 | Apple Watch | A trackpad on the wrist: drag to move, tap to click, Digital Crown to scroll. The watch relays through the iPhone rather than speaking the protocol itself — [ADR 0004](docs/adr/0004-apple-watch-relays-through-the-phone.md) says why, and what that costs |
+| Premium & Monetization | Mobile app only: AdMob banners and post-transfer interstitials for free users; Monthly ($0.99) and Lifetime ($4.99) plans via RevenueCat remove all ads and unlock Apple Watch trackpad relay, Android background clipboard, and unlimited clipboard history. Local link remains 100% private and unaccounted — [ADR 0006](docs/adr/0006-ads-and-subscriptions.md) says why |
 | Appearance | Dark by default, with light and system in Settings › Appearance |
 
 ### Built, but not in this release

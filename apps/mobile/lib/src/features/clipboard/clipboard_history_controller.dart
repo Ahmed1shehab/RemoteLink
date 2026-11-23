@@ -7,6 +7,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:rl_core/rl_core.dart';
 
 import '../../app/providers.dart';
+import '../premium/premium_constants.dart';
+import '../premium/premium_providers.dart';
 import 'clipboard_history_store.dart';
 
 /// The last few things copied on this phone.
@@ -27,8 +29,12 @@ final class MobileClipboardHistoryController
   MobileClipboardHistoryController(this._ref)
       : super(ClipboardHistorySnapshot.empty) {
     _history = _ref.read(clipboardHistoryProvider);
-    state = _history.snapshot;
-    _changes = _history.changes.listen((snapshot) => state = snapshot);
+    state = _applyEntitlement(_history.snapshot);
+    _changes = _history.changes
+        .listen((snapshot) => state = _applyEntitlement(snapshot));
+    _ref.listen<bool>(isPremiumProvider, (_, __) {
+      state = _applyEntitlement(_history.snapshot);
+    });
     unawaited(_restore());
   }
 
@@ -37,6 +43,26 @@ final class MobileClipboardHistoryController
 
   late final ClipboardHistory _history;
   StreamSubscription<ClipboardHistorySnapshot>? _changes;
+
+  ClipboardHistorySnapshot _applyEntitlement(ClipboardHistorySnapshot raw) {
+    final isPremium = _ref.read(isPremiumProvider);
+    if (isPremium) return raw;
+
+    // Free users see the 5 most recent entries. Hidden, never deleted: the
+    // entitlement reads as free until the store answers, so deleting here
+    // would wipe a paying user's history on every cold start — and again on
+    // any day the store is unreachable. Their entries reappear the moment the
+    // entitlement loads.
+    if (raw.entries.length > PremiumConstants.freeClipboardHistoryLimit) {
+      return ClipboardHistorySnapshot(
+        entries: raw.entries
+            .take(PremiumConstants.freeClipboardHistoryLimit)
+            .toList(),
+        isPersistent: raw.isPersistent,
+      );
+    }
+    return raw;
+  }
 
   /// Picks up an opted-in history from a previous run.
   ///
@@ -50,6 +76,7 @@ final class MobileClipboardHistoryController
         _log.debug(
           () => 'restored ${_history.entries.length} clipboard history items',
         );
+        state = _applyEntitlement(_history.snapshot);
       }
     } on Object catch (error) {
       // Storage is a convenience here, not a dependency. A phone that cannot

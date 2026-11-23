@@ -128,6 +128,28 @@ on the high byte.
 meaning forever; a retired message becomes reserved rather than being recycled.
 This is what lets an old client talk to a new server safely.
 
+### Quick Actions
+
+Both endpoints advertise `commandRegistry` (bit 20, `1 << 20`) in their hello.
+The negotiated bit enables catalog delivery and the Actions tab. The desktop
+sends a replacement catalog after the permission grant and on registry or tier
+changes. An empty catalog clears previously offered actions.
+
+| Code | Direction | Payload |
+|---|---|---|
+| `0x0804` `runCommand` | Phone → desktop | Command ID string, then varuint parameter count and parameter strings. Quick Actions sends an empty list. |
+| `0x0806` `commandCatalog` | Desktop → phone | Varuint entry count (up to 1024), then ID and display-name strings for each enabled, permitted action (up to 256 UTF-8 bytes per string). |
+| `0x0807` `commandResult` | Desktop → phone | Command ID string (up to 256 UTF-8 bytes), then a one-byte outcome. |
+
+Outcomes are `0` started, `1` refusedUnknown, `2` refusedDisabled,
+`3` refusedTier, `4` refusedParameters, and `5` failedToStart. Unknown outcomes
+decode as failedToStart. A start acknowledgement describes the launch attempt.
+The messages carry no executable path, arguments, working directory, or output.
+
+Running always requires the `extended` tier or higher and the action's saved
+minimum tier. All admitted tiers can receive catalogs and results so a
+downgrade can clear an old catalog and acknowledge a denied run.
+
 ---
 
 ## 5. Versioning and compatibility

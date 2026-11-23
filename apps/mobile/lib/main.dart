@@ -14,6 +14,7 @@ import 'src/features/devices/link_service.dart';
 import 'src/features/devices/remember_prompt.dart';
 import 'src/features/host/host_providers.dart';
 import 'src/features/host/nearby_prompts.dart';
+import 'src/features/premium/premium_providers.dart';
 import 'src/features/share/share_intake.dart';
 import 'src/features/watch/watch_bridge.dart';
 
@@ -122,6 +123,18 @@ class RemoteLinkApp extends ConsumerWidget {
     // while the user is on a control screen rather than the device list.
     ref.watch(desktopRenameProvider);
     listenForRememberPrompts(ref, navigatorKey);
+    // Interstitial coordinator listens for transfer completions and triggers
+    // ads subject to frequency caps and active prompts.
+    ref.watch(interstitialCoordinatorProvider);
+    // Consent and initialization for ads, skipped if user is already premium.
+    if (!ref.read(isPremiumProvider)) {
+      ref.read(adsGatewayProvider).initializeAndRequestConsent();
+    }
+    ref.listen<bool>(isPremiumProvider, (previous, next) {
+      if (!next && (previous ?? false)) {
+        ref.read(adsGatewayProvider).initializeAndRequestConsent();
+      }
+    });
     // And the same again for shares: something has to be listening when the
     // system hands over a link the user shared into this app, whichever screen
     // happens to be open at the time.

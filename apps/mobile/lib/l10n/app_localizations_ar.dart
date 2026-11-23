@@ -1907,4 +1907,143 @@ class AppLocalizationsAr extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get remoteLinkPremium => 'Remote Link بريميوم';
+
+  @override
+  String get premiumSubtitle => 'تجربة خالية من الإعلانات وميزات إضافية';
+
+  @override
+  String get premiumActive => 'بريميوم نشط';
+
+  @override
+  String get upgradeToPremium => 'الترقية إلى بريميوم';
+
+  @override
+  String get whatYouGet => 'ما تحصل عليه مع بريميوم';
+
+  @override
+  String get featureNoAds =>
+      'بدون إعلانات: إزالة كافة الإعلانات والشاشات البينية في التطبيق';
+
+  @override
+  String get featureWatchTrackpad =>
+      'لوحة لمس Apple Watch: تحكم بحاسوبك مباشرة من معصمك';
+
+  @override
+  String get featureBackgroundClipboard =>
+      'الحافظة في الخلفية: مزامنة الحافظة باستمرار أثناء استخدام التطبيقات الأخرى';
+
+  @override
+  String get featureUnlimitedClipboard =>
+      'سجل حافظة غير محدود: احتفظ بسجل النسخ الكامل وابحث فيه';
+
+  @override
+  String get planMonthlyTitle => 'شهريًا';
+
+  @override
+  String get planMonthlySubtitle => 'اشتراك يتجدد تلقائيًا';
+
+  @override
+  String get planLifetimeTitle => 'مدى الحياة';
+
+  @override
+  String get planLifetimeSubtitle =>
+      'شراء لمرة واحدة · ادفع مرة واحتفظ به للأبد';
+
+  @override
+  String get bestValueBadge => 'أفضل قيمة';
+
+  @override
+  String get monthlyFallbackPrice => '0.99\$ / شهريًا';
+
+  @override
+  String get lifetimeFallbackPrice => '4.99\$ لمرة واحدة';
+
+  @override
+  String get autoRenewDisclosure =>
+      'الخطة الشهرية عبارة عن اشتراك يتجدد تلقائيًا. سيتم خصم المبلغ من حساب المتجر الخاص بك ويتجدد تلقائيًا ما لم يتم الإلغاء قبل 24 ساعة على الأقل من نهاية دورة الفوترة الحالية. يمكنك إدارة الاشتراكات أو إلغاؤها في أي وقت من إعدادات حسابك في المتجر.';
+
+  @override
+  String get restorePurchases => 'استعادة المشتريات';
+
+  @override
+  String get purchasesRestored => 'تمت استعادة المشتريات بنجاح.';
+
+  @override
+  String get noPurchasesToRestore =>
+      'لم يتم العثور على مشتريات نشطة لاستعادتها.';
+
+  @override
+  String get purchasesUnavailable =>
+      'عمليات الشراء غير متوفرة حاليًا. يُرجى التحقق من اتصالك بالشبكة أو المحاولة لاحقًا.';
+
+  @override
+  String purchaseFailed(String error) {
+    return 'تعذر إتمام عملية الشراء: $error';
+  }
+
+  @override
+  String get purchaseCanceled => 'تم إلغاء عملية الشراء.';
+
+  @override
+  String get premiumActiveHeader => 'أنت عضو في بريميوم';
+
+  @override
+  String get premiumActiveMessage =>
+      'جميع ميزات بريميوم والتجربة الخالية من الإعلانات مفتوحة الآن. شكرًا لدعمك تطبيق Remote Link!';
+
+  @override
+  String get lockedFeatureTooltip => 'يتطلب Remote Link بريميوم';
+
+  @override
+  String get unlockUnlimitedHistory =>
+      'افتح سجل الحافظة غير المحدود مع بريميوم';
+
+  @override
+  String get unlockBackgroundClipboard =>
+      'تتطلب الحافظة في الخلفية Remote Link بريميوم';
+
+  @override
+  String get unlockWatchTrackpad =>
+      'تتطلب لوحة لمس Apple Watch اشتراك Remote Link بريميوم';
+
+  @override
+  String get freeHistoryLimitNote =>
+      'يحتفظ المستخدمون المجانيون بآخر 5 عناصر فقط.';
+
+  @override
+  String get continuePurchase => 'متابعة';
+
+  @override
+  String get premiumBadge => 'بريميوم';
+
+  @override
+  String get tabActions => 'الإجراءات';
+
+  @override
+  String get actionsEmpty =>
+      'أضف الإجراءات السريعة وفعّلها من الإعدادات على الكمبيوتر.';
+
+  @override
+  String get actionsStarted => 'بدأ تشغيل الإجراء.';
+
+  @override
+  String get actionsRefusedUnknown => 'هذا الإجراء لم يعد متاحًا.';
+
+  @override
+  String get actionsRefusedDisabled => 'هذا الإجراء معطّل على الكمبيوتر.';
+
+  @override
+  String get actionsRefusedTier => 'يتطلّب هذا الإجراء أذونات إضافية.';
+
+  @override
+  String get actionsRefusedParameters => 'لا يقبل هذا الإجراء أي وسيطات.';
+
+  @override
+  String get actionsFailedToStart => 'تعذّر على الكمبيوتر تشغيل الإجراء.';
+
+  @override
+  String get actionsSendFailed => 'تعذّر إرسال الإجراء.';
 }

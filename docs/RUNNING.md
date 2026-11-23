@@ -394,3 +394,54 @@ To check the menu-bar mask without a Mac, print it as text:
 ```bash
 dart run tool/brand/tool/preview_tray.dart
 ```
+
+---
+
+## Monetization, AdMob & RevenueCat Setup
+
+The phone app (`apps/mobile`) includes monetization: AdMob banners and post-transfer interstitials for free users, and Monthly ($0.99/mo) and Lifetime ($4.99) plans via RevenueCat.
+
+### 1. Compile-Time Dart Defines (`--dart-define`)
+
+All API keys and production ad unit IDs are passed via `--dart-define` flags. None are hard-coded or committed to git:
+
+```bash
+flutter build apk \
+  --dart-define=REVENUECAT_GOOGLE_KEY="goog_your_play_api_key" \
+  --dart-define=ADMOB_BANNER_ANDROID="ca-app-pub-xxxxxxxxxxxxxxxx/bbbbbbbbbb" \
+  --dart-define=ADMOB_INTERSTITIAL_ANDROID="ca-app-pub-xxxxxxxxxxxxxxxx/iiiiiiiiii"
+
+flutter build ipa \
+  --dart-define=REVENUECAT_APPLE_KEY="appl_your_appstore_api_key" \
+  --dart-define=ADMOB_BANNER_IOS="ca-app-pub-yyyyyyyyyyyyyyyy/bbbbbbbbbb" \
+  --dart-define=ADMOB_INTERSTITIAL_IOS="ca-app-pub-yyyyyyyyyyyyyyyy/iiiiiiiiii"
+```
+
+| Variable | Default (Fallback) | Description |
+|---|---|---|
+| `REVENUECAT_APPLE_KEY` | *(empty / disabled)* | RevenueCat Public API key for iOS App Store. If empty, billing gracefully reports unavailable. |
+| `REVENUECAT_GOOGLE_KEY` | *(empty / disabled)* | RevenueCat Public API key for Google Play. If empty, billing gracefully reports unavailable. |
+| `ADMOB_BANNER_ANDROID` | `ca-app-pub-3940256099942544/6300978111` | Google published sample test banner unit ID for Android. |
+| `ADMOB_BANNER_IOS` | `ca-app-pub-3940256099942544/2934735716` | Google published sample test banner unit ID for iOS. |
+| `ADMOB_INTERSTITIAL_ANDROID` | `ca-app-pub-3940256099942544/1033173712` | Google published sample test interstitial unit ID for Android. |
+| `ADMOB_INTERSTITIAL_IOS` | `ca-app-pub-3940256099942544/4411468910` | Google published sample test interstitial unit ID for iOS. |
+
+### 2. Native AdMob App IDs
+
+Before publishing a production release, replace the sample AdMob Application IDs in the native manifests:
+- **Android:** In `apps/mobile/android/app/src/main/AndroidManifest.xml`, update `com.google.android.gms.ads.APPLICATION_ID` (marked with comment `replace before release`).
+- **iOS:** In `apps/mobile/ios/Runner/Info.plist`, update `GADApplicationIdentifier` (marked with comment `replace before release`). Note that `SKAdNetworkItems` are already bundled in `Info.plist`.
+
+### 3. Store Products & RevenueCat Dashboard Setup
+
+For billing to function in production:
+1. **Google Play Console & App Store Connect:**
+   - Create subscription product: `remotelink_premium_monthly` ($0.99 / month auto-renewing).
+   - Create in-app non-consumable product: `remotelink_premium_lifetime` ($4.99 one-time).
+2. **RevenueCat Dashboard:**
+   - In **Entitlements**, create an entitlement with Identifier `premium`.
+   - Attach both `remotelink_premium_monthly` and `remotelink_premium_lifetime` to the `premium` entitlement.
+   - In **Offerings**, create or configure the default offering:
+     - Add a Monthly package (`$rc_monthly`) mapping to `remotelink_premium_monthly`.
+     - Add a Lifetime package (`$rc_lifetime`) mapping to `remotelink_premium_lifetime`.
+

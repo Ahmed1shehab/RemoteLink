@@ -83,6 +83,45 @@ void main() {
   });
 
   group('message round trips', () {
+    test('command result round trips and preserves safety on future outcomes',
+        () {
+      final result = _roundTrip(
+          codec,
+          const CommandResult(
+            commandId: 'backup-id',
+            outcome: CommandOutcome.refusedParameters,
+          ));
+      expect(result.commandId, 'backup-id');
+      expect(result.outcome, CommandOutcome.refusedParameters);
+
+      final writer = ByteWriter()
+        ..writeString('backup-id')
+        ..writeUint8(255)
+        ..writeUint8(42); // A future trailing field.
+      final future = codec.decode(Frame(
+        type: MessageType.commandResult,
+        sequence: 0,
+        timestampMicros: 0,
+        flags: const FrameFlags(0),
+        payload: writer.toBytes(),
+      )) as CommandResult;
+      expect(future.commandId, 'backup-id');
+      expect(future.outcome, CommandOutcome.failedToStart);
+    });
+
+    test('command catalog round trips IDs and display names', () {
+      final message = _roundTrip(
+          codec,
+          const CommandCatalog([
+            CommandCatalogEntry(id: 'backup-id', name: 'Back up'),
+            CommandCatalogEntry(id: 'sync-id', name: 'مزامنة'),
+          ]));
+      expect(message.entries.map((entry) => (entry.id, entry.name)), [
+        ('backup-id', 'Back up'),
+        ('sync-id', 'مزامنة'),
+      ]);
+    });
+
     test('MouseMove preserves signed deltas', () {
       final decoded =
           _roundTrip(codec, const MouseMove(deltaX: -1234, deltaY: 5678));

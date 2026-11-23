@@ -214,6 +214,8 @@ enum MessageType {
 
   /// Server → client. Host telemetry: battery, CPU, volume, uptime.
   systemStatus(0x0805),
+  commandCatalog(0x0806),
+  commandResult(0x0807),
 
   // ── 0x09xx device management ──────────────────────────────────────────────
   /// Either direction. Full peer description after a successful handshake.

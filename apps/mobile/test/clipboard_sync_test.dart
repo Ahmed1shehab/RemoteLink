@@ -10,6 +10,7 @@ import 'package:remotelink_mobile/src/features/devices/link_service.dart';
 import 'package:remotelink_mobile/src/features/host/host_providers.dart';
 import 'package:remotelink_mobile/src/features/host/phone_advertiser.dart';
 import 'package:remotelink_mobile/src/features/host/phone_host_service.dart';
+import 'package:remotelink_mobile/src/features/premium/premium_providers.dart';
 import 'package:rl_core/rl_core.dart';
 import 'package:rl_crypto/rl_crypto.dart';
 import 'package:rl_protocol/rl_protocol.dart';
@@ -206,6 +207,11 @@ void main() {
               )),
           clientProvider.overrideWith((ref) async => client),
           linkServiceProvider.overrideWithValue(linkService),
+          isPremiumProvider.overrideWith((ref) {
+            final notifier = IsPremiumNotifier(ref);
+            notifier.state = true;
+            return notifier;
+          }),
           clipboardControllerProvider.overrideWith(
             (ref) => MobileClipboardController(ref, watcher: watcher),
           ),
@@ -320,6 +326,18 @@ void main() {
       final update = await seen;
       expect(update, isNotNull);
       expect(update!.plainText, 'copied in Chrome');
+    });
+
+    test(
+        'a copy read while another app was on screen is dropped when not premium',
+        () async {
+      // Background clipboard sync is a premium feature.
+      container.read(isPremiumProvider.notifier).state = false;
+      final seen = nextUpdate(within: const Duration(milliseconds: 100));
+      linkService.copies.add('copied in Chrome without premium');
+
+      final update = await seen;
+      expect(update, isNull);
     });
 
     test('the phone does not send back what it just wrote for the computer',
@@ -453,6 +471,11 @@ void main() {
               .overrideWith((ref) => Future<PhoneHostService>.value(host)),
           clientProvider.overrideWith((ref) async => idleClient),
           linkServiceProvider.overrideWithValue(linkService),
+          isPremiumProvider.overrideWith((ref) {
+            final notifier = IsPremiumNotifier(ref);
+            notifier.state = true;
+            return notifier;
+          }),
           clipboardControllerProvider.overrideWith(
             (ref) => MobileClipboardController(ref, watcher: watcher),
           ),

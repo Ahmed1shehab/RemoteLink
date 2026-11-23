@@ -13,6 +13,8 @@ import 'package:rl_transport/rl_transport.dart';
 import 'bonjour_advertiser.dart';
 import 'clipboard_sync.dart';
 import 'command_dispatcher.dart';
+import 'command_process_runner.dart';
+import 'command_registry.dart';
 import 'file_transfer_store.dart';
 import 'instance_lock.dart';
 import 'transfer_model.dart';
@@ -46,6 +48,7 @@ Capabilities buildCapabilities({
   required bool mediaMetadataAvailable,
   bool gesturesAvailable = false,
   bool brightnessAvailable = false,
+  bool commandRegistryAvailable = false,
   bool screenCaptureAvailable = false,
   bool screenSharingShipped = kScreenSharingShipped,
 }) {
@@ -91,6 +94,9 @@ Capabilities buildCapabilities({
     // Two conditions, not one: the backend has to exist *and* the feature has
     // to be part of this release. See [kScreenSharingShipped].
     capabilities = capabilities.plus(Capabilities.screenCapture);
+  }
+  if (commandRegistryAvailable) {
+    capabilities = capabilities.plus(Capabilities.commandRegistry);
   }
   return capabilities;
 }
@@ -314,6 +320,8 @@ final class DesktopService {
     ScreenCaptureBackend? screenCapture,
     ClipboardHistory? clipboardHistory,
     this.incomingTransferStore,
+    this.commandRegistry,
+    this.commandProcessRunner,
     this.peerClipboardSettingsFile,
     this.screenSharingShipped = kScreenSharingShipped,
   })  : _clipboardHistory = clipboardHistory,
@@ -348,6 +356,10 @@ final class DesktopService {
   /// purpose, and a lock would be the thing under test rather than a detail of
   /// it.
   final InstanceLock? instanceLock;
+  final CommandRegistry? commandRegistry;
+  final CommandProcessRunner? commandProcessRunner;
+  final _commandCatalogRecipients = <ServerSession>{};
+  StreamSubscription<void>? _commandRegistrySubscription;
   final IncomingTransferStore? incomingTransferStore;
   final File? peerClipboardSettingsFile;
 
@@ -421,6 +433,8 @@ final class DesktopService {
       <String, Map<String, OutgoingFile>>{};
   final Map<String, FileOffer> _outgoingOffers = <String, FileOffer>{};
   final Map<String, DeviceId> _outgoingPeerIds = <String, DeviceId>{};
+  // The sender checks isCompleted to stop writing. The transfer row carries
+  // the failure, so completing this signal must not produce an uncaught error.
   final Map<String, Completer<void>> _activeSendCompleters =
       <String, Completer<void>>{};
   final Map<String, TransferSpeedTracker> _speedTrackers =
@@ -590,6 +604,7 @@ final class DesktopService {
             _media.isAvailable && _media is MacosMediaBackend,
         gesturesAvailable: _input.isAvailable && _input is MacosInputBackend,
         brightnessAvailable: _brightness.isAvailable,
+        commandRegistryAvailable: commandRegistry != null,
         screenCaptureAvailable: _screenCapture.isAvailable,
         screenSharingShipped: screenSharingShipped,
       );
@@ -826,6 +841,11 @@ final class DesktopService {
     _endedSubscription = server.ended.listen(
       (session) => unawaited(_onEnded(session)),
     );
+    _commandRegistrySubscription = commandRegistry?.changes.listen((_) {
+      for (final session in _commandCatalogRecipients) {
+        unawaited(_publishCommandCatalog(session));
+      }
+    });
 
     clipboard.start();
     _clipboardSubscription = clipboard.outbound.listen(
@@ -1112,6 +1132,7 @@ final class DesktopService {
   Future<void> _admit(ServerSession session, PermissionTier tier) async {
     session.session.admit();
     await session.session.send(PermissionGrant(tier: tier));
+    await _openCommandCatalog(session);
     await session.session.send(DeviceInfoMessage(describeSelf()));
     await _maybeAskToRemember(session);
 
@@ -1303,6 +1324,20 @@ final class DesktopService {
   Future<void> _onMessage(ServerSession session, Message message) async {
     final device = _devices[session.peerId.value];
     if (device == null) return;
+    if (message is RunCommand) {
+      if (!identical(device.serverSession, session) ||
+          !session.session.isEstablished) {
+        return;
+      }
+      if (!device.tier.allows(message.type)) {
+        // Count the denial through the usual gate. A stale Actions tile still
+        // needs a reply, without revealing whether its ID exists.
+        _dispatcher.dispatch(message, device.tier);
+        await _finishCommand(
+            device, message.commandId, CommandOutcome.refusedTier);
+        return;
+      }
+    }
 
     switch (message) {
       case DeviceInfoMessage():
@@ -1331,6 +1366,16 @@ final class DesktopService {
           _activeSessionPeerId = null;
         }
 
+      case FileAccept(:final transferId) ||
+              FileComplete(:final transferId) ||
+              FileAbort(:final transferId)
+          when !device.tier.canTransferFiles &&
+              identical(device.serverSession, session) &&
+              _isOutgoingReply(session.peerId, transferId):
+        // The desktop user already chose to send these files. Let the intended
+        // recipient answer, while keeping phone-initiated offers tier-gated.
+        await _handleFileTransferMessage(session.peerId, message);
+
       default:
         _activeSessionPeerId = session.peerId;
         try {
@@ -1350,6 +1395,7 @@ final class DesktopService {
   }
 
   Future<void> _onEnded(ServerSession session) async {
+    _commandCatalogRecipients.remove(session);
     _pendingConnections.remove(session.peerId.value);
     // An agreement that did not settle is dropped rather than kept for the next
     // session. Half of it is on a device that is no longer here, and a stored
@@ -1369,7 +1415,7 @@ final class DesktopService {
         );
         final sender = _activeSendCompleters.remove(record.transferId);
         if (sender != null && !sender.isCompleted) {
-          sender.completeError(StateError('Connection lost'));
+          sender.complete();
         }
       }
     }
@@ -1425,6 +1471,7 @@ final class DesktopService {
       clipboardSyncEnabled: clipboard.isPeerEnabled(request.peerId),
     );
     _publishDevices();
+    await _openCommandCatalog(request.session);
 
     final snapshot = await clipboard.snapshot(peerId: request.peerId);
     if (snapshot != null) await request.session.session.send(snapshot);
@@ -1484,6 +1531,7 @@ final class DesktopService {
     await device.serverSession.session.send(
       PermissionGrant(tier: tier, expiresInSeconds: expiresInSeconds),
     );
+    await _publishCommandCatalog(device.serverSession);
 
     if (expiresInSeconds != null && expiresInSeconds > 0) {
       _scheduleGrantExpiry(device.serverSession, peerId, expiresInSeconds);
@@ -1531,6 +1579,7 @@ final class DesktopService {
         await device.serverSession.session.send(
           const PermissionGrant(tier: PermissionTier.readOnly),
         );
+        await _publishCommandCatalog(device.serverSession);
       } on TransportError {
         // Session is tearing down; its watcher handles cleanup.
       }
@@ -1644,6 +1693,14 @@ final class DesktopService {
     final peerId = _activeSessionPeerId;
     if (peerId == null) return;
     unawaited(_handleFileTransferMessage(peerId, message));
+  }
+
+  bool _isOutgoingReply(DeviceId peerId, String transferId) {
+    final record = _transfers[transferId];
+    return record != null &&
+        record.isActive &&
+        record.direction == TransferDirection.outgoing &&
+        record.peerId == peerId;
   }
 
   void _publishTransfers() {
@@ -1795,7 +1852,7 @@ final class DesktopService {
                     if (sendCompleter.isCompleted) {
                       throw StateError('Transfer cancelled');
                     }
-                    await device.serverSession.session.send(chunk);
+                    await device.serverSession.session.sendFileChunk(chunk);
                     final rec = _transfers[message.transferId];
                     if (rec != null && rec.isActive) {
                       final fileIdx = rec.files.indexWhere(
@@ -1873,7 +1930,7 @@ final class DesktopService {
                 // Until then a hash or disk error can still arrive as FileAbort.
               } catch (e) {
                 if (!sendCompleter.isCompleted) {
-                  sendCompleter.completeError(e);
+                  sendCompleter.complete();
                 }
                 final rec = _transfers[message.transferId];
                 if (rec != null && rec.isActive) {
@@ -2105,9 +2162,7 @@ final class DesktopService {
           );
           final completer = _activeSendCompleters.remove(message.transferId);
           if (completer != null && !completer.isCompleted) {
-            completer.completeError(
-              StateError('Transfer aborted by remote peer'),
-            );
+            completer.complete();
           }
 
           // Storage cleanup uses the receiver's serial queue and can wait for
@@ -2220,17 +2275,40 @@ final class DesktopService {
   }
 
   /// Sends a list of files to [targetPeerId].
+  ///
+  /// More files than one offer may carry go as several offers, and the id
+  /// returned is the first one's.
   Future<String> sendFiles(DeviceId targetPeerId, List<File> files) async {
+    if (files.isEmpty) {
+      throw ArgumentError('files list must not be empty');
+    }
+    final batches = fileOfferBatches(files);
+    String? first;
+    for (var index = 0; index < batches.length; index++) {
+      final id = await _offerFiles(
+        targetPeerId,
+        batches[index],
+        // Suffixed rather than trusted to differ by the clock. Windows can
+        // hand back the same microsecond to two calls this close together,
+        // and two offers sharing an id would share one transfer row.
+        idSuffix: batches.length == 1 ? '' : '-b${index + 1}',
+      );
+      first ??= id;
+    }
+    return first!;
+  }
+
+  Future<String> _offerFiles(
+    DeviceId targetPeerId,
+    List<File> files, {
+    required String idSuffix,
+  }) async {
     final device = _devices[targetPeerId.value];
     if (device == null || !device.serverSession.session.isEstablished) {
       throw StateError('Cannot send files: device not connected');
     }
 
-    if (files.isEmpty) {
-      throw ArgumentError('files list must not be empty');
-    }
-
-    final transferId = 't-${DateTime.now().microsecondsSinceEpoch}';
+    final transferId = 't-${DateTime.now().microsecondsSinceEpoch}$idSuffix';
     final offeredFiles = <OfferedFile>[];
     final sources = <String, OutgoingFile>{};
 
@@ -2373,7 +2451,7 @@ final class DesktopService {
       final device = _devices[record.peerId.value];
       final completer = _activeSendCompleters.remove(transferId);
       if (completer != null && !completer.isCompleted) {
-        completer.completeError(StateError('Transfer cancelled by user'));
+        completer.complete();
       }
       if (record.direction == TransferDirection.incoming) {
         final receiver = _transferReceivers[record.peerId.value];
@@ -2731,14 +2809,91 @@ final class DesktopService {
     }
   }
 
+  Future<void> _openCommandCatalog(ServerSession session) async {
+    if (!session.session.isEstablished ||
+        !session.session.capabilities.has(Capabilities.commandRegistry)) {
+      return;
+    }
+    // A save can race the welcome. Subscribe this session only after its
+    // grant so the first catalog always follows the permission message.
+    _commandCatalogRecipients.add(session);
+    await _publishCommandCatalog(session);
+  }
+
+  Future<void> _publishCommandCatalog(ServerSession session) async {
+    final registry = commandRegistry;
+    final device = _devices[session.peerId.value];
+    if (registry == null ||
+        device == null ||
+        !identical(device.serverSession, session) ||
+        !_commandCatalogRecipients.contains(session) ||
+        !session.session.isEstablished) {
+      return;
+    }
+
+    try {
+      await session.session.send(CommandCatalog([
+        for (final command in registry.commands)
+          if (registry.resolve(command.id, device.tier).command != null)
+            CommandCatalogEntry(id: command.id, name: command.name),
+      ]));
+    } on TransportError {
+      // The session can close while its catalog is being written.
+    }
+  }
+
   void _onRunCommand(RunCommand command) {
-    // Registered commands resolve against desktop-side configuration that this
-    // milestone does not yet persist. Refusing until it exists is the correct
-    // default: an unresolved command id must never fall through to a shell.
-    _log.warn(
-      'custom command requested but no command registry is configured',
-      fields: <String, Object?>{'commandId': command.commandId},
-    );
+    final device = _devices[_activeSessionPeerId?.value];
+    if (device == null) return;
+    unawaited(_runRegisteredCommand(device, command));
+  }
+
+  Future<void> _runRegisteredCommand(
+    ConnectedDevice device,
+    RunCommand request,
+  ) async {
+    if (request.parameters.isNotEmpty) {
+      await _finishCommand(
+          device, request.commandId, CommandOutcome.refusedParameters);
+      return;
+    }
+    final resolved = commandRegistry?.resolve(request.commandId, device.tier);
+    final command = resolved?.command;
+    if (command == null) {
+      await _finishCommand(device, request.commandId,
+          resolved?.refusal ?? CommandOutcome.refusedUnknown);
+      return;
+    }
+
+    var outcome = CommandOutcome.started;
+    try {
+      await startRegisteredCommand(command, runner: commandProcessRunner);
+    } on Object {
+      outcome = CommandOutcome.failedToStart;
+    }
+    await _finishCommand(device, request.commandId, outcome);
+  }
+
+  Future<void> _finishCommand(
+    ConnectedDevice device,
+    String id,
+    CommandOutcome outcome,
+  ) async {
+    if (outcome != CommandOutcome.started) {
+      final safeId = id
+          .substring(0, id.length.clamp(0, 64))
+          .replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '?');
+      _log.warn(
+        'quick action ${outcome.name}',
+        fields: <String, Object?>{'commandId': safeId},
+      );
+    }
+    try {
+      await device.serverSession.session
+          .send(CommandResult(commandId: id, outcome: outcome));
+    } on TransportError {
+      // The action can complete its start attempt after the requesting link closes.
+    }
   }
 
   void _onMediaCommand(MediaCommand command) =>
@@ -2949,6 +3104,8 @@ final class DesktopService {
     await _acceptedSubscription?.cancel();
     await _endedSubscription?.cancel();
     await _clipboardSubscription?.cancel();
+    await _commandRegistrySubscription?.cancel();
+    _commandCatalogRecipients.clear();
 
     for (final subscription in _messageSubscriptions.values) {
       await subscription.cancel();
